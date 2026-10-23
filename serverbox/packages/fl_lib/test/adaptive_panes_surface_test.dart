@@ -1,0 +1,285 @@
+import 'package:fl_lib/fl_lib.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Stands for whatever the surface holds that cannot simply be rebuilt — a
+/// terminal with a connection behind it. Counts its own lifetimes, so a test
+/// can say whether it was torn down.
+///
+/// This is the whole reason `AdaptivePanes.surface` exists beside
+/// `AdaptivePanes.detail`: a route can be thrown away and built again wherever
+/// it goes, so a narrow window keeps the list and pushes the detail over it. A
+/// connection cannot, so it is the list that moves instead.
+class _Session extends StatefulWidget {
+  const _Session();
+
+  static int inits = 0;
+  static int disposals = 0;
+
+  @override
+  State<_Session> createState() => _SessionState();
+}
+
+class _SessionState extends State<_Session> {
+  int _taps = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _Session.inits++;
+  }
+
+  @override
+  void dispose() {
+    _Session.disposals++;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: () => setState(() => _taps++),
+      child: Text('taps $_taps'),
+    );
+  }
+}
+
+const _listKey = ValueKey('list');
+const _mainKey = ValueKey('main');
+
+/// The divider, found by the only thing that is uniquely true of it.
+final _divider = find.byWidgetPredicate(
+  (w) => w is MouseRegion && w.cursor == SystemMouseCursors.resizeColumn,
+);
+
+void main() {
+  setUp(() {
+    _Session.inits = 0;
+    _Session.disposals = 0;
+  });
+
+  /// Lays the widget out at a real window width.
+  ///
+  /// Not a `SizedBox` inside the default 800x600 surface: the point of most of
+  /// these is what happens above and below a breakpoint, and a box wider than
+  /// the surface is silently the surface's width.
+  Future<void> pumpAt(
+    WidgetTester tester, {
+    required double width,
+    bool enabled = true,
+    double minWidthForSplit = 800,
+    double listWidth = 320,
+    ValueChanged<double>? onListWidthChanged,
+    ValueChanged<bool>? onCollapsedChanged,
+    Animation<double>? presence,
+  }) async {
+    await tester.binding.setSurfaceSize(Size(width, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AdaptivePanes.surface(
+            enabled: enabled,
+            minWidthForSplit: minWidthForSplit,
+            listWidth: listWidth,
+            onListWidthChanged: onListWidthChanged,
+            onCollapsedChanged: onCollapsedChanged,
+            presence: presence,
+            listBuilder: (_, _) => const ColoredBox(
+              key: _listKey,
+              color: Colors.transparent,
+              child: Center(child: Text('list')),
+            ),
+            surfaceBuilder: (_, split) => ColoredBox(
+              key: _mainKey,
+              color: Colors.transparent,
+              child: Column(
+                children: [
+                  Text(split ? 'folded out' : 'folded in'),
+                  const _Session(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  testWidgets('a narrow window folds the list away', (tester) async {
+    await pumpAt(tester, width: 700);
+
+    expect(find.text('list'), findsNothing);
+    expect(
+      find.text('folded in'),
+      findsOneWidget,
+      reason: 'the surface is told to find somewhere else for the list',
+    );
+    expect(tester.getSize(find.byKey(_mainKey)).width, 700);
+  });
+
+  testWidgets('a wide window gives the list a column', (tester) async {
+    await pumpAt(tester, width: 1000);
+
+    expect(find.text('list'), findsOneWidget);
+    expect(find.text('folded out'), findsOneWidget);
+    expect(tester.getSize(find.byKey(_listKey)).width, 320);
+  });
+
+  testWidgets('disabled keeps one column at any width', (tester) async {
+    await pumpAt(tester, width: 1400, enabled: false);
+
+    expect(find.text('list'), findsNothing);
+    expect(find.text('folded in'), findsOneWidget);
+  });
+
+  testWidgets('the surface survives the layout changing', (tester) async {
+    await pumpAt(tester, width: 700);
+    await tester.tap(find.text('taps 0'));
+    await tester.pump();
+    expect(find.text('taps 1'), findsOneWidget);
+
+    await pumpAt(tester, width: 1000);
+    await tester.pump();
+
+    expect(
+      find.text('taps 1'),
+      findsOneWidget,
+      reason: 'a column appearing beside it must not restart what it holds',
+    );
+    expect(_Session.disposals, 0);
+    expect(_Session.inits, 1);
+
+    await pumpAt(tester, width: 700);
+    await tester.pump();
+
+    expect(find.text('taps 1'), findsOneWidget);
+    expect(_Session.disposals, 0, reason: 'nor must the column going away');
+    expect(_Session.inits, 1);
+  });
+
+  testWidgets('dragging the divider resizes the list and reports once', (
+    tester,
+  ) async {
+    final reported = <double>[];
+    await pumpAt(tester, width: 1000, listWidth: 300, onListWidthChanged: reported.add);
+
+    await tester.drag(_divider, const Offset(60, 0));
+    await tester.pump();
+
+    expect(tester.getSize(find.byKey(_listKey)).width, closeTo(360, 0.01));
+    expect(reported, hasLength(1), reason: 'at the end, not once per frame');
+    expect(reported.single, closeTo(360, 0.01));
+  });
+
+  testWidgets('the list cannot take more than half the width', (tester) async {
+    await pumpAt(tester, width: 900, listWidth: 800);
+
+    expect(tester.getSize(find.byKey(_listKey)).width, 450);
+  });
+
+  testWidgets('a width given later replaces the one it opened with', (
+    tester,
+  ) async {
+    await pumpAt(tester, width: 1000, listWidth: 300);
+    expect(tester.getSize(find.byKey(_listKey)).width, 300);
+
+    // What several of these sharing one stored width look like: the page on
+    // screen writes it, and this one — kept alive behind it — is rebuilt with
+    // the new number. Ignoring it made one setting behave as one per page.
+    await pumpAt(tester, width: 1000, listWidth: 420);
+
+    expect(tester.getSize(find.byKey(_listKey)).width, 420);
+  });
+
+  testWidgets('a drag survives a rebuild carrying the same given width', (
+    tester,
+  ) async {
+    await pumpAt(tester, width: 1000, listWidth: 300);
+    await tester.drag(_divider, const Offset(60, 0));
+    await tester.pump();
+    expect(tester.getSize(find.byKey(_listKey)).width, closeTo(360, 0.01));
+
+    // The caller re-reads the store and passes what it had before the drag
+    // ended. Copying it back unconditionally would snap the list to 300.
+    await pumpAt(tester, width: 1000, listWidth: 300);
+
+    expect(tester.getSize(find.byKey(_listKey)).width, closeTo(360, 0.01));
+  });
+
+  testWidgets('a wider start than the range allows is clamped down', (
+    tester,
+  ) async {
+    await pumpAt(tester, width: 2000, listWidth: 900);
+
+    expect(
+      tester.getSize(find.byKey(_listKey)).width,
+      520,
+      reason: 'maxListWidth still applies when half the window is more',
+    );
+  });
+
+  testWidgets('the column arriving does not rebuild the surface', (
+    tester,
+  ) async {
+    // With a grip on offer the row is drawn in a `Stack`; without one it was
+    // handed back bare, so the column becoming available changed the row's
+    // parent and took the surface down with it.
+    await pumpAt(tester, width: 1000, enabled: false, onCollapsedChanged: (_) {});
+    expect(_Session.inits, 1);
+
+    await pumpAt(tester, width: 1000, onCollapsedChanged: (_) {});
+    expect(find.text('list'), findsOneWidget);
+    await pumpAt(tester, width: 1000, enabled: false, onCollapsedChanged: (_) {});
+
+    expect(_Session.inits, 1);
+    expect(_Session.disposals, 0);
+  });
+
+  testWidgets('presence scales the column, and the seam with it', (
+    tester,
+  ) async {
+    final presence = ValueNotifier(0.0);
+    final anim = _NotifierAnimation(presence);
+    await pumpAt(tester, width: 1000, presence: anim);
+    expect(tester.getSize(find.byKey(_mainKey)).width, 1000);
+
+    presence.value = 0.5;
+    await tester.pump();
+    expect(
+      tester.getSize(find.byKey(_mainKey)).width,
+      moreOrLessEquals(1000 - (320 + PaneDivider.hitWidth) * 0.5),
+    );
+
+    presence.value = 1;
+    await tester.pump();
+    expect(tester.getSize(find.byKey(_listKey)).width, 320);
+    expect(_Session.inits, 1);
+  });
+}
+
+/// A value driven by hand, for a test that steps through an animation.
+class _NotifierAnimation extends Animation<double> {
+  _NotifierAnimation(this._notifier);
+
+  final ValueNotifier<double> _notifier;
+
+  @override
+  double get value => _notifier.value;
+
+  @override
+  AnimationStatus get status => AnimationStatus.forward;
+
+  @override
+  void addListener(VoidCallback listener) => _notifier.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _notifier.removeListener(listener);
+
+  @override
+  void addStatusListener(AnimationStatusListener listener) {}
+
+  @override
+  void removeStatusListener(AnimationStatusListener listener) {}
+}
