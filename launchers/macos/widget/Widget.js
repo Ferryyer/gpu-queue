@@ -51,6 +51,7 @@ function render(view) {
     labels.status.stringValue = online ? '● 已连接' : busy ? '◷ 正在连接' : view.phase === 'auth' ? '◷ 等待登录' : '○ 未连接';
     labels.status.textColor = online ? $.NSColor.colorWithSRGBRedGreenBlueAlpha(.16,.43,.33,1) : $.NSColor.colorWithSRGBRedGreenBlueAlpha(.45,.43,.40,1);
     labels.note.stringValue = view.note;
+    labels.note.toolTip = view.note;
     var s = view.summary;
     labels.stats.stringValue = s ? '运行 ' + s.running + '    排队 ' + s.queued + '    待启动 ' + s.ready : '运行 —    排队 —    待启动 —';
     labels.current.stringValue = s ? s.current : '连接后显示任务进度';
@@ -136,6 +137,7 @@ function run() {
     panel = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0,0,344,340),
         $.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable | $.NSWindowStyleMaskNonactivatingPanel,
         $.NSBackingStoreBuffered, false);
+    panel.appearance = $.NSAppearance.appearanceNamed($.NSAppearanceNameAqua);
     panel.backgroundColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.96,.95,.93,1);
     panel.title = 'GPU 任务台'; panel.titlebarAppearsTransparent = true;
     panel.titleVisibility = $.NSWindowTitleHidden;
@@ -147,13 +149,13 @@ function run() {
     panel.setFrameAutosaveName('GPUQueueDesktopPanel');
     if (!panel.setFrameUsingName('GPUQueueDesktopPanel')) {
         var screen = $.NSScreen.mainScreen.visibleFrame;
-        panel.setFrameOrigin($.NSMakePoint(screen.origin.x + screen.size.width - 368, screen.origin.y + screen.size.height - 310));
+        panel.setFrameOrigin($.NSMakePoint(screen.origin.x + screen.size.width - 368, screen.origin.y + screen.size.height - 380));
     }
     panel.setContentSize($.NSMakeSize(344,340));
     interactionMode = GPUQWidget.interactionMode(readFile(stateDir + '/interaction-mode'));
     label('GPU 任务台',20,292,220,30,23,true);
-    labels.status = label('○ 未连接',22,267,294,20,12,true);
-    labels.note = label('正在检查已有连接…',22,246,298,18,11,false);
+    labels.status = label('○ 未连接',22,267,294,20,13,false);
+    labels.note = label('正在检查已有连接…',22,246,298,20,12,false);
     labels.note.textColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.45,.43,.40,1);
     labels.stats = label('运行 —    排队 —    待启动 —',20,206,304,27,17,true);
     labels.current = label('连接后显示任务进度',22,180,298,21,12,false);
@@ -161,7 +163,7 @@ function run() {
     buttons.mode.keyEquivalent = '\t';
     buttons.mode.keyEquivalentModifierMask = $.NSEventModifierFlagShift;
     buttons.mode.toolTip = 'Shift+Tab 切换下次打开网页的模式；不修改已打开的网页';
-    labels.modeHint = label('',22,112,300,22,11,false);
+    labels.modeHint = label('',22,112,300,22,12,false);
     buttons.open = button('打开任务台', 'openQueue:',16,69,188,34);
     buttons.connect = button('连接','toggleConnection:',207,69,120,34);
     button('SSH 配置','selectConfig:',16,31,100,28);
@@ -169,7 +171,7 @@ function run() {
     buttons.update.toolTip = '当前版本 ' + GPUQ_RELEASE_VERSION;
     var pin = button('置顶','pinPanel:',259,33,70,25);
     pin.setButtonType($.NSButtonTypeSwitch);
-    labels.attention = label('只管理网页连接，任务由服务器执行',22,8,300,18,10,false);
+    labels.attention = label('只管理网页连接，任务由服务器执行',22,8,300,20,12,false);
     labels.attention.textColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.45,.43,.40,1);
     widget = new GPUQWidget.Controller({
         now:function () { return Date.now(); },

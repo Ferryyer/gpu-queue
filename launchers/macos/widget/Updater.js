@@ -130,6 +130,7 @@ function run() {
     target = $.GPUQUpdaterActions.alloc.init;
     $.NSNotificationCenter.defaultCenter.addObserverSelectorNameObject(target,'applicationExiting:',$.NSApplicationWillTerminateNotification,null);
     window = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0,0,500,386),$.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable,$.NSBackingStoreBuffered,false);
+    window.appearance = $.NSAppearance.appearanceNamed($.NSAppearanceNameAqua);
     window.backgroundColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.96,.95,.93,1);
     window.title = 'GPU 任务台 · 软件更新'; window.releasedWhenClosed = false; window.delegate = target;
     label('软件更新',24,326,450,34,25,true);
@@ -139,6 +140,8 @@ function run() {
     scroll.hasVerticalScroller = true; scroll.borderType = $.NSBezelBorder;
     fields.notes = $.NSTextView.alloc.initWithFrame($.NSMakeRect(0,0,424,154));
     fields.notes.editable = false; fields.notes.selectable = true;
+    fields.notes.textColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.19,.18,.17,1);
+    fields.notes.backgroundColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.99,.98,.96,1);
     fields.notes.font = $.NSFont.systemFontOfSize(13);
     fields.notes.textContainerInset = $.NSMakeSize(10,10);
     fields.notes.verticallyResizable = true;
