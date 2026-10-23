@@ -1,0 +1,1 @@
+{"name":"gpu-queue","private":true,"type":"module","scripts":{"test":"node --test tests/cloud.test.js","build":"node scripts/build.mjs"}}

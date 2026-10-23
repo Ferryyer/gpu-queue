@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "title": "GPU 链路验收 · 训练 → 评测 → 推理",
+  "description": "小型真实 CUDA 线性模型，用于验收任务投放、步骤衔接、日志和产物回传。仅在你点击开始后运行，不下载模型或数据。",
+  "project": "/inspire/hdd/global_user/wuruixi-CZXS25210319/markflow-members/homes/linlishuo/code/gpu-queue-prototype-20261022",
+  "code_files": [
+    "examples/acceptance.py"
+  ],
+  "resources": {
+    "gpus": 1,
+    "memory_gb": 1,
+    "type": "H卡离线",
+    "estimated_hours": 0.25
+  },
+  "steps": [
+    {
+      "name": "训练",
+      "argv": [
+        "/inspire/hdd/global_user/wuruixi-CZXS25210319/markflow-members/homes/linlishuo/envs/minimax-video/bin/python",
+        "{code}/examples/acceptance.py",
+        "train",
+        "--output-dir",
+        "{outputs}"
+      ],
+      "outputs": [
+        "{outputs}/model.pt"
+      ]
+    },
+    {
+      "name": "评测",
+      "argv": [
+        "/inspire/hdd/global_user/wuruixi-CZXS25210319/markflow-members/homes/linlishuo/envs/minimax-video/bin/python",
+        "{code}/examples/acceptance.py",
+        "evaluate",
+        "--output-dir",
+        "{outputs}"
+      ],
+      "outputs": [
+        "{outputs}/metrics.json"
+      ]
+    },
+    {
+      "name": "推理",
+      "argv": [
+        "/inspire/hdd/global_user/wuruixi-CZXS25210319/markflow-members/homes/linlishuo/envs/minimax-video/bin/python",
+        "{code}/examples/acceptance.py",
+        "infer",
+        "--output-dir",
+        "{outputs}"
+      ],
+      "outputs": [
+        "{outputs}/samples.json"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="个人 GPU 任务台交互原型。准备实验，调整队列，一次启动完整流程。">
+<meta name="theme-color" content="#f5f3ed"><title>GPU Queue · 个人任务台</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside class="sidebar">
+<a class="brand" href="#"><span class="brand-icon">▦</span><span>GPU Queue<small>个人计算工作台</small></span></a>
+<div class="workspace"><span class="avatar">L</span><div>我的工作空间<small>linlishuo · 个人</small></div><i class="green-dot"></i></div>
+<div class="nav-label">工作台</div>
+<nav><button class="nav-item active" data-nav="all"><span>▤</span>任务总览<b id="nav-count">7</b></button><button class="nav-item" data-nav="queue"><span>☷</span>执行队列</button><button class="nav-item" data-nav="history"><span>◷</span>运行记录</button></nav>
+<div class="sidebar-note"><span class="little-icon">↗</span><strong>让实验准备好，再出发。</strong><p>Agent 准备和提交，<br>你来决定何时开始。</p><button id="integration">查看 Agent 接入方式 →</button></div>
+<div class="sidebar-bottom"><i class="green-dot"></i>真实任务<span>v1.0</span></div>
+</aside>
+<div class="shell">
+<header class="topbar"><div><span class="muted">工作台</span><span class="slash">/</span>任务总览</div><div class="top-actions"><span class="prototype-tag">连接中</span><button class="icon-button" id="refresh-icon" title="刷新任务状态" aria-label="刷新任务状态">↺</button><span class="avatar small">L</span></div></header>
+<main>
+<div class="page-heading"><div><div class="eyebrow">YOUR EXPERIMENTS, IN ORDER.</div><h1>每个实验，都有进展<span>。</span></h1><p>准备就绪的任务在这里集合。查看、排序，然后开始。</p></div><button class="button secondary" id="refresh">↻ 刷新状态</button></div>
+<div class="demo-note" id="connection-note"><span>◈</span><span>正在连接服务器。任务由 Agent 准备提交；只有你在这里点击开始，才会复用或申请 GPU。</span></div>
+<section class="mode-toolbar" aria-label="操作模式"><button id="interaction-mode" class="mode-switch" aria-describedby="mode-hint" aria-keyshortcuts="Shift+Tab" aria-pressed="false"><span id="mode-label">Edit mode</span><kbd>Shift ⇥</kbd></button><span id="mode-hint" role="status" aria-live="polite">编辑队列，手动启动准备好的任务。</span></section>
+<section class="stats" id="stats" aria-label="任务统计"></section>
+<section class="resource-card">
+<div class="resource-title"><span class="gpu-icon">▦</span><div><strong>计算资源</strong><span><i class="green-dot"></i> 等待资源状态同步</span></div></div>
+<div class="resource-meter"><div><span>GPU 利用率</span><strong id="gpu-value">—<small>%</small></strong></div><div class="meter"><i id="gpu-bar"></i></div></div>
+<div class="resource-meter memory"><div><span>显存使用</span><strong id="memory-value">— <small>GB</small></strong></div><div class="meter"><i id="memory-bar"></i></div></div>
+<div class="resource-mode"><strong id="schedule-label">● 按顺序执行</strong><small id="schedule-hint">持续低占用时，最多并行 2 个任务</small></div>
+<span class="text-button" id="low-load">低占用时自动判断并行</span>
+</section>
+<p id="resource-policy" class="release-note" hidden></p>
+<div class="workbench">
+<section class="tasks-panel" aria-label="任务列表">
+<div class="list-toolbar"><div class="tabs" id="filters"><button class="active" data-filter="all">全部任务</button><button data-filter="queue">执行队列</button><button data-filter="ready">待启动</button><button data-filter="history">已结束</button></div><button class="icon-button" id="search-toggle" aria-label="搜索任务">⌕</button></div>
+<div class="search-wrap" id="search-wrap" hidden><input id="search" type="search" placeholder="搜索任务、项目或 Agent…" aria-label="搜索任务"></div>
+<div id="task-list"></div>
+<div class="list-footer"><span>⠿ 拖动队列左侧手柄调整顺序</span><span>已批准任务自动接续执行</span></div>
+</section>
+<aside class="detail-panel" id="detail" aria-label="任务详情"></aside>
+</div>
+<footer class="page-footer"><span>GPU QUEUE · 为有条理的实验而设计</span><span>顺序优先 · 空闲复用 · 失败即停</span></footer>
+</main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<dialog id="integration-dialog">
+<div class="dialog-heading"><div><div class="eyebrow">AGENT → QUEUE</div><h2>一个入口，连接你的 Agent。</h2></div><button class="icon-button" id="close-dialog" aria-label="关闭">×</button></div>
+<p>Codex 和 Claude 准备代码、数据与环境，生成任务文件，通过同一个提交工具进入任务台。</p>
+<div class="integration-flow"><span>准备任务</span><b>→</b><span>CPU 检查</span><b>→</b><span>提交队列</span><b>→</b><span>你点开始</span></div>
+<pre>gpuq validate --manifest &lt;任务文件绝对路径&gt;
+gpuq submit --manifest &lt;任务文件绝对路径&gt; --source codex</pre>
+<p class="muted">提交后任务会直接出现在这里。Agent 无法通过提交工具批准执行；你点开始后，服务器才会进入资源流程。</p>
+<button class="button primary" id="close-dialog-bottom">了解了</button>
+</dialog>
+<dialog id="stop-dialog" aria-labelledby="stop-title">
+<div class="dialog-heading"><h2 id="stop-title">停止这个任务？</h2></div>
+<p id="stop-task-name"></p>
+<p>排队中的任务会移出队列；运行中的任务会结束当前步骤和子进程，后续步骤不再执行。已写入的产物保留，尚未写入的结果可能丢失。</p>
+<p class="muted">停止任务不等于释放 GPU 或撤回已提交的资源申请。再次运行需要提交新版本并重新点击开始。</p>
+<div class="stop-actions"><button class="button secondary" id="cancel-stop">继续保留任务</button><button class="button danger" id="confirm-stop">确认停止</button></div>
+</dialog>
+<script type="module" src="app.js"></script>
+</body></html>

@@ -1,0 +1,6 @@
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+export function database(){const raw=new DatabaseSync(':memory:');raw.exec(readFileSync(new URL('../drizzle/0000_gpuq.sql',import.meta.url),'utf8'));const db={prepare(sql){let args=[];const statement=raw.prepare(sql);const bound={bind(...values){args=values;return bound;},async first(){return statement.get(...args)||null;},async all(){return {results:statement.all(...args)};},async run(){const result=statement.run(...args);return {meta:{changes:Number(result.changes)}};}};return bound;},async batch(statements){raw.exec('BEGIN');try{const out=[];for(const statement of statements)out.push(await statement.run());raw.exec('COMMIT');return out;}catch(error){raw.exec('ROLLBACK');throw error;}}};return db;}
+export const id=n=>'GQ-'+String(n).padStart(16,'0');
+export const digest=n=>String(n).padStart(64,'0');
+export function payload(n){return {id:id(n),name:'真实链路测试 '+n,description:'准备好后由用户启动',project:'test-project',agent:n%2?'Codex':'Claude',state:'ready',stage:0,progress:null,elapsed:'尚未运行',version:digest(n).slice(0,12),memory:2,resources:{gpus:1,memory_gb:2},steps:['训练','评测','推理'],step_records:[],events:['CPU 检查通过'],checks:['代码快照已校验','输入路径已检查','执行入口已检查','GPU 兼容性将在运行时验证'],created_at:new Date().toISOString()};}
