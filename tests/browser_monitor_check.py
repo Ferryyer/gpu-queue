@@ -42,6 +42,7 @@ try:
         expect(page.locator('#account-threads')).to_contain_text('fixture-user')
         expect(page.locator('#server-resources')).to_contain_text('61 °C')
         expect(page.locator('#server-resources')).to_contain_text('40.0 / 80.0 GiB')
+        expect(page.locator('#memory-value')).to_contain_text('GiB')
         sample_at += 25
         page.locator('#refresh').click()
         expect(page.locator('.monitor-trend svg')).to_be_visible()
