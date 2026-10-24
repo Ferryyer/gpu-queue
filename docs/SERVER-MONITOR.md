@@ -27,7 +27,7 @@ python3 tests/browser_monitor_check.py
 python3 tests/browser_typography_check.py
 ```
 
-通过 60 项 Python、31 项 Node、14 项 GPU 桥接、6 项线程采样测试。
+通过 60 项 Python、32 项 Node、14 项 GPU 桥接、6 项线程采样测试。
 Chromium 验证了线程展开、GPU 指标、真实采样去重后的趋势、JSON 下载、过期隐藏和 320–1440px 无横向溢出；排版检查覆盖 7 种宽度、模式切换、搜索、弹窗、深色系统偏好及减少动画。
 浏览器数据为 CPU 隔离假数据，不是线上 GPU 读数。
 
