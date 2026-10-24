@@ -19,20 +19,39 @@ ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / 'serverbox'
 IRONRDP = 'debc16c0039936bef2fb0ded046b171ecced3885'
 FLUTTER = '3.47.8'
+FLUTTER_REVISION = '737ba8f885dc774b53b442759999a312c9461e4e'
 RUST = '1.98.1'
 
 
-def run(command, *, cwd=ROOT, log=None, timeout=60):
+def run(command, *, cwd=ROOT, log=None, timeout=60, separate_stderr=False):
+    stderr = ''
     try:
         result = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, timeout=timeout,
+                                stderr=subprocess.PIPE if separate_stderr else subprocess.STDOUT, timeout=timeout,
                                 env={**os.environ, 'RUSTUP_TOOLCHAIN': RUST})
         code, output = result.returncode, result.stdout
+        stderr = (result.stderr or '') if separate_stderr else ''
     except (OSError, subprocess.TimeoutExpired) as error:
         code, output = 127, str(error)
     if log:
-        log.write_text(output, encoding='utf-8')
-    return {'command': command, 'exitCode': code, 'output': output}
+        log.write_text(output + stderr, encoding='utf-8')
+    return {'command': command, 'exitCode': code, 'output': output, 'stderr': stderr}
+
+
+def flutter_version(output):
+    # A newly cloned SDK may print bootstrap notices before its machine JSON.
+    # Require both version fields; never infer a version from human log text.
+    decoder = json.JSONDecoder()
+    for index, char in enumerate(output):
+        if char != '{':
+            continue
+        try:
+            value, _ = decoder.raw_decode(output[index:])
+        except ValueError:
+            continue
+        if isinstance(value, dict) and 'frameworkRevision' in value and 'frameworkVersion' in value:
+            return value
+    return {}
 
 
 def main():
@@ -51,13 +70,13 @@ def main():
     report['sourceCommit'] = run(['git', 'rev-parse', 'HEAD'])['output'].strip()
     report['sourceDirty'] = bool(run(['git', 'status', '--porcelain'])['output'].strip())
     checks['macOS'] = platform.system() == 'Darwin'
-    flutter = run([args.flutter, '--version', '--machine'])
-    try:
-        version = json.loads(flutter['output'])
-    except ValueError:
-        version = {}
+    flutter = run([args.flutter, '--version', '--machine'], timeout=300, separate_stderr=True)
+    version = flutter_version(flutter['output'])
+    report['flutterProbe'] = flutter
     report['flutterVersion'] = version.get('frameworkVersion')
-    checks['flutterPinned'] = flutter['exitCode'] == 0 and report['flutterVersion'] == FLUTTER
+    report['flutterRevision'] = version.get('frameworkRevision')
+    checks['flutterPinned'] = (flutter['exitCode'] == 0 and report['flutterVersion'] == FLUTTER
+                               and report['flutterRevision'] == FLUTTER_REVISION)
     for label, command in {
         'xcode': ['xcodebuild', '-version'],
         'macSdk': ['xcrun', '--sdk', 'macosx', '--show-sdk-path'],

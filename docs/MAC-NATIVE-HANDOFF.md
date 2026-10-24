@@ -6,9 +6,9 @@
 
 Linux 已用真实 Clang 编译 vendored PTY C 库，并运行真实生产 build hook 的本地终端测试：shell 输入/输出、环境/目录、resize、退出状态与信号。发现旧 `DynamicLibrary.open` 文件名不经过 code-asset 映射，已改用 `@Native` 精确指向 hook 输出的 `package:flutter_pty/flutter_pty`。这要求完整重建原生运行时，不能复用旧版 Mac 运行时只替换 AOT。
 
-本地测试只证明 PTY 库，不证明 Mac 应用、SSH、SFTP、安装或更新。Mac 构建、签名工具和交互验收在 Linux 上无法代做。平台 runtime 清单目前只有 markflow CPU，没有已连接的 Mac。
+Linux 已进一步通过根应用真实 native hooks 的 19 项任务定向测试，但这不证明 Mac SSH/SFTP、安装或更新。Mac 构建在 GitHub macos-15 runner 执行；用户本机的交互验收仍由 Mac 执行者完成。
 
-工程后续负责人：GPU 任务台设计开发负责构建错误和代码修复；MF-9 的产品设计师负责独立 UI 复验；Mac 本机操作由 linlishuo 或其指定的 Mac 验收执行者接手。当前尚未确认某台 Mac 已接单，不能把交接说明写成实机已运行。
+工程后续负责人：GPU 任务台设计开发负责构建错误和代码修复；MF-9 的产品设计师负责独立 UI 复验；Mac 本机操作由 linlishuo 或其指定的 Mac 验收执行者接手。Mac 人工验收任务为 MF-18。用户已授权先发布、再本机验收；发布结果以 GitHub Release 的实际资产为准。
 
 ## 准备固定依赖
 
@@ -53,10 +53,14 @@ QA 构建先 `flutter build macos --config-only --release` 写配置，再以本
 
 保留源码现有的 `SERVERBOX_DATA_NAME=ServerBoxH100`、`FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false`、`FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100`。不要改 bundle ID 或钥匙串定义后宣称旧配置保留。首次验收在专门的 macOS 测试用户执行，保留已有安装与钥匙串；完成隔离验收后再在原用户下验证兼容性。
 
-完整脚本目前没有在 Mac 执行；成功与否以 Mac 生成的报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2000 / 2000`。QA app 未签名，不能当作正式分发版本或自动更新候选。
+成功与否以对应源码提交的 Mac Actions 报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2000 / 2000`。本地 QA app 没有 Developer ID 签名，不能当作稳定自动更新候选。
 
-PR 分支另带 `.github/workflows/mf12-native-qa.yml`：仅在此候选分支的相关变更上触发 macos-15 构建，固定 Flutter 提交、Rust 和 IronRDP，不使用签名密钥或部署凭据。它运行相同验收脚本，成功后用 ditto 保留 executable mode/资源并生成 QA ZIP/SHA-256；失败时也上传已有报告，保留 7 天。具体运行是否已被 GitHub 接受、是否成功以 Actions 结果为准。CI 构建也不证明交互、真实安装/更新或用户 Mac 已验收。
+PR 分支另带 `.github/workflows/mf12-native-qa.yml`：候选分支相关变更触发 macos-15，固定 Flutter 3.47.8 的官方 tag 和提交、Rust 及 IronRDP。原生测试和 Mac 构建通过后，`package_mac_preview.py` 校验版本/arm64、做本地 ad-hoc 签名及完整性验证、执行 10 秒启动冒烟检查，再生成 DMG、清单、SHA-256 和报告。发布步骤使用本仓库短期 GITHUB_TOKEN 的 contents:write 权限创建 `v2.0.2000-preview.1` 预发布，不把它设为 latest。流程失败则不执行发布。没有使用上游开发者签名、没有 Apple Developer ID/公证，也不更新稳定 Widget 通道。
 
+用户安装入口（仅在 Release 实际存在并有资产后可用）：
+https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2000-preview.1
+
+预览仅支持 Apple Silicon、macOS 13+。下载 DMG 和 SHA256SUMS 校验后挂载，先备份已有应用，优先用独立测试用户验收。若 Gatekeeper 阻止打开，核实来源和 SHA-256 后在系统设置 → 隐私与安全性中选择“仍要打开”，不要全局禁用 Gatekeeper。退出预览后可恢复备份应用。原包名的 unsigned 表示没有正式 Developer ID 签名/公证，即使已经 ad-hoc 签名。不能将 CI 启动冒烟当作 SSH/SFTP、真实安装覆盖或旧配置兼容性通过。
 ## 实机交互清单（每项记录结果及证据）
 
 - 在同一窗口添加两台已有测试 SSH 服务器。使用隔离的任务库和无 GPU 的结果 fixture，不连接或启动真实 GPU 队列。
@@ -75,7 +79,7 @@ PR 分支另带 `.github/workflows/mf12-native-qa.yml`：仅在此候选分支�
 python3 scripts/package_unified_macos.py --app 'serverbox/build/macos-qa/Build/Products/Release/GPU Queue.app' --allow-unsigned
 ```
 
-不运行生产发布命令；旧 Widget ZIP 不代表统一版，旧更新入口在本轮保持原状。
+仅发布用户授权的验收预览；旧 Widget ZIP 不代表统一版，旧更新入口保持原状。
 
 ## Linux 继续验证 PTY 的实际配置
 
