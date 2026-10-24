@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""Record native prerequisites; on a prepared Mac run tests and an unsigned QA build.
+
+Does not install tools, modify SSH/keychain settings, sign, publish, or launch GPU
+jobs. Interactive SSH/SFTP and installation acceptance remain human checks.
+"""
+import argparse
+import datetime
+import json
+import os
+from pathlib import Path
+import platform
+import shlex
+import shutil
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+APP = ROOT / 'serverbox'
+IRONRDP = 'debc16c0039936bef2fb0ded046b171ecced3885'
+FLUTTER = '3.47.8'
+RUST = '1.98.1'
+
+
+def run(command, *, cwd=ROOT, log=None, timeout=60):
+    try:
+        result = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, timeout=timeout,
+                                env={**os.environ, 'RUSTUP_TOOLCHAIN': RUST})
+        code, output = result.returncode, result.stdout
+    except (OSError, subprocess.TimeoutExpired) as error:
+        code, output = 127, str(error)
+    if log:
+        log.write_text(output, encoding='utf-8')
+    return {'command': command, 'exitCode': code, 'output': output}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--stage', choices=['preflight', 'tests', 'build'], default='preflight')
+    parser.add_argument('--flutter', default='flutter')
+    parser.add_argument('--out', type=Path, default=ROOT / 'build/native-acceptance')
+    args = parser.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+    report = {'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              'platform': platform.system(), 'architecture': platform.machine(),
+              'stage': args.stage, 'checks': {}, 'commands': [],
+              'interactiveSshSftpVerified': False, 'installationVerified': False,
+              'macBuildVerified': False}
+    checks = report['checks']
+    report['sourceCommit'] = run(['git', 'rev-parse', 'HEAD'])['output'].strip()
+    report['sourceDirty'] = bool(run(['git', 'status', '--porcelain'])['output'].strip())
+    checks['macOS'] = platform.system() == 'Darwin'
+    flutter = run([args.flutter, '--version', '--machine'])
+    try:
+        version = json.loads(flutter['output'])
+    except ValueError:
+        version = {}
+    report['flutterVersion'] = version.get('frameworkVersion')
+    checks['flutterPinned'] = flutter['exitCode'] == 0 and report['flutterVersion'] == FLUTTER
+    for label, command in {
+        'xcode': ['xcodebuild', '-version'],
+        'macSdk': ['xcrun', '--sdk', 'macosx', '--show-sdk-path'],
+        'clang': ['clang', '--version'],
+        'swift': ['swift', '--version'],
+        'rust': ['rustup', 'run', RUST, 'rustc', '--version'],
+        'cargo': ['rustup', 'run', RUST, 'cargo', '--version'],
+    }.items():
+        result = run(command)
+        report[label] = result
+        checks[label] = result['exitCode'] == 0
+    target = 'aarch64-apple-darwin' if platform.machine() == 'arm64' else 'x86_64-apple-darwin'
+    targets = run(['rustup', 'target', 'list', '--installed', '--toolchain', RUST])
+    checks['rustMacTarget'] = targets['exitCode'] == 0 and target in targets['output'].splitlines()
+    dependency = APP / 'third_party/ironrdp'
+    revision = run(['git', '-C', str(dependency), 'rev-parse', 'HEAD'])
+    report['ironRdpCommit'] = revision['output'].strip() if revision['exitCode'] == 0 else None
+    checks['ironRdpPinned'] = report['ironRdpCommit'] == IRONRDP
+    submodules = run(['git', '-C', str(dependency), 'submodule', 'status', '--recursive'])
+    checks['ironRdpSubmodules'] = submodules['exitCode'] == 0 and all(
+        not line.startswith(('-', '+', 'U')) for line in submodules['output'].splitlines())
+    report['ready'] = all(checks.values())
+    report['missing'] = [name for name, passed in checks.items() if not passed]
+
+    def save():
+        (args.out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+    save()
+    if args.stage == 'preflight' or not report['ready']:
+        print(json.dumps({'ready': report['ready'], 'missing': report['missing'],
+                          'report': str(args.out / 'report.json')}, ensure_ascii=False))
+        return 0 if report['ready'] else 2
+
+    # Flutter build hooks retain PATH but filter custom environment variables.
+    # An explicit launcher also keeps a user's non-default Rust homes intact;
+    # otherwise rustup may silently download every target in rust-toolchain.toml.
+    rustup = shutil.which('rustup')
+    launchers = args.out.resolve() / 'toolchain-bin'
+    launchers.mkdir(exist_ok=True)
+    wrapper = launchers / 'rustup'
+    values = {'RUSTUP_TOOLCHAIN': RUST}
+    for key in ['RUSTUP_HOME', 'CARGO_HOME']:
+        if key in os.environ:
+            values[key] = os.environ[key]
+    wrapper.write_text('#!/bin/sh\n' + ''.join(
+        'export ' + key + '=' + shlex.quote(value) + '\n' for key, value in values.items()
+    ) + 'exec ' + shlex.quote(rustup) + ' "$@"\n', encoding='utf-8')
+    wrapper.chmod(0o700)
+    os.environ['PATH'] = str(launchers) + os.pathsep + os.environ.get('PATH', '')
+
+    # No source rewrite or native-hook bypass: these are the application's tests.
+    commands = [
+        ([args.flutter, 'pub', 'get', '--enforce-lockfile'], APP),
+        ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
+        (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
+          '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
+        ([sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts/macos-reconnect', '-v'], APP),
+        ([args.flutter, 'test', '--no-pub', 'test/unit/app/queue_protocol_test.dart',
+          'test/unit/app/queue_session_test.dart', 'test/unit/app/queue_presentation_test.dart',
+          'test/unit/app/queue_resource_widget_test.dart', 'test/widget/terminal_reconnect_test.dart'], APP),
+    ]
+    if args.stage == 'build':
+        commands += [
+            ([args.flutter, 'build', 'macos', '--config-only', '--release',
+              '--dart-define=SERVERBOX_DATA_NAME=ServerBoxH100',
+              '--dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false',
+              '--dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100'], APP),
+            (['xcodebuild', '-workspace', 'macos/Runner.xcworkspace', '-scheme', 'Runner',
+              '-configuration', 'Release', '-derivedDataPath', 'build/macos-qa',
+              'ARCHS=' + platform.machine(), 'ONLY_ACTIVE_ARCH=YES',
+              'CODE_SIGNING_ALLOWED=NO', 'CODE_SIGNING_REQUIRED=NO',
+              'CODE_SIGN_IDENTITY=', 'DEVELOPMENT_TEAM=', 'build'], APP),
+        ]
+    for index, (command, cwd) in enumerate(commands, 1):
+        log = args.out / f'{index:02d}.log'
+        print(f'Running {index}/{len(commands)}: {command[0]} {command[1]}', flush=True)
+        result = run(command, cwd=cwd, log=log, timeout=3600)
+        report['commands'].append({'command': command, 'exitCode': result['exitCode'], 'log': log.name})
+        save()
+        if result['exitCode']:
+            print(f'Failed; see {log}', file=sys.stderr)
+            return 1
+    if args.stage == 'build':
+        app = APP / 'build/macos-qa/Build/Products/Release/GPU Queue.app'
+        report['macBuildVerified'] = app.is_dir()
+        report['qaApp'] = str(app)
+        report['signedForDistribution'] = False
+        save()
+        if not report['macBuildVerified']:
+            return 1
+    print('Requested native stage passed. Interactive and installation acceptance remain unverified.')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

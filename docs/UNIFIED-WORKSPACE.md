@@ -59,7 +59,7 @@ python3 scripts/package_unified_macos.py --app 'serverbox/build/macos/Build/Prod
 - 打包元数据校验覆盖空格/中文目录、错误版本和非法可执行文件路径；这不是 Mac 实机安装测试。
 - Chromium 使用 CPU fixture 验证两轮 5 秒刷新后焦点仍在原控件且 Enter 可继续排序、断线与恢复、GPU 缓存非实时、320/390/640/800/1024/1440px 布局、手机独立详情返回、真实时间比例趋势与采样点。截图只证明网页模块，不证明 Flutter/macOS 通过。
 
-具体阻塞：完整 `flutter test` 在 `flutter_pty` 的 native build hook 报 `No compiler configured on host linux_x64`。根目录全量 `flutter analyze` 还会扫描未独立 pub get 的 vendored example 工程；应用 lib 定向分析已无问题。当前没有 Mac/Xcode，亦未准备完整 IronRDP 原生依赖，不能实际演示原生 SSH/SFTP 闭环、检查 Mac 中文字体/深浅色/全屏、运行 Swift 重连测试、签名公证或实测 DMG 安装更新。没有申请 GPU，也没有启动真实用户任务。
+初轮阻塞：完整 `flutter test` 在 `flutter_pty` 的 native build hook 报 `No compiler configured on host linux_x64`。后续已准备任务内 Clang/Rust/IronRDP 并解除 PTY 编译问题，又修复旧动态库加载与 code-asset 映射不兼容；真实 PTY hook 与 3 项本地终端测试已通过。原生接手步骤和 CI 通道见 [Mac 验收接手包](MAC-NATIVE-HANDOFF.md)，最新整应用构建结果以任务本轮证据为准。根目录全量分析还会扫描未独立 pub get 的 vendored example；应用 lib 定向分析已无问题。当前运行时没有 Mac/Xcode，原生 SSH/SFTP 实机闭环、中文字体/深浅色/全屏、Swift 重连与签名安装更新仍需 Mac 验收。没有申请 GPU，也没有启动真实用户任务。
 
 ## Mac 必须补齐的验收
 

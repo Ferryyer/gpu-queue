@@ -1,0 +1,68 @@
+name: MF-12 native Mac QA
+
+on:
+  push:
+    branches: [codex/mf-12-unified-workspace]
+    paths:
+      - serverbox/**
+      - scripts/native_acceptance.py
+      - scripts/test_pty_native.py
+      - .github/workflows/mf12-native-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mf12-native-qa-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mac-native:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+      CARGO_BUILD_JOBS: 3
+    steps:
+      - name: Check out the exact public candidate without stored credentials
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/Ferryyer/gpu-queue.git
+          git -C source fetch --depth=1 origin "$CANDIDATE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+      - name: Prepare the pinned Flutter SDK
+        run: |
+          git init flutter-sdk
+          git -C flutter-sdk remote add origin https://github.com/flutter/flutter.git
+          git -C flutter-sdk fetch --depth=1 origin 737ba8f885dc774b53b442759999a312c9461e4e
+          git -C flutter-sdk checkout --detach FETCH_HEAD
+          printf '%s\n' "$GITHUB_WORKSPACE/flutter-sdk/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned Rust and IronRDP
+        working-directory: source
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          if [ "$(uname -m)" = arm64 ]; then target=aarch64-apple-darwin; else target=x86_64-apple-darwin; fi
+          rustup target add --toolchain 1.98.1 "$target"
+          git clone --no-checkout https://github.com/lollipopkit/IronRDP.git serverbox/third_party/ironrdp
+          git -C serverbox/third_party/ironrdp checkout --detach debc16c0039936bef2fb0ded046b171ecced3885
+          git -C serverbox/third_party/ironrdp submodule update --init --recursive
+      - name: Run real native tests and unsigned Mac build
+        working-directory: source
+        run: python3 scripts/native_acceptance.py --stage build
+      - name: Archive the QA app preserving executable modes and resources
+        working-directory: source
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent 'serverbox/build/macos-qa/Build/Products/Release/GPU Queue.app' build/native-acceptance/GPU-Queue-unsigned-QA.zip
+          shasum -a 256 build/native-acceptance/GPU-Queue-unsigned-QA.zip > build/native-acceptance/SHA256SUMS
+      - name: Upload native evidence and unsigned QA app
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mf12-native-mac-qa-${{ github.sha }}
+          path: |
+            source/build/native-acceptance/
+          if-no-files-found: warn
+          retention-days: 7
