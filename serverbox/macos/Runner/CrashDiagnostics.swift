@@ -8,9 +8,8 @@ import MetricKit
 /// handler runs, nothing is written, and the next launch looks like a clean
 /// start. MetricKit is the platform's own record of it.
 ///
-/// The same file as `ios/Runner/CrashDiagnostics.swift` apart from the
-/// availability annotation. The two Xcode projects are separate and neither
-/// can reference the other's sources, so this is a copy; keep them in step.
+/// Shares diagnostic handling with the iOS implementation. macOS does not
+/// provide MXMetricPayload, so its metrics-only callback is omitted here.
 ///
 /// **Delivery is on the system's schedule, not ours.** A payload arrives
 /// somewhere between the next launch and roughly a day later, so a record
@@ -80,10 +79,6 @@ final class CrashDiagnostics: NSObject, MXMetricManagerSubscriber {
         guard !records.isEmpty else { return }
         Self.append(records)
     }
-
-    /// Also required by the protocol. Metrics are usage statistics rather than
-    /// failures, and nothing here collects them.
-    func didReceive(_ payloads: [MXMetricPayload]) {}
 
     /// Everything accumulated since the last call, which it clears.
     ///

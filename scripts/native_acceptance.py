@@ -14,6 +14,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / 'serverbox'
@@ -24,6 +25,8 @@ RUST = '1.98.1'
 
 
 def run(command, *, cwd=ROOT, log=None, timeout=60, separate_stderr=False):
+    if log:
+        return run_logged(command, cwd=cwd, log=log, timeout=timeout)
     stderr = ''
     try:
         result = subprocess.run(command, cwd=cwd, text=True, stdout=subprocess.PIPE,
@@ -36,6 +39,48 @@ def run(command, *, cwd=ROOT, log=None, timeout=60, separate_stderr=False):
     if log:
         log.write_text(output + stderr, encoding='utf-8')
     return {'command': command, 'exitCode': code, 'output': output, 'stderr': stderr}
+
+
+def run_logged(command, *, cwd, log, timeout):
+    """Keep the complete log on disk and expose compiler progress during CI."""
+    started = time.monotonic()
+    next_heartbeat = started + 30
+    with log.open('w', encoding='utf-8') as destination:
+        try:
+            child = subprocess.Popen(command, cwd=cwd, text=True, stdout=destination,
+                                     stderr=subprocess.STDOUT,
+                                     env={**os.environ, 'RUSTUP_TOOLCHAIN': RUST})
+        except OSError as error:
+            destination.write(str(error))
+            return {'command': command, 'exitCode': 127, 'output': str(error), 'stderr': ''}
+        with log.open(encoding='utf-8', errors='replace') as reader:
+            try:
+                while True:
+                    try:
+                        code = child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        code = None
+                    chunk = reader.read()
+                    if chunk:
+                        print(chunk, end='', flush=True)
+                    now = time.monotonic()
+                    if code is not None:
+                        break
+                    if now >= next_heartbeat:
+                        print(f'[build] {command[0]} still running; {int(now - started)}s elapsed', flush=True)
+                        next_heartbeat = now + 30
+                    if now - started >= timeout:
+                        child.kill()
+                        child.wait()
+                        destination.write(f'\nCommand timed out after {timeout}s\n')
+                        code = 124
+                        break
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+    print(f'[build] {command[0]} exited {code}; {int(time.monotonic() - started)}s elapsed', flush=True)
+    return {'command': command, 'exitCode': code, 'output': log.read_text(errors='replace'), 'stderr': ''}
 
 
 def flutter_version(output):
