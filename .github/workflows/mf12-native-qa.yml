@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: mf12-native-qa-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   mac-native:
@@ -54,9 +54,9 @@ jobs:
           git clone --no-checkout https://github.com/lollipopkit/IronRDP.git serverbox/third_party/ironrdp
           git -C serverbox/third_party/ironrdp checkout --detach debc16c0039936bef2fb0ded046b171ecced3885
           git -C serverbox/third_party/ironrdp submodule update --init --recursive
-      - name: Run real native tests and unsigned Mac build
+      - name: Generate Mac app without preflight or test gates
         working-directory: source
-        run: python3 scripts/native_acceptance.py --stage build
+        run: python3 scripts/native_acceptance.py --stage build --package-only
       - name: Package the installable acceptance preview
         working-directory: source
         run: python3 scripts/package_mac_preview.py

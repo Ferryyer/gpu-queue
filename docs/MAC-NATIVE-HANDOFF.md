@@ -55,8 +55,9 @@ QA 构建先 `flutter build macos --config-only --release` 写配置，再以本
 
 成功与否以对应源码提交的 Mac Actions 报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2000 / 2000`。本地 QA app 没有 Developer ID 签名，不能当作稳定自动更新候选。
 
-PR 分支另带 `.github/workflows/mf12-native-qa.yml`：候选分支相关变更触发 macos-15，固定 Flutter 3.47.8 的官方 tag 和提交、Rust 及 IronRDP。原生测试和 Mac 构建通过后，`package_mac_preview.py` 校验版本/arm64、做本地 ad-hoc 签名及完整性验证、执行 10 秒启动冒烟检查，再生成 DMG、清单、SHA-256 和报告。发布步骤使用本仓库短期 GITHUB_TOKEN 的 contents:write 权限创建 `v2.0.2000-preview.1` 预发布，不把它设为 latest。流程失败则不执行发布。没有使用上游开发者签名、没有 Apple Developer ID/公证，也不更新稳定 Widget 通道。
+用户最新要求“不用构建检查直接上传”。PR 分支的 `.github/workflows/mf12-native-qa.yml` 已改为直接生成预览包：`native_acceptance.py --stage build --package-only` 跳过环境预检和全部测试，仅安装固定依赖、编译 Mac 应用；`package_mac_preview.py` 做 Apple Silicon 启动必需的 ad-hoc 签名和 DMG 打包，不运行签名复验、架构复验或启动冒烟。报告明确记录 checksSkippedByUser / testsSkippedByUser，macBuildVerified 和交互/安装项目仍为 false。上文完整 QA 命令供用户之后需要时自行执行，不作为这次上传前置条件。
 
+生成成功后直接创建 `v2.0.2000-preview.1` 预发布，不设为 latest、不改变旧 Widget 稳定更新入口。流程只用本仓库短期 GITHUB_TOKEN，没有上游开发者签名、Apple Developer ID 或公证。生成可安装的 Mac 二进制仍必须执行一次编译，这不是额外验收检查。
 用户安装入口（仅在 Release 实际存在并有资产后可用）：
 https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2000-preview.1
 

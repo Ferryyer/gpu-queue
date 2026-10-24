@@ -58,6 +58,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', choices=['preflight', 'tests', 'build'], default='preflight')
     parser.add_argument('--flutter', default='flutter')
+    parser.add_argument('--package-only', action='store_true',
+                        help='User-requested direct preview: skip prerequisite checks and tests; compile the app only')
     parser.add_argument('--out', type=Path, default=ROOT / 'build/native-acceptance')
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -69,6 +71,79 @@ def main():
     checks = report['checks']
     report['sourceCommit'] = run(['git', 'rev-parse', 'HEAD'])['output'].strip()
     report['sourceDirty'] = bool(run(['git', 'status', '--porcelain'])['output'].strip())
+    if args.package_only:
+        if args.stage != 'build' or platform.system() != 'Darwin':
+            parser.error('--package-only requires --stage build on macOS')
+        report['checksSkippedByUser'] = True
+        report['testsSkippedByUser'] = True
+    else:
+        preflight(args, report)
+    report['ready'] = not args.package_only and all(checks.values())
+    report['missing'] = [name for name, passed in checks.items() if not passed]
+
+    def save():
+        (args.out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+    save()
+    if args.stage == 'preflight' or (not args.package_only and not report['ready']):
+        print(json.dumps({'ready': report['ready'], 'missing': report['missing'],
+                          'report': str(args.out / 'report.json')}, ensure_ascii=False))
+        return 0 if report['ready'] else 2
+
+    # Flutter build hooks retain PATH but filter custom environment variables.
+    rustup = shutil.which('rustup')
+    launchers = args.out.resolve() / 'toolchain-bin'
+    launchers.mkdir(exist_ok=True)
+    wrapper = launchers / 'rustup'
+    values = {'RUSTUP_TOOLCHAIN': RUST}
+    for key in ['RUSTUP_HOME', 'CARGO_HOME']:
+        if key in os.environ:
+            values[key] = os.environ[key]
+    wrapper.write_text('#!/bin/sh\n' + ''.join(
+        'export ' + key + '=' + shlex.quote(value) + '\n' for key, value in values.items()
+    ) + 'exec ' + shlex.quote(rustup) + ' "$@"\n', encoding='utf-8')
+    wrapper.chmod(0o700)
+    os.environ['PATH'] = str(launchers) + os.pathsep + os.environ.get('PATH', '')
+    commands = [([args.flutter, 'pub', 'get', '--enforce-lockfile'], APP)]
+    if not args.package_only:
+        commands += test_commands(args)
+    if args.stage == 'build':
+        commands += [
+            ([args.flutter, 'build', 'macos', '--config-only', '--release',
+              '--dart-define=SERVERBOX_DATA_NAME=ServerBoxH100',
+              '--dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false',
+              '--dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100'], APP),
+            (['xcodebuild', '-workspace', 'macos/Runner.xcworkspace', '-scheme', 'Runner',
+              '-configuration', 'Release', '-derivedDataPath', 'build/macos-qa',
+              'ARCHS=' + platform.machine(), 'ONLY_ACTIVE_ARCH=YES',
+              'CODE_SIGNING_ALLOWED=NO', 'CODE_SIGNING_REQUIRED=NO',
+              'CODE_SIGN_IDENTITY=', 'DEVELOPMENT_TEAM=', 'build'], APP),
+        ]
+    for index, (command, cwd) in enumerate(commands, 1):
+        log = args.out / f'{index:02d}.log'
+        print(f'Running {index}/{len(commands)}: {command[0]} {command[1]}', flush=True)
+        result = run(command, cwd=cwd, log=log, timeout=3600)
+        report['commands'].append({'command': command, 'exitCode': result['exitCode'], 'log': log.name})
+        save()
+        if result['exitCode']:
+            print(f'Failed; see {log}', file=sys.stderr)
+            print(result['output'][-12000:], file=sys.stderr)
+            return 1
+    if args.stage == 'build':
+        app = APP / 'build/macos-qa/Build/Products/Release/GPU Queue.app'
+        report['macBuildProduced'] = app.is_dir()
+        report['macBuildVerified'] = not args.package_only and app.is_dir()
+        report['qaApp'] = str(app)
+        report['signedForDistribution'] = False
+        save()
+        if not report['macBuildProduced']:
+            return 1
+    print('Package generation completed. Human acceptance remains unverified.')
+    return 0
+
+
+def preflight(args, report):
+    checks = report['checks']
     checks['macOS'] = platform.system() == 'Darwin'
     flutter = run([args.flutter, '--version', '--machine'], timeout=300, separate_stderr=True)
     version = flutter_version(flutter['output'])
@@ -98,38 +173,10 @@ def main():
     submodules = run(['git', '-C', str(dependency), 'submodule', 'status', '--recursive'])
     checks['ironRdpSubmodules'] = submodules['exitCode'] == 0 and all(
         not line.startswith(('-', '+', 'U')) for line in submodules['output'].splitlines())
-    report['ready'] = all(checks.values())
-    report['missing'] = [name for name, passed in checks.items() if not passed]
 
-    def save():
-        (args.out / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
-    save()
-    if args.stage == 'preflight' or not report['ready']:
-        print(json.dumps({'ready': report['ready'], 'missing': report['missing'],
-                          'report': str(args.out / 'report.json')}, ensure_ascii=False))
-        return 0 if report['ready'] else 2
-
-    # Flutter build hooks retain PATH but filter custom environment variables.
-    # An explicit launcher also keeps a user's non-default Rust homes intact;
-    # otherwise rustup may silently download every target in rust-toolchain.toml.
-    rustup = shutil.which('rustup')
-    launchers = args.out.resolve() / 'toolchain-bin'
-    launchers.mkdir(exist_ok=True)
-    wrapper = launchers / 'rustup'
-    values = {'RUSTUP_TOOLCHAIN': RUST}
-    for key in ['RUSTUP_HOME', 'CARGO_HOME']:
-        if key in os.environ:
-            values[key] = os.environ[key]
-    wrapper.write_text('#!/bin/sh\n' + ''.join(
-        'export ' + key + '=' + shlex.quote(value) + '\n' for key, value in values.items()
-    ) + 'exec ' + shlex.quote(rustup) + ' "$@"\n', encoding='utf-8')
-    wrapper.chmod(0o700)
-    os.environ['PATH'] = str(launchers) + os.pathsep + os.environ.get('PATH', '')
-
-    # No source rewrite or native-hook bypass: these are the application's tests.
-    commands = [
-        ([args.flutter, 'pub', 'get', '--enforce-lockfile'], APP),
+def test_commands(args):
+    return [
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
           '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
@@ -138,38 +185,6 @@ def main():
           'test/unit/app/queue_session_test.dart', 'test/unit/app/queue_presentation_test.dart',
           'test/unit/app/queue_resource_widget_test.dart', 'test/widget/terminal_reconnect_test.dart'], APP),
     ]
-    if args.stage == 'build':
-        commands += [
-            ([args.flutter, 'build', 'macos', '--config-only', '--release',
-              '--dart-define=SERVERBOX_DATA_NAME=ServerBoxH100',
-              '--dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false',
-              '--dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100'], APP),
-            (['xcodebuild', '-workspace', 'macos/Runner.xcworkspace', '-scheme', 'Runner',
-              '-configuration', 'Release', '-derivedDataPath', 'build/macos-qa',
-              'ARCHS=' + platform.machine(), 'ONLY_ACTIVE_ARCH=YES',
-              'CODE_SIGNING_ALLOWED=NO', 'CODE_SIGNING_REQUIRED=NO',
-              'CODE_SIGN_IDENTITY=', 'DEVELOPMENT_TEAM=', 'build'], APP),
-        ]
-    for index, (command, cwd) in enumerate(commands, 1):
-        log = args.out / f'{index:02d}.log'
-        print(f'Running {index}/{len(commands)}: {command[0]} {command[1]}', flush=True)
-        result = run(command, cwd=cwd, log=log, timeout=3600)
-        report['commands'].append({'command': command, 'exitCode': result['exitCode'], 'log': log.name})
-        save()
-        if result['exitCode']:
-            print(f'Failed; see {log}', file=sys.stderr)
-            print(result['output'][-12000:], file=sys.stderr)
-            return 1
-    if args.stage == 'build':
-        app = APP / 'build/macos-qa/Build/Products/Release/GPU Queue.app'
-        report['macBuildVerified'] = app.is_dir()
-        report['qaApp'] = str(app)
-        report['signedForDistribution'] = False
-        save()
-        if not report['macBuildVerified']:
-            return 1
-    print('Requested native stage passed. Interactive and installation acceptance remain unverified.')
-    return 0
 
 
 if __name__ == '__main__':
