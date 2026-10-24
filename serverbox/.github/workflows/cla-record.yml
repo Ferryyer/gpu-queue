@@ -1,0 +1,41 @@
+# Records a CLA signature that was given somewhere other than a pull request —
+# in practice, a past contributor signing in an issue after being asked.
+#
+# Run it from Actions → CLA record → Run workflow. Only accounts with write
+# access to this repository can start it, and the run itself is the audit trail
+# of who recorded what.
+#
+# `reference` must be the URL of the comment where the person actually agreed.
+# That comment is the signature; this workflow only writes it down.
+
+name: CLA record
+
+on:
+  workflow_dispatch:
+    inputs:
+      login:
+        description: 'GitHub username of the person who signed'
+        required: true
+        type: string
+      reference:
+        description: 'URL of the comment where they signed (issue or PR comment)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cla-signatures-write
+  cancel-in-progress: false
+
+jobs:
+  record:
+    name: Record a CLA signature
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: lollipopkit/cla-actions/record@cb8ab238a96f2736f19a9bf258a49af3c6eed7bd # v2.0.0
+        with:
+          login: ${{ inputs.login }}
+          reference: ${{ inputs.reference }}

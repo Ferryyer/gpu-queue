@@ -4,6 +4,16 @@
 
 这是为 linlishuo 的 Markflow 环境编写的个人工具，包含用户身份、SSH 入口和平台适配，并非开箱即用的多用户产品。
 
+## ServerBox 融合
+
+`serverbox/` 为带 GPU 桥接、账号线程卡片和 Mac 自动重连的完整原生客户端源码。
+网页新增逐实例 GPU 监控、页面内趋势、JSON 导出及账号线程面板；原生客户端新增任务台入口与暖纸色主题。
+关于页捐赠与产品推广已移除；源码中未发现内购或功能订阅锁。
+
+详见 [融合范围与验证](docs/SERVER-MONITOR.md) 和 [原生构建说明](serverbox/README.gpu-console.md)。
+原生构建仍需 Flutter/Xcode/Rust 及所列依赖；当前改动没有更新线上服务或发布 Mac 安装包。
+ServerBox 与其依赖保留各自许可证和来源信息。
+
 ## 组成
 
 - `gpuqueue/`：任务固定版本、启动授权、队列控制、平台资源适配及本地网页服务。
