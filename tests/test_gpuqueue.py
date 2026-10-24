@@ -105,12 +105,13 @@ class QueueTests(unittest.TestCase):
   service.record_release_intents([first,second]);self.assertEqual(adapter.resources[rid]['release']['state'],'armed')
   second['public']['state']='completed';service.record_release_intents([first,second])
   intent=read_json(self.store.root/'release-intents'/(rid+'.json'))
-  self.assertEqual(intent['state'],'pending_interface');self.assertFalse(intent['released'])
+  self.assertEqual(intent['state'],'grace_period');self.assertFalse(intent['released'])
+  self.assertEqual(intent['release_after']-intent['idle_since'],5400)
   self.assertEqual(adapter.resources[rid]['status'],'online');adapter.run.assert_not_called()
   service.record_release_intents([first,second]);self.assertEqual(intent,read_json(self.store.root/'release-intents'/(rid+'.json')))
  def test_unapproved_tasks_do_not_hold_a_card(self):
   service,adapter,rid=self.release_service();task=self.task()
-  service.record_release_intents([task]);self.assertEqual(adapter.resources[rid]['release']['state'],'pending_interface')
+  service.record_release_intents([task]);self.assertEqual(adapter.resources[rid]['release']['state'],'grace_period')
  def test_uncertain_execution_or_submission_does_not_mark_queue_done(self):
   service,adapter,rid=self.release_service();task=self.task();task['internal']['approved_at']='now'
   task['public']['state']='execution_unknown';service.record_release_intents([task]);self.assertEqual(adapter.resources[rid]['release']['state'],'armed')
@@ -119,6 +120,79 @@ class QueueTests(unittest.TestCase):
   service,adapter,rid=self.release_service();adapter.resources[rid]['owned_by_gpuq']=False
   service.record_release_intents([]);self.assertNotIn('release',adapter.resources[rid])
   self.assertFalse((self.store.root/'release-intents'/(rid+'.json')).exists())
+
+ def test_release_waits_full_90_minutes_and_survives_service_restart(self):
+  service,adapter,rid=self.release_service();task=self.task()
+  task['internal']['approved_at']='now';task['public']['state']='completed'
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([task])
+  initial=read_json(self.store.root/'release-intents'/(rid+'.json'))
+  # Recreate both service and adapter from persisted metadata, not process memory.
+  adapter=Markflow(self.store,{'username':'linlishuo','home':str(self.root)})
+  adapter.run=Mock();service=Service({},self.store,adapter)
+  with patch('gpuqueue.service.time.time',return_value=6399):service.record_release_intents([task])
+  self.assertEqual(read_json(self.store.root/'release-intents'/(rid+'.json')),initial)
+  with patch('gpuqueue.service.time.time',return_value=6400):service.record_release_intents([task])
+  release=adapter.resources[rid]['release']
+  self.assertEqual(release['state'],'pending_interface');self.assertFalse(release['released'])
+  self.assertEqual(release['idle_since'],1000);self.assertEqual(adapter.resources[rid]['status'],'online')
+  adapter.run.assert_not_called()
+
+ def test_new_approved_task_cancels_and_restarts_grace_period(self):
+  service,adapter,rid=self.release_service();task=self.task()
+  task['internal']['approved_at']='now';task['public']['state']='completed'
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([task])
+  self.manifest['title']='new approved task';second=self.task()
+  second['internal']['approved_at']='later';second['public']['state']='queued'
+  with patch('gpuqueue.service.time.time',return_value=6000):service.record_release_intents([task,second])
+  self.assertEqual(adapter.resources[rid]['release']['state'],'armed')
+  self.assertNotIn('release_after',adapter.resources[rid]['release'])
+  second['public']['state']='completed'
+  with patch('gpuqueue.service.time.time',return_value=6500):service.record_release_intents([task,second])
+  self.assertEqual(adapter.resources[rid]['release']['release_after'],11900)
+
+ def test_task_completed_during_downtime_also_restarts_grace_period(self):
+  service,adapter,rid=self.release_service();task=self.task()
+  task['internal']['approved_at']='now';task['public']['state']='completed'
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([task])
+  self.manifest['title']='completed during downtime';second=self.task()
+  second['internal']['approved_at']='later';second['public']['state']='completed'
+  with patch('gpuqueue.service.time.time',return_value=7000):service.record_release_intents([task,second])
+  self.assertEqual(adapter.resources[rid]['release']['state'],'grace_period')
+  self.assertEqual(adapter.resources[rid]['release']['release_after'],12400)
+
+ def test_old_immediate_intent_migrates_to_full_grace_period(self):
+  service,adapter,rid=self.release_service()
+  adapter.resources[rid]['release']={'state':'pending_interface','released':False,'at':'old'}
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([])
+  self.assertEqual(adapter.resources[rid]['release']['release_after'],6400)
+  self.assertEqual(adapter.resources[rid]['release']['state'],'grace_period')
+
+ def test_disabling_policy_clears_timer_and_reenabling_starts_fresh(self):
+  service,adapter,rid=self.release_service()
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([])
+  self.store.metadata('resource_policy',{'release_when_queue_idle':False})
+  service.record_release_intents([])
+  self.assertEqual(adapter.resources[rid]['release']['state'],'disabled')
+  self.assertNotIn('release_after',adapter.resources[rid]['release'])
+  self.store.metadata('resource_policy',{'release_when_queue_idle':True})
+  with patch('gpuqueue.service.time.time',return_value=7000):service.record_release_intents([])
+  self.assertEqual(adapter.resources[rid]['release']['release_after'],12400)
+
+ def test_clock_rollback_and_invalid_persisted_time_restart_safely(self):
+  service,adapter,rid=self.release_service()
+  with patch('gpuqueue.service.time.time',return_value=1000):service.record_release_intents([])
+  with patch('gpuqueue.service.time.time',return_value=900):service.record_release_intents([])
+  self.assertEqual(adapter.resources[rid]['release']['release_after'],6300)
+  for invalid in [None,'900',float('nan'),float('inf'),True,-1]:
+   adapter.resources[rid]['release']['idle_since']=invalid
+   with patch('gpuqueue.service.time.time',return_value=2000):service.record_release_intents([])
+   self.assertEqual(adapter.resources[rid]['release']['release_after'],7400)
+
+ def test_closed_failed_and_opted_out_resources_are_untouched(self):
+  for status,opted_in in [('closed',True),('failed',True),('online',False)]:
+   service,adapter,rid=self.release_service()
+   adapter.resources[rid].update(status=status,release_when_done=opted_in)
+   service.record_release_intents([]);self.assertNotIn('release',adapter.resources[rid])
 
  def h100_adapter(self):
   adapter=Markflow(self.store,{'username':'linlishuo'})
