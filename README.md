@@ -16,6 +16,16 @@
 
 [下载 macOS 桌面小组件 1.1.3](https://raw.githubusercontent.com/Ferryyer/gpu-queue/main/downloads/GPU-Queue-Widget-1.1.3-macOS.zip) · [校验和](downloads/SHA256SUMS)
 
+## 1.1.2 更新报“安装包文件清单不符”
+
+可手动安装 [1.1.4 修复包](https://raw.githubusercontent.com/Ferryyer/gpu-queue/codex/mf-8-widget-update-fix/downloads/GPU-Queue-Widget-1.1.4-macOS.zip)。
+退出小组件及更新窗口，完整解压 ZIP，双击“安装桌面小组件.command”覆盖安装。
+安装保留 SSH 配置、窗口位置和偏好；服务器任务继续运行。旧更新器在安装新版前就会报错，因此需要这一次手动覆盖。
+
+1.1.4 直接校验 ZIP 中央目录与文件头，保留下载大小、SHA-256、精确文件白名单和文件类型/大小检查，不再解析 macOS `unzip` 输出。
+修复包目前在上述审阅分支和 issue 附件，正式更新入口仍为 1.1.3；未改动已发布的旧版包。
+验证与限制见 [更新修复说明](docs/widget-update-1.1.4.md)。
+
 ## 安装桌面小组件
 
 完整解压 `downloads/GPU-Queue-Widget-1.1.3-macOS.zip`，双击“安装桌面小组件.command”。如果旧更新器报“安装包文件路径无效”，先退出旧面板和更新窗口，再覆盖安装一次。
