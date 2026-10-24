@@ -3,6 +3,26 @@ import 'package:server_box/core/gpu_queue/protocol.dart';
 /// Human-readable queue data. Missing values stay missing, and historical GPU
 /// readings never become live metrics merely because an SSH session is open.
 abstract final class QueuePresentation {
+  static String taskStatus(Object? state) =>
+      const {
+        'ready': '待开始',
+        'queued': '队列中',
+        'waiting_gpu': '等待 GPU',
+        'checking_resources': '核查资源',
+        'dispatching': '正在投放',
+        'starting': '启动中',
+        'running': '运行中',
+        'stopping': '正在停止',
+        'stopped': '已停止',
+        'cancelled': '已取消',
+        'completed': '已完成',
+        'failed': '失败',
+        'blocked': '需核查',
+        'execution_unknown': '执行状态待核查',
+        'interrupted': '已中断',
+      }[state] ??
+      '状态待核查';
+
   static num? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value : null;
   static String _decimal(num value) => value == value.roundToDouble()
@@ -19,6 +39,13 @@ abstract final class QueuePresentation {
         : const {};
     return '申请 GPU：${_requirement(resources['gpus'], '张 GPU')} · '
         '每卡显存：${_requirement(resources['memory_gb'] ?? task['memory'], 'GB')}';
+  }
+
+  static String compactRequirements(Map<String, dynamic> task) {
+    final resources = task['resources'] is Map
+        ? task['resources'] as Map
+        : const {};
+    return '${_requirement(resources['gpus'], 'GPU')} / ${_requirement(resources['memory_gb'] ?? task['memory'], 'GB')}';
   }
 
   static String version(Map<String, dynamic> task) {

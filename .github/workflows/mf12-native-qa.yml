@@ -75,10 +75,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ github.sha }}
         run: |
-          tag=v2.0.2000-preview.1
+          tag=v2.0.2001-preview.2
           gh release create "$tag" build/unified-release/* \
             --repo Ferryyer/gpu-queue --target "$CANDIDATE_SHA" \
-            --prerelease --latest=false --title 'GPU Queue 2.0.2000 · Mac 验收预览 1' \
+            --prerelease --latest=false --title 'GPU Queue 2.0.2001 · 原生设计预览 2' \
             --notes-file build/unified-release/RELEASE-NOTES.md
       - name: Upload native evidence and unsigned QA app
         if: always()

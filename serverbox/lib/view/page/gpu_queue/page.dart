@@ -13,6 +13,7 @@ import 'package:server_box/data/provider/server/single.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/data/ssh/terminal_source.dart';
 import 'package:server_box/view/page/gpu_queue/resource.dart';
+import 'package:server_box/view/page/gpu_queue/workspace.dart';
 import 'package:server_box/view/page/server/detail/view.dart';
 import 'package:server_box/view/page/ssh/page/page.dart';
 import 'package:server_box/view/page/storage/sftp.dart';
@@ -32,13 +33,14 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
   @override
   bool get wantKeepAlive => true;
   String? _selected;
-  String _query = '', _filter = 'all';
+  String _query = '', _filter = 'all', _sort = 'latest';
+  int _detailTab = 0;
+  final _search = TextEditingController();
   final _listScroll = ScrollController();
-  final _detailScroll = ScrollController();
   @override
   void dispose() {
+    _search.dispose();
     _listScroll.dispose();
-    _detailScroll.dispose();
     super.dispose();
   }
 
@@ -130,8 +132,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
 
   void _message(Object text) {
     if (mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('$text')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$text')));
     }
   }
 
@@ -209,25 +212,37 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     'failed',
     'interrupted',
   ];
-  static const _labels = {
-    'ready': '待启动',
-    'queued': '队列中',
-    'waiting_gpu': '等待 GPU',
-    'checking_resources': '核查资源',
-    'dispatching': '正在投放',
-    'starting': '启动中',
-    'running': '运行中',
-    'stopping': '正在停止',
-    'stopped': '已停止',
-    'cancelled': '已取消',
-    'completed': '已完成',
-    'failed': '失败',
-    'blocked': '需核查',
-    'execution_unknown': '执行状态待核查',
-    'interrupted': '已中断',
-  };
-  String _status(Map<String, dynamic> task) =>
-      _labels[task['state']] ?? '${task['state']}';
+  Widget _serverSelector(String service, Map<String, Spi> servers) => SizedBox(
+    width: MediaQuery.sizeOf(context).width < 1000 ? 150 : 204,
+    child: DropdownButtonFormField<String>(
+      key: ValueKey(service),
+      initialValue: servers[service]?.sshOn != null ? service : null,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      ),
+      hint: const Text('选择任务服务', style: TextStyle(fontSize: 13)),
+      items: [
+        for (final spi in servers.values.where((s) => s.sshOn != null))
+          DropdownMenuItem(
+            value: spi.id,
+            child: Text(
+              spi.name,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13),
+            ),
+          ),
+      ],
+      onChanged: (id) {
+        if (id == null) return;
+        setState(() {
+          _selected = null;
+          _detailTab = 0;
+        });
+        Stores.setting.gpuQueueServer.put(id);
+      },
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -237,62 +252,26 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
       valueListenable: Stores.setting.gpuQueueServer.listenable(),
       builder: (context, _, _) {
         final service = Stores.setting.gpuQueueServer.fetch();
-        final available = servers.values.where((s) => s.sshOn != null).toList();
+        if (servers[service]?.sshOn != null) {
+          return _workspace(service, servers);
+        }
         return Scaffold(
           appBar: AppBar(
-            title: Text(
-              widget.overview
-                  ? '总览'
-                  : widget.serverFilter != null
-                  ? '关联任务'
-                  : '任务',
-            ),
-          ),
-          body: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 8,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButton<String>(
-                        isExpanded: true,
-                        value: available.any((s) => s.id == service)
-                            ? service
-                            : null,
-                        hint: const Text('选择任务服务所在的已有服务器'),
-                        items: [
-                          for (final spi in available)
-                            DropdownMenuItem(
-                              value: spi.id,
-                              child: Text(spi.name),
-                            ),
-                        ],
-                        onChanged: (id) {
-                          if (id != null) Stores.setting.gpuQueueServer.put(id);
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (available.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('请先在「服务器」添加或导入 SSH 配置。密钥与密码继续使用原有安全存储。'),
-                ),
-              if (available.isNotEmpty && !servers.containsKey(service))
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('选择运行个人任务服务的服务器。应用将复用其 SSH 会话，无需另建网页转发。'),
-                ),
-              if (servers.containsKey(service) &&
-                  servers[service]!.sshOn != null)
-                Expanded(child: _workspace(service, servers)),
+            title: const Text('任务'),
+            actions: [
+              _serverSelector(service, servers),
+              const SizedBox(width: 24),
             ],
+          ),
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Text(
+                servers.values.any((s) => s.sshOn != null)
+                    ? '选择运行个人任务服务的服务器。'
+                    : '请先在「服务器」添加或导入 SSH 配置。密钥与密码继续使用原有安全存储。',
+              ),
+            ),
           ),
         );
       },
@@ -306,12 +285,29 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
       listenable: queue,
       builder: (context, _) {
         final connected = queue.connected && ssh != null && !ssh.isClosed;
+        final sshAvailable = ssh != null && !ssh.isClosed;
+        final fresh = queue.resources.any(
+          (r) => QueueTarget.fresh(r, DateTime.now(), connected: connected),
+        );
         final tasks = queue.tasks.where((task) {
           if (widget.serverFilter != null &&
               _target(service, task, servers)?.id != widget.serverFilter) {
             return false;
           }
           if (_filter == 'ready' && task['state'] != 'ready') return false;
+          if (_filter == 'running' &&
+              !['running', 'starting', 'stopping'].contains(task['state'])) {
+            return false;
+          }
+          if (_filter == 'failed' &&
+              ![
+                'failed',
+                'interrupted',
+                'blocked',
+                'execution_unknown',
+              ].contains(task['state'])) {
+            return false;
+          }
           if (_filter == 'history' && !_ended.contains(task['state'])) {
             return false;
           }
@@ -319,233 +315,455 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               .toLowerCase()
               .contains(_query.toLowerCase());
         }).toList();
+        if (_sort == 'name') {
+          tasks.sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
+        } else {
+          num timestamp(Map<String, dynamic> t) {
+            final at = t['updated_at'] ?? t['created_at'];
+            return at is num
+                ? at
+                : DateTime.tryParse('$at')?.millisecondsSinceEpoch ?? 0;
+          }
+
+          tasks.sort((a, b) => timestamp(b).compareTo(timestamp(a)));
+        }
         final task = queue.tasks.where((t) => t['id'] == _selected).firstOrNull;
-        return Focus(
-          onKeyEvent: (node, event) {
-            final keys = HardwareKeyboard.instance;
-            if (event is! KeyDownEvent ||
-                event.logicalKey != LogicalKeyboardKey.tab ||
-                !keys.isShiftPressed ||
-                keys.isControlPressed ||
-                keys.isAltPressed ||
-                keys.isMetaPressed) {
-              return KeyEventResult.ignored;
-            }
-            if (FocusManager.instance.primaryFocus?.context
-                        ?.findAncestorWidgetOfExactType<EditableText>() !=
-                    null ||
-                ModalRoute.of(context)?.isCurrent != true) {
-              return KeyEventResult.ignored;
-            }
-            queue.setAuto(!queue.auto);
-            return KeyEventResult.handled;
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(
+              widget.overview
+                  ? '总览'
+                  : widget.serverFilter != null
+                  ? '关联任务'
+                  : '任务',
+            ),
+            actions: [
+              _serverSelector(service, servers),
+              const SizedBox(width: 16),
+              Tooltip(
+                message:
+                    'SSH：${sshAvailable ? '已连接' : '未连接'}\n任务服务：${connected ? '已连接' : '不可用'}\nGPU 采样：${fresh ? '实时' : '暂无数据'}',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'SSH · ${ssh != null && !ssh.isClosed ? '可用' : '未连接'}',
+                    Icon(
+                      connected
+                          ? Icons.check_circle_outline
+                          : Icons.error_outline,
+                      size: 14,
+                      color: connected
+                          ? Theme.of(context).colorScheme.secondary
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
-                    Text(
-                      '任务服务 · ${queue.loading
-                          ? '同步中'
-                          : connected
-                          ? '可用'
-                          : '不可用'}',
-                    ),
-                    Text(
-                      'GPU 采样 · ${queue.resources.any((r) => QueueTarget.fresh(r, DateTime.now(), connected: connected)) ? '实时' : '暂无实时读数'}',
-                    ),
-                    OutlinedButton(
-                      onPressed: queue.loading || queue.acting
-                          ? null
-                          : () => queue.refresh(connect: true),
-                      child: const Text('连接 / 重试'),
-                    ),
-                    OutlinedButton(
-                      onPressed: () => queue.setAuto(!queue.auto),
-                      child: Text(
-                        '${queue.auto ? 'Auto' : 'Edit'} mode · ⇧Tab',
+                    const SizedBox(width: 6),
+                    if (MediaQuery.sizeOf(context).width >= 1000)
+                      Text(
+                        connected
+                            ? '已连接'
+                            : queue.loading
+                            ? '连接中'
+                            : '连接失败',
+                        style: Theme.of(context).textTheme.bodySmall,
                       ),
-                    ),
                   ],
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 8,
-                ),
-                child: Text(
-                  queue.auto
-                      ? '仅监看已授权队列；新任务仍需切回 Edit 并点击开始。'
-                      : '提交、连接与切换模式均不会授权任务。点击开始才会执行这一版。',
-                ),
+              IconButton(
+                tooltip: '重试连接',
+                onPressed: queue.loading || queue.acting
+                    ? null
+                    : () => queue.refresh(connect: true),
+                icon: const Icon(Icons.refresh),
               ),
+              IconButton(
+                tooltip: '队列策略与连接状态',
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (context) => ListenableBuilder(
+                    listenable: queue,
+                    builder: (context, _) => AlertDialog(
+                      title: const Text('队列策略与连接状态'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('SSH · ${sshAvailable ? '已连接' : '未连接'}'),
+                          Text('任务服务 · ${connected ? '已连接' : '不可用'}'),
+                          Text('GPU 采样 · ${fresh ? '实时' : '暂无数据'}'),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('自动监看已授权队列'),
+                            value: queue.auto,
+                            onChanged: queue.setAuto,
+                          ),
+                          const Text('仅监看已授权队列，不授权新任务。关闭后可手动点击开始或调整顺序。'),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('关闭'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                icon: const Icon(Icons.tune),
+              ),
+              const SizedBox(width: 12),
+            ],
+          ),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Divider(),
               if (queue.error != null)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 8,
+                  ),
                   child: Row(
                     children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 16,
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '${queue.error}\n上次数据 · 非实时',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
+                          '任务服务不可用 · 保留上次快照（非实时） · 上次同步：${queue.sampledAt?.toLocal().toString().split('.').first ?? '未提供'}',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
-                      IconButton(
-                        tooltip: '复制错误',
-                        onPressed: () => Clipboard.setData(
-                          ClipboardData(text: queue.error!),
+                      TextButton(
+                        onPressed: () => showDialog<void>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('连接错误'),
+                            content: SelectableText(queue.error!),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Clipboard.setData(
+                                  ClipboardData(text: queue.error!),
+                                ),
+                                child: const Text('复制错误'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('关闭'),
+                              ),
+                            ],
+                          ),
                         ),
-                        icon: const Icon(Icons.copy),
+                        child: const Text('查看错误'),
                       ),
                     ],
                   ),
                 ),
-              if (queue.loading) const LinearProgressIndicator(),
+              SizedBox(
+                height: 2,
+                child: queue.loading
+                    ? const LinearProgressIndicator(minHeight: 2)
+                    : null,
+              ),
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, bounds) {
                     final wide = bounds.maxWidth >= 850;
-                    final list = Column(
-                      children: [
-                        if (widget.overview)
-                          Padding(
-                            padding: const EdgeInsets.all(20),
-                            child: Text(
-                              '每个实验，都有进展。\n${queue.tasks.where((t) => t['state'] == 'ready').length} 个待启动 · ${queue.tasks.where((t) => t['state'] == 'running').length} 个运行中',
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(
-                                    fontFamily: 'Georgia',
-                                    fontFamilyFallback: const [
-                                      'Songti SC',
-                                      'Noto Serif CJK SC',
-                                    ],
-                                  ),
-                            ),
-                          ),
-                        Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: TextField(
-                            decoration: const InputDecoration(
-                              labelText: '搜索任务',
-                              prefixIcon: Icon(Icons.search),
-                            ),
-                            onChanged: (value) =>
-                                setState(() => _query = value),
-                          ),
-                        ),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            for (final entry in {
-                              'all': '全部',
-                              'ready': '待启动',
-                              'history': '已结束',
-                            }.entries)
-                              ChoiceChip(
-                                label: Text(entry.value),
-                                selected: _filter == entry.key,
-                                onSelected: (_) =>
-                                    setState(() => _filter = entry.key),
-                              ),
-                          ],
-                        ),
-                        Expanded(
-                          child: tasks.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    queue.loading
-                                        ? '正在加载…'
-                                        : widget.serverFilter != null
-                                        ? '暂无已明确关联此服务器的任务。\n请在任务详情关联实例。'
-                                        : '暂无匹配任务。\n通过 gpuq submit 提交后在这里点击开始。',
-                                  ),
-                                )
-                              : ListView.builder(
-                                  controller: _listScroll,
-                                  itemCount: tasks.length,
-                                  itemBuilder: (context, index) {
-                                    final task = tasks[index];
-                                    return ListTile(
-                                      key: ValueKey(task['id']),
-                                      selected: _selected == task['id'],
-                                      title: Text('${task['name']}'),
-                                      subtitle: Text(
-                                        '${_status(task)} · ${task['project'] ?? ''}\n${task['id']}',
-                                      ),
-                                      isThreeLine: true,
-                                      trailing: const Icon(Icons.chevron_right),
-                                      onTap: () {
-                                        setState(() => _selected = task['id']);
-                                        if (!wide) {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(
-                                              builder: (_) => _MobileDetail(
-                                                queue: queue,
-                                                taskId: task['id'],
-                                                buildDetail: (t) => _detail(
-                                                  service,
-                                                  queue,
-                                                  t,
-                                                  servers,
-                                                  mobile: true,
-                                                ),
-                                              ),
+                    final showDetail = wide && task != null;
+                    final list = Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _search,
+                                  style: const TextStyle(fontSize: 13),
+                                  decoration: InputDecoration(
+                                    hintText: '搜索任务或项目',
+                                    prefixIcon: const Icon(
+                                      Icons.search,
+                                      size: 18,
+                                    ),
+                                    suffixIcon: _query.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            tooltip: '清除搜索',
+                                            onPressed: () {
+                                              _search.clear();
+                                              setState(() => _query = '');
+                                            },
+                                            icon: const Icon(
+                                              Icons.close,
+                                              size: 16,
                                             ),
-                                          );
-                                        }
-                                      },
-                                    );
-                                  },
+                                          ),
+                                  ),
+                                  onChanged: (value) =>
+                                      setState(() => _query = value),
                                 ),
-                        ),
-                        ExpansionTile(
-                          title: const Text('服务器与 GPU · 展开监控'),
-                          children: [
-                            SizedBox(
-                              height: 180,
-                              child: ListView(
-                                children: [
-                                  if (queue.resources.isEmpty)
-                                    const ListTile(title: Text('尚无 GPU 实例')),
-                                  for (final resource in queue.resources)
-                                    QueueResourceView(
-                                      resource: resource,
-                                      connected: connected,
+                              ),
+                              const SizedBox(width: 12),
+                              DropdownButton<String>(
+                                value: _filter,
+                                underline: const SizedBox.shrink(),
+                                items: [
+                                  for (final e in const {
+                                    'all': '所有状态',
+                                    'ready': '待开始',
+                                    'running': '运行中',
+                                    'failed': '失败',
+                                    'history': '已结束',
+                                  }.entries)
+                                    DropdownMenuItem(
+                                      value: e.key,
+                                      child: Text(
+                                        e.value,
+                                        style: const TextStyle(fontSize: 13),
+                                      ),
                                     ),
                                 ],
+                                onChanged: (value) =>
+                                    setState(() => _filter = value!),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    );
-                    return wide
-                        ? Row(
-                            children: [
-                              SizedBox(width: 360, child: list),
-                              const VerticalDivider(width: 1),
-                              Expanded(
-                                child: task == null
-                                    ? const Center(
-                                        child: Text('选择一个任务，查看步骤与结果。'),
-                                      )
-                                    : _detail(service, queue, task, servers),
+                              const SizedBox(width: 12),
+                              DropdownButton<String>(
+                                value: _sort,
+                                underline: const SizedBox.shrink(),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'latest',
+                                    child: Text(
+                                      '最新',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'name',
+                                    child: Text(
+                                      '名称',
+                                      style: TextStyle(fontSize: 13),
+                                    ),
+                                  ),
+                                ],
+                                onChanged: (value) =>
+                                    setState(() => _sort = value!),
                               ),
                             ],
-                          )
-                        : list;
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.overview ? '任务总览' : '全部任务',
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                              ),
+                              Text(
+                                '${queue.tasks.where((t) => t['state'] == 'ready').length} 个待开始 · ${queue.tasks.where((t) => t['state'] == 'failed').length} 个失败',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Expanded(
+                            child: tasks.isEmpty
+                                ? Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          queue.loading ? '正在加载…' : '暂无匹配任务',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.headlineSmall,
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          widget.serverFilter != null
+                                              ? '请在任务详情关联实际服务器。'
+                                              : _query.isNotEmpty ||
+                                                    _filter != 'all'
+                                              ? '试试其他关键词或状态。'
+                                              : '提交任务后，在这里点击开始。',
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : QueuePanel(
+                                    child: Column(
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 20,
+                                            vertical: 9,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  '任务名称 / 项目',
+                                                  style: Theme.of(
+                                                    context,
+                                                  ).textTheme.bodySmall,
+                                                ),
+                                              ),
+                                              Text(
+                                                '状态',
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.bodySmall,
+                                              ),
+                                              if (!showDetail &&
+                                                  bounds.maxWidth > 650)
+                                                const SizedBox(width: 130),
+                                            ],
+                                          ),
+                                        ),
+                                        const Divider(),
+                                        Expanded(
+                                          child: ListView.builder(
+                                            key: PageStorageKey(
+                                              'tasks:$service',
+                                            ),
+                                            controller: _listScroll,
+                                            itemCount: tasks.length,
+                                            itemBuilder: (context, index) {
+                                              final current = tasks[index];
+                                              return QueueTaskRow(
+                                                key: ValueKey(current['id']),
+                                                task: current,
+                                                selected:
+                                                    _selected == current['id'],
+                                                action:
+                                                    !showDetail &&
+                                                        bounds.maxWidth > 650
+                                                    ? SizedBox(
+                                                        width: 100,
+                                                        child:
+                                                            current['state'] ==
+                                                                'ready'
+                                                            ? Tooltip(
+                                                                message:
+                                                                    queue.auto
+                                                                    ? '请在队列策略中关闭自动监看后开始'
+                                                                    : '点击才授权当前版本',
+                                                                child: FilledButton(
+                                                                  onPressed:
+                                                                      connected &&
+                                                                          !queue
+                                                                              .acting &&
+                                                                          !queue
+                                                                              .loading &&
+                                                                          !queue
+                                                                              .auto
+                                                                      ? () => _act(
+                                                                          queue,
+                                                                          current,
+                                                                          'start',
+                                                                        )
+                                                                      : null,
+                                                                  child:
+                                                                      const Text(
+                                                                        '开始',
+                                                                      ),
+                                                                ),
+                                                              )
+                                                            : TextButton(
+                                                                onPressed: () =>
+                                                                    _openTask(
+                                                                      current,
+                                                                      service,
+                                                                      queue,
+                                                                      servers,
+                                                                      wide,
+                                                                    ),
+                                                                child: Text(
+                                                                  current['state'] ==
+                                                                          'completed'
+                                                                      ? '打开结果'
+                                                                      : '查看日志',
+                                                                ),
+                                                              ),
+                                                      )
+                                                    : null,
+                                                onTap: () => _openTask(
+                                                  current,
+                                                  service,
+                                                  queue,
+                                                  servers,
+                                                  wide,
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            '共 ${tasks.length} 个任务 · 任务 ID 与工作目录在详情中查看',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 20),
+                          QueuePanel(
+                            child: ExpansionTile(
+                              title: const Text(
+                                'GPU',
+                                style: TextStyle(fontSize: 14),
+                              ),
+                              subtitle: Text(
+                                fresh
+                                    ? '实时采样'
+                                    : '暂无数据 · 上次采样：${queue.resources.isEmpty ? '未提供' : QueuePresentation.sampleAbsolute(queue.resources.first)}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                              children: [
+                                SizedBox(
+                                  height: 180,
+                                  child: ListView(
+                                    children: [
+                                      for (final resource in queue.resources)
+                                        QueueResourceView(
+                                          resource: resource,
+                                          connected: connected,
+                                        ),
+                                      if (queue.resources.isEmpty)
+                                        const ListTile(title: Text('暂无数据')),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                    return Row(
+                      children: [
+                        Expanded(child: list),
+                        if (showDetail) ...[
+                          const VerticalDivider(width: 1),
+                          SizedBox(
+                            width: 416,
+                            child: _detail(service, queue, task, servers),
+                          ),
+                        ],
+                      ],
+                    );
                   },
                 ),
               ),
@@ -554,6 +772,37 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         );
       },
     );
+  }
+
+  void _openTask(
+    Map<String, dynamic> task,
+    String service,
+    QueueSession queue,
+    Map<String, Spi> servers,
+    bool wide,
+  ) {
+    setState(() {
+      if (_selected != task['id']) {
+        _detailTab = task['state'] == 'failed'
+            ? 1
+            : task['state'] == 'completed'
+            ? 2
+            : 0;
+      }
+      _selected = task['id'];
+    });
+    if (!wide) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => _MobileDetail(
+            queue: queue,
+            taskId: task['id'],
+            buildDetail: (t) =>
+                _detail(service, queue, t, servers, mobile: true),
+          ),
+        ),
+      );
+    }
   }
 
   Widget _detail(
@@ -573,200 +822,239 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     final steps = (task['step_records'] as List? ?? [])
         .cast<Map<String, dynamic>>();
     final names = task['steps'] as List? ?? [];
-    return ListView(
-      key: PageStorageKey(task['id']),
-      controller: mobile ? null : _detailScroll,
+    Widget page(String name, List<Widget> children) => ListView(
+      key: PageStorageKey('${task['id']}:$name'),
       padding: const EdgeInsets.all(24),
-      children: [
-        Text(_status(task), style: Theme.of(context).textTheme.labelLarge),
-        Text(
-          '${task['name']}',
-          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-            fontFamily: 'Georgia',
-            fontFamilyFallback: const ['Songti SC', 'Noto Serif CJK SC'],
-          ),
-        ),
-        SelectableText(
-          '${task['description'] ?? ''}\n${task['id']}\n授权：${task['approved_at'] ?? '等待点击开始'}',
-        ),
-        const SizedBox(height: 16),
-        Text('申请资源需求', style: Theme.of(context).textTheme.titleMedium),
-        SelectableText(QueuePresentation.requirements(task)),
-        SelectableText('固定版本：${QueuePresentation.version(task)}'),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
+      children: children,
+    );
+    return StatefulBuilder(
+      builder: (context, updateDetail) => QueueDetailPane(
+        task: task,
+        tab: _detailTab,
+        onTab: (tab) {
+          setState(() => _detailTab = tab);
+          updateDetail(() {});
+        },
+        onClose: () {
+          if (mobile) {
+            Navigator.pop(context);
+          } else {
+            setState(() => _selected = null);
+          }
+        },
+        child: IndexedStack(
+          index: _detailTab,
           children: [
-            if (task['state'] == 'ready')
-              FilledButton(
-                onPressed: enabled && !queue.auto
-                    ? () => _act(queue, task, 'start')
-                    : null,
-                child: const Text('开始这一版任务'),
+            page('overview', [
+              SelectableText(
+                '${task['name']}\n任务 ID：${task['id']}\n授权：${task['approved_at'] ?? '等待点击开始'}\n${task['description'] ?? ''}',
+                style: const TextStyle(fontSize: 12),
               ),
-            if (!_ended.contains(task['state']))
-              OutlinedButton(
-                onPressed: enabled && task['state'] != 'stopping'
-                    ? () => _act(queue, task, 'stop')
-                    : null,
-                child: Text(task['state'] == 'stopping' ? '等待停止确认…' : '停止任务'),
-              ),
-            if (_reorderable(task)) ...[
-              IconButton(
-                tooltip: '队列向前移动',
-                onPressed: enabled && !queue.auto
-                    ? () => _move(queue, task, -1)
-                    : null,
-                icon: const Icon(Icons.arrow_upward),
-              ),
-              IconButton(
-                tooltip: '队列向后移动',
-                onPressed: enabled && !queue.auto
-                    ? () => _move(queue, task, 1)
-                    : null,
-                icon: const Icon(Icons.arrow_downward),
-              ),
-            ],
-          ],
-        ),
-        if (task['failureReason'] != null)
-          SelectableText(
-            '${task['failureReason']}',
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
-        if (task['phase'] != null) Text('${task['phase']}'),
-        const Divider(height: 32),
-        SelectableText(
-          'GPU 实例：${QueueTarget.instance(task) ?? '尚未分配'}\n服务器：${target?.name ?? '尚未关联服务器'}\n工作目录：${directory ?? '等待执行端提供'}',
-        ),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            TextButton(
-              onPressed: QueueTarget.instance(task) == null
-                  ? null
-                  : () => _bind(service, task, servers),
-              child: const Text('关联 / 更改服务器'),
-            ),
-            OutlinedButton(
-              onPressed: target == null
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ServerDetailPage(args: SpiRequiredArgs(target)),
+              const SizedBox(height: 16),
+              Text('申请资源需求', style: Theme.of(context).textTheme.titleMedium),
+              SelectableText(QueuePresentation.requirements(task)),
+              SelectableText('固定版本：${QueuePresentation.version(task)}'),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (task['state'] == 'ready')
+                    FilledButton(
+                      onPressed: enabled && !queue.auto
+                          ? () => _act(queue, task, 'start')
+                          : null,
+                      child: const Text('开始这一版任务'),
+                    ),
+                  if (!_ended.contains(task['state']))
+                    OutlinedButton(
+                      onPressed: enabled && task['state'] != 'stopping'
+                          ? () => _act(queue, task, 'stop')
+                          : null,
+                      child: Text(
+                        task['state'] == 'stopping' ? '等待停止确认…' : '停止任务',
                       ),
                     ),
-              child: const Text('服务器 / GPU'),
-            ),
-            OutlinedButton(
-              onPressed: target == null
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SSHPage(
-                          args: SshPageArgs(
-                            source: ServerSource(target),
-                            initCmd: directory == null
-                                ? null
-                                : 'cd -- ${QueueProtocol.quote(directory)}',
-                          ),
-                        ),
-                      ),
+                  if (_reorderable(task)) ...[
+                    IconButton(
+                      tooltip: '队列向前移动',
+                      onPressed: enabled && !queue.auto
+                          ? () => _move(queue, task, -1)
+                          : null,
+                      icon: const Icon(Icons.arrow_upward),
                     ),
-              child: const Text('SSH 终端'),
-            ),
-            OutlinedButton(
-              onPressed: target == null || directory == null
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SftpPage(
-                          args: SftpPageArgs(spi: target, initPath: directory),
-                        ),
-                      ),
+                    IconButton(
+                      tooltip: '队列向后移动',
+                      onPressed: enabled && !queue.auto
+                          ? () => _move(queue, task, 1)
+                          : null,
+                      icon: const Icon(Icons.arrow_downward),
                     ),
-              child: const Text('工作目录 / SFTP'),
-            ),
-          ],
-        ),
-        if (resource != null)
-          QueueResourceView(resource: resource, connected: queue.connected),
-        const Divider(height: 32),
-        Text('执行步骤与日志', style: Theme.of(context).textTheme.titleLarge),
-        for (var index = 0; index < names.length; index++)
-          ExpansionTile(
-            key: PageStorageKey('${task['id']}:$index'),
-            title: Text('${index + 1}. ${names[index]}'),
-            subtitle: Text(
-              QueuePresentation.stepStatus(
-                index < steps.length ? steps[index]['state'] : null,
+                  ],
+                ],
               ),
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: SelectableText(
-                    index < steps.length
-                        ? '${steps[index]['log'] ?? '暂无日志'}'
-                        : '暂无日志',
-                    style: const TextStyle(fontFamily: 'monospace'),
-                  ),
+              if (task['failureReason'] != null)
+                SelectableText(
+                  '${task['failureReason']}',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
+              if (task['phase'] != null) Text('${task['phase']}'),
+              const Divider(height: 32),
+              SelectableText(
+                'GPU 实例：${QueueTarget.instance(task) ?? '尚未分配'}\n服务器：${target?.name ?? '尚未关联服务器'}\n工作目录：${directory ?? '等待执行端提供'}',
               ),
-            ],
-          ),
-        if (task['entry_log'] != null) SelectableText('${task['entry_log']}'),
-        if (task['stop_log'] != null)
-          SelectableText('停止日志：${task['stop_log']}'),
-        const SizedBox(height: 24),
-        Text('结果文件', style: Theme.of(context).textTheme.titleLarge),
-        if (steps.every((s) => (s['outputs'] as List? ?? []).isEmpty))
-          const Text('尚无已验证产物。成功步骤的结果将出现在这里。'),
-        for (final step in steps)
-          for (final file in step['outputs'] as List? ?? [])
-            ListTile(
-              title: Text('${file['name']}'),
-              subtitle: SelectableText(
-                '${file['path']} · ${file['size']} bytes',
-              ),
-              trailing: IconButton(
-                tooltip: '复制路径',
-                onPressed: () =>
-                    Clipboard.setData(ClipboardData(text: '${file['path']}')),
-                icon: const Icon(Icons.copy),
-              ),
-              onTap:
-                  target == null ||
-                      file['path'] is! String ||
-                      !(file['path'] as String).startsWith('/')
-                  ? null
-                  : () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => SftpPage(
-                          args: SftpPageArgs(
-                            spi: target,
-                            initPath: (file['path'] as String).substring(
-                              0,
-                              (file['path'] as String).lastIndexOf('/'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: QueueTarget.instance(task) == null
+                        ? null
+                        : () => _bind(service, task, servers),
+                    child: const Text('关联 / 更改服务器'),
+                  ),
+                  OutlinedButton(
+                    onPressed: target == null
+                        ? null
+                        : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ServerDetailPage(
+                                args: SpiRequiredArgs(target),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
+                    child: const Text('服务器 / GPU'),
+                  ),
+                  OutlinedButton(
+                    onPressed: target == null
+                        ? null
+                        : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SSHPage(
+                                args: SshPageArgs(
+                                  source: ServerSource(target),
+                                  initCmd: directory == null
+                                      ? null
+                                      : 'cd -- ${QueueProtocol.quote(directory)}',
+                                ),
+                              ),
+                            ),
+                          ),
+                    child: const Text('SSH 终端'),
+                  ),
+                  OutlinedButton(
+                    onPressed: target == null || directory == null
+                        ? null
+                        : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SftpPage(
+                                args: SftpPageArgs(
+                                  spi: target,
+                                  initPath: directory,
+                                ),
+                              ),
+                            ),
+                          ),
+                    child: const Text('工作目录 / SFTP'),
+                  ),
+                ],
+              ),
+              if (resource != null)
+                QueueResourceView(
+                  resource: resource,
+                  connected: queue.connected,
+                ),
+              const SizedBox(height: 24),
+              Text('准备检查与事件', style: Theme.of(context).textTheme.titleLarge),
+              for (final line in [
+                ...(task['checks'] as List? ?? []),
+                ...(task['events'] as List? ?? []),
+              ])
+                Text('· $line'),
+            ]),
+            page('logs', [
+              Text(
+                QueuePresentation.compactRequirements(task),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 16),
+              for (var index = 0; index < names.length; index++) ...[
+                QueueLogView(
+                  key: ValueKey('${task['id']}:$index'),
+                  label:
+                      '步骤 ${index + 1} · ${names[index]} · ${QueuePresentation.stepStatus(index < steps.length ? steps[index]['state'] : null)}',
+                  text: index < steps.length
+                      ? '${steps[index]['log'] ?? '暂无日志'}'
+                      : '暂无日志',
+                ),
+                const SizedBox(height: 16),
+              ],
+              if (names.isEmpty) const Text('暂无步骤日志'),
+              if (task['entry_log'] != null)
+                QueueLogView(label: '入口日志', text: '${task['entry_log']}'),
+              if (task['stop_log'] != null)
+                QueueLogView(label: '停止日志', text: '${task['stop_log']}'),
+              if (task['failureReason'] != null) ...[
+                const SizedBox(height: 16),
+                SelectableText(
+                  '${task['failureReason']}',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                TextButton(
+                  onPressed: () => Clipboard.setData(
+                    ClipboardData(text: '${task['failureReason']}'),
+                  ),
+                  child: const Text('复制错误'),
+                ),
+              ],
+              const SizedBox(height: 16),
+              SelectableText(
+                '固定版本：${QueuePresentation.version(task)}',
+                style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
+              ),
+            ]),
+            page('results', [
+              const SizedBox(height: 24),
+              Text('结果文件', style: Theme.of(context).textTheme.titleLarge),
+              if (steps.every((s) => (s['outputs'] as List? ?? []).isEmpty))
+                const Text('尚无已验证产物。成功步骤的结果将出现在这里。'),
+              for (final step in steps)
+                for (final file in step['outputs'] as List? ?? [])
+                  ListTile(
+                    title: Text('${file['name']}'),
+                    subtitle: SelectableText(
+                      '${file['path']} · ${file['size']} bytes',
                     ),
-            ),
-        const SizedBox(height: 24),
-        Text('准备检查与事件', style: Theme.of(context).textTheme.titleLarge),
-        for (final line in [
-          ...(task['checks'] as List? ?? []),
-          ...(task['events'] as List? ?? []),
-        ])
-          Text('· $line'),
-      ],
+                    trailing: IconButton(
+                      tooltip: '复制路径',
+                      onPressed: () => Clipboard.setData(
+                        ClipboardData(text: '${file['path']}'),
+                      ),
+                      icon: const Icon(Icons.copy),
+                    ),
+                    onTap:
+                        target == null ||
+                            file['path'] is! String ||
+                            !(file['path'] as String).startsWith('/')
+                        ? null
+                        : () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => SftpPage(
+                                args: SftpPageArgs(
+                                  spi: target,
+                                  initPath: (file['path'] as String).substring(
+                                    0,
+                                    (file['path'] as String).lastIndexOf('/'),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+            ]),
+          ],
+        ),
+      ),
     );
   }
 }

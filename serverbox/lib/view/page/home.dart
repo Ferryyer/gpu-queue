@@ -24,6 +24,7 @@ import 'package:server_box/data/res/store.dart';
 import 'package:server_box/data/res/url.dart';
 import 'package:server_box/data/ssh/session_manager.dart';
 import 'package:server_box/view/page/floating_panels.dart';
+import 'package:server_box/view/page/gpu_queue/workspace.dart';
 import 'package:server_box/view/page/home_tab.dart';
 import 'package:server_box/view/page/macos_menu_bar.dart';
 import 'package:server_box/view/page/setting/entries/home_tabs.dart';
@@ -411,48 +412,78 @@ class _HomePageState extends ConsumerState<HomePage>
     Widget mainContent(bool narrow) => ListenableBuilder(
       listenable: _selectIndex,
       builder: (_, _) => Scaffold(
-        body: Stack(
-          children: [
-            Row(
-              children: [
-                // The room the rail stands in, and not the rail: it opens
-                // under the pointer and is painted over what is beside it, so
-                // a tab must not be laid out to one width and then another.
-                //
-                // Its own `SafeArea` rather than none, because the rail has
-                // one too — on a landscape phone wide enough for a rail, the
-                // left inset is width neither of them may spend.
-                if (_hasRail(narrow))
-                  const SafeArea(
-                    top: false,
-                    bottom: false,
-                    right: false,
-                    child: SizedBox(width: _kRailWidth),
+        body: isDesktop
+            ? Row(
+                children: [
+                  if (!_wantsWindow)
+                    WindowControlsInset(
+                      axis: Axis.vertical,
+                      child: SafeArea(
+                        right: false,
+                        child: QueueSidebar(
+                          key: _navKey,
+                          selected: _selectIndex.value,
+                          settingsOpen: _settingsOpen,
+                          onSelect: _onDestinationSelected,
+                          onSettings: _openSettings,
+                          onMore: () => unawaited(_showMoreSheet(3)),
+                        ),
+                      ),
+                    ),
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        _buildTabPages(),
+                        if (_settingsSeen) _buildSettingsPane(),
+                      ],
+                    ),
                   ),
-                Expanded(
-                  child: Stack(
+                ],
+              )
+            : Stack(
+                children: [
+                  Row(
                     children: [
-                      _buildTabPages(),
-                      if (_settingsSeen) _buildSettingsPane(),
+                      // The room the rail stands in, and not the rail: it opens
+                      // under the pointer and is painted over what is beside it, so
+                      // a tab must not be laid out to one width and then another.
+                      //
+                      // Its own `SafeArea` rather than none, because the rail has
+                      // one too — on a landscape phone wide enough for a rail, the
+                      // left inset is width neither of them may spend.
+                      if (_hasRail(narrow))
+                        const SafeArea(
+                          top: false,
+                          bottom: false,
+                          right: false,
+                          child: SizedBox(width: _kRailWidth),
+                        ),
+                      Expanded(
+                        child: Stack(
+                          children: [
+                            _buildTabPages(),
+                            if (_settingsSeen) _buildSettingsPane(),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                ),
-              ],
-            ),
-            // Painted last, so that opening it is a panel coming out over the
-            // tab rather than the tab drawing over it: in a `Row` the rail is
-            // the first child and so the first painted, and what it overflows
-            // into is painted after.
-            if (_hasRail(narrow))
-              PositionedDirectional(
-                top: 0,
-                bottom: 0,
-                start: 0,
-                child: _buildRailBar(),
+                  // Painted last, so that opening it is a panel coming out over the
+                  // tab rather than the tab drawing over it: in a `Row` the rail is
+                  // the first child and so the first painted, and what it overflows
+                  // into is painted after.
+                  if (_hasRail(narrow))
+                    PositionedDirectional(
+                      top: 0,
+                      bottom: 0,
+                      start: 0,
+                      child: _buildRailBar(),
+                    ),
+                ],
               ),
-          ],
-        ),
-        bottomNavigationBar: narrow && !_wantsWindow ? _buildBottomBar() : null,
+        bottomNavigationBar: !isDesktop && narrow && !_wantsWindow
+            ? _buildBottomBar()
+            : null,
       ),
     );
 
@@ -483,6 +514,7 @@ class _HomePageState extends ConsumerState<HomePage>
         // than it got, so `MediaQuery.sizeOf` is a different number and it is
         // not the one a tab is laid out in.
         final narrow =
+            !isDesktop &&
             constraints.maxWidth - _kRailWidth < AdaptivePanes.kSplitWidth;
         _narrow = narrow;
         return Stack(

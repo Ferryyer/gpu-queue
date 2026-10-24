@@ -53,13 +53,13 @@ QA 构建先 `flutter build macos --config-only --release` 写配置，再以本
 
 保留源码现有的 `SERVERBOX_DATA_NAME=ServerBoxH100`、`FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false`、`FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100`。不要改 bundle ID 或钥匙串定义后宣称旧配置保留。首次验收在专门的 macOS 测试用户执行，保留已有安装与钥匙串；完成隔离验收后再在原用户下验证兼容性。
 
-成功与否以对应源码提交的 Mac Actions 报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2000 / 2000`。本地 QA app 没有 Developer ID 签名，不能当作稳定自动更新候选。
+成功与否以对应源码提交的 Mac Actions 报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2001 / 2001`。本地 QA app 没有 Developer ID 签名，不能当作稳定自动更新候选。
 
 用户最新要求“不用构建检查直接上传”。PR 分支的 `.github/workflows/mf12-native-qa.yml` 已改为直接生成预览包：`native_acceptance.py --stage build --package-only` 跳过环境预检和全部测试，仅安装固定依赖、编译 Mac 应用；`package_mac_preview.py` 做 Apple Silicon 启动必需的 ad-hoc 签名和 DMG 打包，不运行签名复验、架构复验或启动冒烟。报告明确记录 checksSkippedByUser / testsSkippedByUser，macBuildVerified 和交互/安装项目仍为 false。上文完整 QA 命令供用户之后需要时自行执行，不作为这次上传前置条件。
 
-生成成功后直接创建 `v2.0.2000-preview.1` 预发布，不设为 latest、不改变旧 Widget 稳定更新入口。流程只用本仓库短期 GITHUB_TOKEN，没有上游开发者签名、Apple Developer ID 或公证。生成可安装的 Mac 二进制仍必须执行一次编译，这不是额外验收检查。
+生成成功后直接创建 `v2.0.2001-preview.2` 预发布，不设为 latest、不改变旧 Widget 稳定更新入口。流程只用本仓库短期 GITHUB_TOKEN，没有上游开发者签名、Apple Developer ID 或公证。生成可安装的 Mac 二进制仍必须执行一次编译，这不是额外验收检查。
 用户安装入口（仅在 Release 实际存在并有资产后可用）：
-https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2000-preview.1
+https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2001-preview.2
 
 预览仅支持 Apple Silicon、macOS 13+。下载 DMG 和 SHA256SUMS 校验后挂载，先备份已有应用，优先用独立测试用户验收。若 Gatekeeper 阻止打开，核实来源和 SHA-256 后在系统设置 → 隐私与安全性中选择“仍要打开”，不要全局禁用 Gatekeeper。退出预览后可恢复备份应用。原包名的 unsigned 表示没有正式 Developer ID 签名/公证，即使已经 ad-hoc 签名。不能将 CI 启动冒烟当作 SSH/SFTP、真实安装覆盖或旧配置兼容性通过。
 ## 实机交互清单（每项记录结果及证据）
@@ -91,3 +91,12 @@ python3 scripts/test_pty_native.py --flutter /具体SDK/bin/flutter
 ```
 
 未配置 Clang 时的旧错误为 `No compiler configured on host linux_x64`；配置后暴露并修复的错误为 `Failed to load dynamic library 'libflutter_pty.so'`。这两个问题与 SSH 登录故障、GPFS 存储故障分别处理。整应用后续 Rust/native 依赖错误及退出码见本轮交付的原生验证报告，不把独立 PTY 通过称为整应用通过。
+
+
+## 已批准原生设计预览 2（MF-12）
+
+版本 2.0.2001 / build 2001，基于 PR #3 的 f2b0de2；按 MF-9 最终设计重新实现工作区，没有直接合并 PR #4 草稿。208px 侧栏可收起，64px 工具栏，紧凑任务行，详情按需占用右侧 416px，概览/日志/结果保留列表上下文。浅深色使用批准的 token，仅展示标题用 Georgia / 宋体-简；正文使用系统字体 / 苹方，日志 Menlo，可复制、保留缩进并独立滚动。没有打包 Anthropic 字体。
+
+新版本发布使用独立 tag 与 build，不覆盖 preview.1 或旧 Widget 稳定更新入口。沿用既有 bundle ID、数据名称、钥匙串账户和 SSH/SFTP 入口；切换服务重置详情选择，实例仍需明确绑定服务器。只有点击开始会授权当前版本，Auto 策略位于工具栏的「队列策略与连接状态」，停止仍需确认。
+
+工程验证包含生产 Flutter 组件的浅深色、长标题、侧栏收起、416px 日志与复制、文本放大、刷新后焦点/滚动保持；这些 Linux CPU 渲染检查不能代替 Mac 安装和字体验收。下载后在 MF-18 验收 SSH/SFTP、双服务器、安装覆盖/配置保留、休眠、中文字体和全屏。
