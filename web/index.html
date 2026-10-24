@@ -22,6 +22,16 @@
 <div class="demo-note" id="connection-note"><span>◈</span><span>正在连接服务器。任务由 Agent 准备提交；只有你在这里点击开始，才会复用或申请 GPU。</span></div>
 <section class="mode-toolbar" aria-label="操作模式"><button id="interaction-mode" class="mode-switch" aria-describedby="mode-hint" aria-keyshortcuts="Shift+Tab" aria-pressed="false"><span id="mode-label">Edit mode</span><kbd>Shift ⇥</kbd></button><span id="mode-hint" role="status" aria-live="polite">编辑队列，手动启动准备好的任务。</span></section>
 <section class="stats" id="stats" aria-label="任务统计"></section>
+<div class="workbench">
+<section class="tasks-panel" aria-label="任务列表">
+<div class="list-toolbar"><div class="tabs" id="filters"><button class="active" data-filter="all">全部任务</button><button data-filter="queue">执行队列</button><button data-filter="ready">待启动</button><button data-filter="history">已结束</button></div><button class="icon-button" id="search-toggle" aria-label="搜索任务">⌕</button></div>
+<div class="search-wrap" id="search-wrap" hidden><input id="search" type="search" placeholder="搜索任务、项目或 Agent…" aria-label="搜索任务"></div>
+<div id="task-list"></div>
+<div class="list-footer"><span>⠿ 拖动队列左侧手柄调整顺序</span><span>已批准任务自动接续执行</span></div>
+</section>
+<aside class="detail-panel" id="detail" aria-label="任务详情"></aside>
+</div>
+<details class="full-monitor"><summary>服务器与 GPU · 展开完整监控</summary>
 <section class="resource-card">
 <div class="resource-title"><span class="gpu-icon">▦</span><div><strong>计算资源</strong><span><i class="green-dot"></i> 等待资源状态同步</span></div></div>
 <div class="resource-meter"><div><span>GPU 利用率</span><strong id="gpu-value">—<small>%</small></strong></div><div class="meter"><i id="gpu-bar"></i></div></div>
@@ -36,15 +46,7 @@
 <div id="server-resources"></div>
 <p class="monitor-footnote">趋势仅记录此页面打开期间最近 30 分钟的采样，刷新后清空。实例详情为只读。</p>
 </section>
-<div class="workbench">
-<section class="tasks-panel" aria-label="任务列表">
-<div class="list-toolbar"><div class="tabs" id="filters"><button class="active" data-filter="all">全部任务</button><button data-filter="queue">执行队列</button><button data-filter="ready">待启动</button><button data-filter="history">已结束</button></div><button class="icon-button" id="search-toggle" aria-label="搜索任务">⌕</button></div>
-<div class="search-wrap" id="search-wrap" hidden><input id="search" type="search" placeholder="搜索任务、项目或 Agent…" aria-label="搜索任务"></div>
-<div id="task-list"></div>
-<div class="list-footer"><span>⠿ 拖动队列左侧手柄调整顺序</span><span>已批准任务自动接续执行</span></div>
-</section>
-<aside class="detail-panel" id="detail" aria-label="任务详情"></aside>
-</div>
+</details>
 <footer class="page-footer"><span>GPU QUEUE · 为有条理的实验而设计 · <a href="https://github.com/Ferryyer/gpu-queue/tree/codex/gpu-serverbox-integration">源码与许可证</a></span><span>顺序优先 · 空闲复用 · 失败即停</span></footer>
 </main>
 </div>

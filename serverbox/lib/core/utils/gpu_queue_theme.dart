@@ -1,26 +1,28 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Local paper and terracotta styling, with no downloaded font dependency.
 ThemeData gpuQueueTheme(ThemeData base) {
   const enabled = bool.fromEnvironment('GPU_QUEUE_STYLE', defaultValue: true);
   if (!enabled) return base;
   final dark = base.brightness == Brightness.dark;
-  final scheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xFF9B6047),
-    brightness: base.brightness,
-  ).copyWith(
-    surface: Color(dark ? 0xFF272521 : 0xFFF5F3ED),
-    onSurface: Color(dark ? 0xFFEAE5DC : 0xFF302E2B),
-    onSurfaceVariant: Color(dark ? 0xFFBEB7AA : 0xFF69655E),
-    primary: Color(dark ? 0xFFE0A387 : 0xFF8B543E),
-    onPrimary: Color(dark ? 0xFF302018 : 0xFFFFFFFF),
-  );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: const Color(0xFF9B6047),
+        brightness: base.brightness,
+      ).copyWith(
+        surface: Color(dark ? 0xFF272521 : 0xFFF5F3ED),
+        onSurface: Color(dark ? 0xFFEAE5DC : 0xFF302E2B),
+        onSurfaceVariant: Color(dark ? 0xFFBEB7AA : 0xFF69655E),
+        primary: Color(dark ? 0xFFE0A387 : 0xFF8B543E),
+        onPrimary: Color(dark ? 0xFF302018 : 0xFFFFFFFF),
+      );
   final text = base.textTheme.apply(
     bodyColor: scheme.onSurface,
     displayColor: scheme.onSurface,
   );
   TextStyle? heading(TextStyle? style) => style?.copyWith(
     fontFamily: 'Georgia',
+    fontFamilyFallback: const ['Songti SC', 'Noto Serif CJK SC'],
     fontWeight: FontWeight.w500,
   );
   return base.copyWith(

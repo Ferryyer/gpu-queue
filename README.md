@@ -1,13 +1,15 @@
 # GPU Queue
 
-个人 GPU 任务台：网页、CPU 调度服务，以及 macOS 桌面小组件。
+个人 GPU 任务台：网页、CPU 调度服务、ServerBox 原生统一工作台与兼容旧版的 macOS 小组件。
 
 这是为 linlishuo 的 Markflow 环境编写的个人工具，包含用户身份、SSH 入口和平台适配，并非开箱即用的多用户产品。
 
 ## ServerBox 融合
 
 `serverbox/` 为带 GPU 桥接、账号线程卡片和 Mac 自动重连的完整原生客户端源码。
-网页新增逐实例 GPU 监控、页面内趋势、JSON 导出及账号线程面板；原生客户端新增任务台入口与暖纸色主题。
+原生客户端提供总览、任务、服务器与设置，任务详情在应用内打开关联服务器的 SSH 终端和 SFTP 目录。复用已有安全连接配置；Edit/Auto 与重连不会批准任务。网页同步修复焦点、断线读数与任务入口布局。
+
+当前工程候选尚未完成 Mac 实机验收与安装包发布。见 [MF-12 实现、验证和原生阻塞](docs/UNIFIED-WORKSPACE.md)。
 关于页捐赠与产品推广已移除；源码中未发现内购或功能订阅锁。
 
 详见 [融合范围与验证](docs/SERVER-MONITOR.md) 和 [原生构建说明](serverbox/README.gpu-console.md)。

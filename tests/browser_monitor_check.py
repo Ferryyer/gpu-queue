@@ -37,6 +37,7 @@ try:
         page.route('**/api/state', state)
         page.route('**/api/host', lambda route: route.fulfill(json={'available':True,'at':time.time(),'text':'42 个线程\n8 个进程 · fixture-user'}))
         page.goto('http://127.0.0.1:8765')
+        page.locator('.full-monitor>summary').click()
         expect(page.locator('#account-summary')).to_contain_text('42 个线程')
         page.locator('.account-monitor summary').click()
         expect(page.locator('#account-threads')).to_contain_text('fixture-user')

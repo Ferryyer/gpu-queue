@@ -31,6 +31,12 @@ class SettingStore extends SqliteStore with ThemeSettings {
 
   static final instance = SettingStore();
 
+  // Only server IDs and explicit instance associations; credentials stay in
+  // the existing encrypted server/key stores.
+  late final gpuQueueServer = propertyDefault('gpuQueueServer', '');
+  late final gpuQueueBindings = propertyDefault('gpuQueueBindings', '{}');
+  late final gpuQueueAuto = propertyDefault('gpuQueueAuto', false);
+
   /// Timeout for server connections and related operations.
   late final timeout = propertyDefault('timeOut', 5);
 

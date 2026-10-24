@@ -94,7 +94,12 @@ class _HomePageState extends ConsumerState<HomePage>
   late final _notifier = ref.read(serversProvider.notifier);
 
   /// What the user arranged: the bar, and the rail.
-  late List<AppTab> _barTabs = Stores.setting.homeTabs.fetch();
+  late List<AppTab> _barTabs = [
+    ...AppTab.defaultOrder,
+    ...Stores.setting.homeTabs.fetch().where(
+      (tab) => !AppTab.defaultOrder.contains(tab),
+    ),
+  ];
 
   /// Every page there is, the bar's first and "more"'s after. The index space
   /// for everything below, so a tab reached through "more" is a page like any
@@ -287,7 +292,12 @@ class _HomePageState extends ConsumerState<HomePage>
   void _dropFocus() => FocusManager.instance.primaryFocus?.unfocus();
 
   void _handleHomeTabsChanged() {
-    final newBar = Stores.setting.homeTabs.fetch();
+    final newBar = [
+      ...AppTab.defaultOrder,
+      ...Stores.setting.homeTabs.fetch().where(
+        (tab) => !AppTab.defaultOrder.contains(tab),
+      ),
+    ];
     final newTabs = [...newBar, ...AppTab.overflowOf(newBar)];
     // The page list is every tab either way, so it only changes when the *bar*
     // does — which is what the setting says.
@@ -584,7 +594,7 @@ class _HomePageState extends ConsumerState<HomePage>
         AppUpdateIface.doUpdate(
           build: BuildData.build,
           githubReleasesUrl: Urls.githubReleasesApi,
-          storeUrl: Urls.appStore,
+          storeUrl: '${Urls.thisRepo}/releases',
           context: context,
           noticeBuilder: (ctx) => DmgNotice.forUpdate(
             ctx,

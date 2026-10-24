@@ -1,11 +1,11 @@
 import 'package:fl_lib/fl_lib.dart';
-import 'package:server_box/core/utils/gpu_queue.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:icons_plus/icons_plus.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
 import 'package:server_box/data/provider/server/all.dart';
+import 'package:server_box/view/page/gpu_queue/page.dart';
 import 'package:server_box/view/page/server/edit/edit.dart';
 import 'package:server_box/view/page/server/monitor_settings/page.dart';
 import 'package:server_box/view/widget/server_share.dart';
@@ -39,7 +39,9 @@ final class ServerPageAction {
       ServerPageAction._(
         Icons.view_list_outlined,
         'GPU Queue',
-        () => GpuQueue.uri.toString().launchUrl(),
+        () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => GpuQueuePage(serverFilter: spi.id)),
+        ),
       ),
       ServerPageAction._(
         Icons.share,
@@ -92,5 +94,8 @@ Future<void> _saveMonitorPassword(
   if (current == null || monitor == null) return;
   await container
       .read(serversProvider.notifier)
-      .updateServer(current, current.copyWith(monitorHttp: monitor.withPwd(pwd)));
+      .updateServer(
+        current,
+        current.copyWith(monitorHttp: monitor.withPwd(pwd)),
+      );
 }
