@@ -1,0 +1,554 @@
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:fl_lib/fl_lib.dart';
+import 'package:fl_pi_llm/fl_pi_llm.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart';
+import 'package:fl_pi_llm_ui/src/core/chats.dart';
+import 'package:fl_pi_llm_ui/src/core/user_input.dart';
+import 'package:fl_pi_llm_ui/src/core/llm.dart';
+import 'package:fl_pi_llm_ui/src/res/l10n.dart';
+import 'package:fl_pi_llm_ui/src/store/stores.dart';
+import 'package:fl_pi_llm_ui/src/view/model_picker.dart';
+import 'package:fl_pi_llm_ui/src/view/menu.dart';
+import 'package:image_picker/image_picker.dart';
+
+/// Where a message is written: text, attachments, the model, thinking, tools
+/// and send. Makes the chat when there is none yet.
+class Composer extends StatefulWidget {
+  const Composer({
+    super.key,
+    required this.chatId,
+    required this.onChatCreated,
+    this.compact = false,
+    this.scope,
+  });
+
+  /// The chat it sends to; null until the first message makes one.
+  final String? chatId;
+  final void Function(String id) onChatCreated;
+
+  /// On a phone: the thinking level is an icon.
+  final bool compact;
+
+  /// Where a chat this starts belongs — see [ChatMeta.scope].
+  final String? scope;
+
+  /// Text put in by a deep link, for the new-chat composer.
+  static final draft = nvn<String>();
+
+  /// The scope [draft] is for — see [scope]. Set before [draft]: only the
+  /// new-chat composer of that scope takes it. Null is the app's own list.
+  static String? draftScope;
+
+  /// Set when a message makes the chat: the composer that takes over keeps
+  /// the keyboard.
+  static var _keepFocus = false;
+
+  @override
+  State<Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<Composer> {
+  final _ctrl = TextEditingController();
+  final _focus = FocusNode();
+  final _files = <String>[].vn;
+
+  @override
+  void initState() {
+    super.initState();
+    Composer.draft.addListener(_takeDraft);
+    _takeDraft();
+    if (Composer._keepFocus) {
+      Composer._keepFocus = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    Composer.draft.removeListener(_takeDraft);
+    _ctrl.dispose();
+    _focus.dispose();
+    _files.dispose();
+    super.dispose();
+  }
+
+  void _takeDraft() {
+    final d = Composer.draft.value;
+    // A chat's composer leaves it to the new chat's, which is on its way —
+    // and another place's new-chat composer to that place's.
+    if (d == null || widget.chatId != null || Composer.draftScope != widget.scope) return;
+    _ctrl.text = d;
+    Composer.draft.value = null;
+    Composer.draftScope = null;
+  }
+
+  LlmModelRef? get _model {
+    final id = widget.chatId;
+    return (id == null ? null : LlmStores.chat.fetch(id)?.model) ?? Llm.defaultModel;
+  }
+
+  /// What a chat not open yet is doing.
+  static final _idle = false.vn;
+
+  bool get _running {
+    final id = widget.chatId;
+    return id != null && (Chats.openOf(id)?.running.value ?? false);
+  }
+
+  /// The form chat [widget.chatId] waits on, if one.
+  PendingInput? get _pendingInput {
+    final id = widget.chatId;
+    return id == null ? null : Chats.openOf(id)?.pendingInput.value;
+  }
+
+  Future<void> _send() async {
+    // With a form waiting, a message is the answer instead of it: the form is
+    // cancelled, and what was written goes to the model with that.
+    if (_pendingInput != null) {
+      final text = _ctrl.text.trim();
+      if (text.isEmpty) return;
+      _ctrl.clear();
+      Chats.cancelInput(widget.chatId!, message: text);
+      return;
+    }
+    if (_running) return;
+    final raw = _ctrl.text;
+    final text = raw.trim();
+    final files = [..._files.value];
+    if (text.isEmpty && files.isEmpty) return;
+    if (_model == null) {
+      await pickModel(context);
+      return;
+    }
+    var id = widget.chatId;
+    if (id == null) {
+      id = Chats.create(scope: widget.scope);
+      Composer._keepFocus = _focus.hasFocus;
+      widget.onChatCreated(id);
+    }
+    _ctrl.clear();
+    _files.value = [];
+    try {
+      await Chats.send(id, text, files: files);
+    } catch (e, s) {
+      Loggers.app.warning('Send', e, s);
+      Toast.show(e is UnsupportedAttachment ? llmL10n.attachUnsupported(e.name) : '$e');
+      // What was written is not lost with the send: back where it was, if
+      // this composer is still the one on screen and nothing new was typed.
+      if (mounted && _ctrl.text.isEmpty && _files.value.isEmpty) {
+        _ctrl.text = raw;
+        _files.value = files;
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.theme.colorScheme;
+    return ComposerBox(
+      controller: _ctrl,
+      focusNode: _focus,
+      hint: llmL10n.message,
+      onSubmit: _send,
+      top: _files.listenVal((files) {
+        if (files.isEmpty) return UIs.placeholder;
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 5,
+            children: [
+              for (final f in files)
+                InputChip(
+                  label: Text(f.split(RegExp(r'[/\\]')).last, style: UIs.text12),
+                  onDeleted: () => _files.value = [..._files.value]..remove(f),
+                ),
+            ],
+          ),
+        );
+      }),
+      actions: [
+        // The pickers outlive a composer closed while they are open.
+        AttachButton(onPicked: (paths) {
+          if (mounted) _files.value = [..._files.value, ...paths];
+        }),
+        Flexible(
+          child: _ModelChip(chatId: widget.chatId, model: _model, onChanged: () {
+            if (mounted) setState(() {});
+          }),
+        ),
+        _ThinkingChip(model: _model, compact: widget.compact),
+        if (widget.chatId != null) _ToolsToggle(chatId: widget.chatId!),
+      ],
+      // The chat opens after the composer is built: follow it.
+      button: ListenableBuilder(
+        listenable: Chats.openChanges,
+        builder: (context, _) {
+          final id = widget.chatId;
+          final chat = id == null ? null : Chats.openOf(id);
+          return ListenableBuilder(
+            listenable: Listenable.merge([chat?.running ?? _idle, ?chat?.pendingInput]),
+            builder: (context, _) {
+              // A form waiting is answered by sending, not stopped.
+              final r = (chat?.running.value ?? false) && chat?.pendingInput.value == null;
+              return r
+                  ? ComposerButton.stop(scheme, onTap: () => Chats.abort(widget.chatId!))
+                  : ComposerButton.send(scheme, onTap: _send);
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// The box a message is written in: [top] (attachments, say), the field, a
+/// row of [actions] under it and [button] at the end of that row. [Composer]
+/// is it with a chat's attachments, model and tools; a host writing to a
+/// conversation of its own — one that runs elsewhere — uses the same box.
+///
+/// On a keyboard Enter submits and Shift+Enter is a new line; an Enter the
+/// input method takes, to confirm what is being composed, is its own.
+class ComposerBox extends StatelessWidget {
+  const ComposerBox({
+    super.key,
+    required this.controller,
+    required this.onSubmit,
+    required this.button,
+    this.focusNode,
+    this.hint,
+    this.top,
+    this.actions = const [],
+    this.enabled = true,
+  });
+
+  final TextEditingController controller;
+  final FocusNode? focusNode;
+  final VoidCallback onSubmit;
+  final String? hint;
+  final Widget? top;
+  final List<Widget> actions;
+  final Widget button;
+  final bool enabled;
+
+  KeyEventResult _onKey(FocusNode _, KeyEvent e) {
+    if (e is! KeyDownEvent) return KeyEventResult.ignored;
+    if (e.logicalKey != LogicalKeyboardKey.enter && e.logicalKey != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    if (HardwareKeyboard.instance.isShiftPressed || controller.value.composing.isValid) return KeyEventResult.ignored;
+    onSubmit();
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.theme.colorScheme;
+    // The box is the field's tap region: its buttons keep the keyboard up,
+    // and a tap anywhere else puts it away.
+    return TextFieldTapRegion(
+      child: Material(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(17),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(9, 7, 9, 5),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ?top,
+              Focus(
+                canRequestFocus: false,
+                skipTraversal: true,
+                onKeyEvent: isDesktop ? _onKey : null,
+                child: TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  enabled: enabled,
+                  minLines: 1,
+                  maxLines: 8,
+                  style: const TextStyle(fontSize: 14, height: 20 / 14),
+                  textInputAction: isDesktop ? TextInputAction.newline : TextInputAction.send,
+                  onSubmitted: isDesktop ? null : (_) => onSubmit(),
+                  // Flutter's default only does this for a mouse; on a phone the
+                  // keyboard stayed up over the chat, the history and the rest.
+                  onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+                  decoration: bareInputDecoration(
+                    hintText: hint,
+                    hintStyle: UIs.textGrey.copyWith(fontSize: 14, height: 20 / 14),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 7, vertical: 9),
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  // Its own row: a Flexible beside a Spacer would split the free
+                  // space with it, and what the chip leaves of its half would
+                  // end up after the button.
+                  Expanded(child: Row(children: actions.joinWith(const SizedBox(width: 1)))),
+                  button,
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Attach: a file on a computer; on a phone, a file, a photo or the camera.
+/// Hands what was picked to [onPicked], as paths; a picker's failure is shown
+/// rather than lost.
+class AttachButton extends StatelessWidget {
+  const AttachButton({super.key, required this.onPicked});
+
+  final void Function(List<String> paths) onPicked;
+
+  Future<void> _picking(Future<List<String>> Function() pick) async {
+    try {
+      final paths = await pick();
+      if (paths.isNotEmpty) onPicked(paths);
+    } catch (e, s) {
+      Loggers.app.warning('Pick attachment', e, s);
+      Toast.show('$e');
+    }
+  }
+
+  Future<void> _pickFiles() => _picking(() async {
+    final res = await FilePicker.pickFiles();
+    return [for (final f in res) ?f.path];
+  });
+
+  Future<void> _pickImage(ImageSource source) => _picking(() async {
+    final img = await ImagePicker().pickImage(source: source);
+    return [?img?.path];
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget btn(VoidCallback onTap) =>
+        Btn.icon(icon: const Icon(Icons.attach_file, size: _iconSize), text: llmL10n.attachment, onTap: onTap, padding: _btnPadding);
+    if (!isMobile) return btn(_pickFiles);
+    return MenuBtn(
+      actions: [
+        ContextMenuAction(text: libL10n.file, icon: Icons.insert_drive_file_outlined, onTap: _pickFiles),
+        ContextMenuAction(text: llmL10n.image, icon: Icons.image_outlined, onTap: () => _pickImage(ImageSource.gallery)),
+        ContextMenuAction(text: llmL10n.camera, icon: Icons.photo_camera_outlined, onTap: () => _pickImage(ImageSource.camera)),
+      ],
+      builder: btn,
+    );
+  }
+}
+
+/// The size of the icons in the row under the text, and around them.
+const double _iconSize = 16;
+const _btnPadding = EdgeInsets.all(5);
+
+/// Send, or stop: a 32 circle at the end of a [ComposerBox]'s row.
+class ComposerButton extends StatelessWidget {
+  const ComposerButton({super.key, required this.icon, required this.tooltip, required this.color, required this.onColor, required this.onTap});
+
+  ComposerButton.send(ColorScheme scheme, {Key? key, required VoidCallback? onTap})
+    : this(key: key, icon: Icons.arrow_upward, tooltip: llmL10n.send, color: scheme.primary, onColor: scheme.onPrimary, onTap: onTap);
+
+  ComposerButton.stop(ColorScheme scheme, {Key? key, required VoidCallback? onTap})
+    : this(
+        key: key,
+        icon: Icons.stop_rounded,
+        tooltip: libL10n.stop,
+        color: scheme.secondaryContainer,
+        onColor: scheme.onSecondaryContainer,
+        onTap: onTap,
+      );
+
+  final IconData icon;
+  final String tooltip;
+  final Color color;
+  final Color onColor;
+
+  /// Null: dimmed, and no tap.
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final off = onTap == null;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: off ? color.withValues(alpha: 0.38) : color,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(width: 32, height: 32, child: Icon(icon, size: 18, color: off ? onColor.withValues(alpha: 0.6) : onColor)),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModelChip extends StatelessWidget {
+  const _ModelChip({required this.chatId, required this.model, required this.onChanged});
+
+  final String? chatId;
+  final LlmModelRef? model;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([Llm.providers, Llm.configured]),
+      builder: (context, _) => ComposerModelChip(
+        name: switch (model) {
+          final m? => Llm.modelLabel(m),
+          null => llmL10n.model,
+        },
+        onTap: () async {
+          final picked = await pickModel(context, current: model);
+          if (picked == null) return;
+          final id = chatId;
+          if (id == null) {
+            LlmStores.llm.defaultModel.set(picked);
+          } else {
+            await Chats.setModel(id, picked);
+          }
+          onChanged();
+        },
+      ),
+    );
+  }
+}
+
+class _ThinkingChip extends StatefulWidget {
+  const _ThinkingChip({required this.model, required this.compact});
+
+  final LlmModelRef? model;
+  final bool compact;
+
+  @override
+  State<_ThinkingChip> createState() => _ThinkingChipState();
+}
+
+class _ThinkingChipState extends State<_ThinkingChip> {
+  @override
+  Widget build(BuildContext context) {
+    final info = Llm.info(widget.model);
+    if (info == null || !info.reasoning) return UIs.placeholder;
+    return ComposerThinkingChip(
+      level: Chats.thinkingFor(widget.model).name,
+      levels: [for (final l in info.thinkingLevels) l.name],
+      compact: widget.compact,
+      onPick: (name) async {
+        await Chats.setThinkingLevel(ThinkingLevel.values.byName(name));
+        if (mounted) setState(() {});
+      },
+    );
+  }
+}
+
+/// The model a message goes to, in a [ComposerBox]'s row: [onTap] picks
+/// another.
+class ComposerModelChip extends StatelessWidget {
+  const ComposerModelChip({super.key, required this.name, required this.onTap});
+
+  final String name;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = context.theme.colorScheme.primary;
+    return Btn.row(
+      icon: Icon(Icons.auto_awesome, size: _iconSize, color: primary),
+      text: name,
+      textStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: primary, overflow: TextOverflow.ellipsis),
+      mainAxisSize: MainAxisSize.min,
+      padding: _btnPadding,
+      onTap: onTap,
+    );
+  }
+}
+
+/// How hard the model thinks, in a [ComposerBox]'s row: [level] among
+/// [levels], a menu of them. Highlighted with the level while it thinks;
+/// dimmed when `off`, and then an icon alone when [compact].
+class ComposerThinkingChip extends StatelessWidget {
+  const ComposerThinkingChip({super.key, required this.level, required this.levels, required this.onPick, this.compact = false});
+
+  final String level;
+  final List<String> levels;
+  final void Function(String level) onPick;
+  final bool compact;
+
+  static String _label(String level) => level.isEmpty ? level : level[0].toUpperCase() + level.substring(1);
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = _label(level);
+    final on = level != ThinkingLevel.off.name;
+    final scheme = context.theme.colorScheme;
+    final color = on ? scheme.primary : scheme.onSurfaceVariant.withValues(alpha: 0.6);
+    final icon = Icon(on ? Icons.psychology : Icons.psychology_outlined, size: _iconSize, color: color);
+    return MenuBtn(
+      actions: [
+        for (final l in levels)
+          ContextMenuAction(text: _label(l), checked: l == level, onTap: () => onPick(l)),
+      ],
+      builder: (toggle) {
+        final name = '${llmL10n.thinkingEffort}: $cur';
+        if (compact && !on) return Btn.icon(icon: icon, text: name, onTap: toggle, padding: _btnPadding);
+        // The level alone says little to a screen reader.
+        return Semantics(
+          label: name,
+          button: true,
+          onTap: toggle,
+          excludeSemantics: true,
+          child: Btn.row(
+            icon: icon,
+            text: cur,
+            textStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: color),
+            mainAxisSize: MainAxisSize.min,
+            onTap: toggle,
+            padding: _btnPadding,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ToolsToggle extends StatefulWidget {
+  const _ToolsToggle({required this.chatId});
+
+  final String chatId;
+
+  @override
+  State<_ToolsToggle> createState() => _ToolsToggleState();
+}
+
+class _ToolsToggleState extends State<_ToolsToggle> {
+  @override
+  Widget build(BuildContext context) {
+    return LlmStores.tool.enabled.listenable().listenVal((enabled) {
+      if (!enabled) return UIs.placeholder;
+      final on = LlmStores.chat.fetch(widget.chatId)?.useTools ?? true;
+      return Btn.icon(
+        icon: Icon(
+          on ? Icons.build : Icons.build_outlined,
+          size: _iconSize,
+          color: on ? context.theme.colorScheme.primary : null,
+        ),
+        text: llmL10n.tool,
+        padding: _btnPadding,
+        onTap: () async {
+          await Chats.setUseTools(widget.chatId, !on);
+          setState(() {});
+        },
+      );
+    });
+  }
+}

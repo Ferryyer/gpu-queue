@@ -1,0 +1,979 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+
+import 'lib_l10n.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Spanish Castilian (`es`).
+class LibLocalizationsEs extends LibLocalizations {
+  LibLocalizationsEs([String locale = 'es']) : super(locale);
+
+  @override
+  String get about => 'Acerca de';
+
+  @override
+  String actionAndAction(Object action1, Object action2) {
+    return '¿$action1 y luego $action2?';
+  }
+
+  @override
+  String get active => 'Activo';
+
+  @override
+  String get add => 'Añadir';
+
+  @override
+  String get addr => 'Dirección';
+
+  @override
+  String agoFmt(String time) {
+    return 'hace $time';
+  }
+
+  @override
+  String get ai => 'IA';
+
+  @override
+  String get all => 'Todos';
+
+  @override
+  String get anonLoseDataTip =>
+      'Actualmente has iniciado sesión de forma anónima. Si continuas, podrías perder tus datos.';
+
+  @override
+  String get apiEndpoint => 'URL base';
+
+  @override
+  String get apiKey => 'Clave API';
+
+  @override
+  String get apiProtocol => 'Protocolo de API';
+
+  @override
+  String get app => 'Aplicación';
+
+  @override
+  String get ascending => 'Ascendente';
+
+  @override
+  String get askAiModel => 'Modelo';
+
+  @override
+  String askContinue(Object msg) {
+    return '$msg, ¿deseas continuar?';
+  }
+
+  @override
+  String get attention => 'Atención';
+
+  @override
+  String get authRequired => 'Autenticación requerida';
+
+  @override
+  String get auto => 'Automático';
+
+  @override
+  String get available => 'Disponible';
+
+  @override
+  String get background => 'Fondo';
+
+  @override
+  String get backup => 'Copia de seguridad';
+
+  @override
+  String get battery => 'Batería';
+
+  @override
+  String get bioAuth => 'Autenticación biométrica';
+
+  @override
+  String get blurRadius => 'Radio de desenfoque';
+
+  @override
+  String get bright => 'Brillante';
+
+  @override
+  String get browsing => 'Explorando';
+
+  @override
+  String get cancel => 'Cancelar';
+
+  @override
+  String get cancelled => 'Cancelado';
+
+  @override
+  String get capacity => 'Capacidad';
+
+  @override
+  String get checkUpdate => 'Buscar actualizaciones';
+
+  @override
+  String get clear => 'Limpiar';
+
+  @override
+  String get clearHistory => 'Borrar historial';
+
+  @override
+  String get click => 'Clic';
+
+  @override
+  String get clipboard => 'Portapapeles';
+
+  @override
+  String get clone => 'Clonar';
+
+  @override
+  String get close => 'Cerrar';
+
+  @override
+  String get cmd => 'Comando';
+
+  @override
+  String get configured => 'Configurado';
+
+  @override
+  String get confirm => 'Confirmar';
+
+  @override
+  String get conn => 'Conectar';
+
+  @override
+  String get container => 'Contenedor';
+
+  @override
+  String get content => 'Contenido';
+
+  @override
+  String get convert => 'Convertir';
+
+  @override
+  String get copy => 'Copiar';
+
+  @override
+  String get create => 'Crear';
+
+  @override
+  String get current => 'Actual';
+
+  @override
+  String get custom => 'Personalizado';
+
+  @override
+  String get defaultLabel => 'Predeterminado';
+
+  @override
+  String get customCmdDocUrl =>
+      'https://github.com/lollipopkit/flutter_server_box/wiki#custom-commands';
+
+  @override
+  String get cut => 'Cortar';
+
+  @override
+  String get dark => 'Oscuro';
+
+  @override
+  String get day => 'Días';
+
+  @override
+  String get decode => 'Decodificar';
+
+  @override
+  String get decompress => 'Descomprimir';
+
+  @override
+  String delFmt(Object id, Object type) {
+    return '¿Eliminar $type ($id)?';
+  }
+
+  @override
+  String get delay => 'Retraso';
+
+  @override
+  String get delete => 'Eliminar';
+
+  @override
+  String get descending => 'Descendente';
+
+  @override
+  String get description => 'Descripción';
+
+  @override
+  String get device => 'Dispositivo';
+
+  @override
+  String get disabled => 'Deshabilitado';
+
+  @override
+  String get enabled => 'Activado';
+
+  @override
+  String get disconnected => 'Desconectado';
+
+  @override
+  String get disk => 'Disco';
+
+  @override
+  String get doc => 'Documentación';
+
+  @override
+  String get done => 'Hecho';
+
+  @override
+  String get dontShowAgain => 'No mostrar más';
+
+  @override
+  String get download => 'Descargar';
+
+  @override
+  String get duration => 'Duración';
+
+  @override
+  String get edit => 'Editar';
+
+  @override
+  String get editor => 'Editor';
+
+  @override
+  String get empty => 'Vacío';
+
+  @override
+  String get emulator => 'Emulador';
+
+  @override
+  String get encode => 'Codificar';
+
+  @override
+  String get error => 'Error';
+
+  @override
+  String get example => 'Ejemplo';
+
+  @override
+  String get execute => 'Ejecutar';
+
+  @override
+  String get exit => 'Salir';
+
+  @override
+  String get exitConfirmTip => 'Presiona Atrás nuevamente para salir';
+
+  @override
+  String get exitDirectly => 'Salir directamente';
+
+  @override
+  String get experimentalFeature => 'Característica experimental';
+
+  @override
+  String get export => 'Exportar';
+
+  @override
+  String get fail => 'Error';
+
+  @override
+  String get feedback => 'Comentarios';
+
+  @override
+  String get file => 'Archivo';
+
+  @override
+  String get fold => 'Contraer';
+
+  @override
+  String get folder => 'Carpeta';
+
+  @override
+  String get followSystem => 'Seguir al sistema';
+
+  @override
+  String get font => 'Fuente';
+
+  @override
+  String get fontSize => 'Tamaño de fuente';
+
+  @override
+  String get force => 'Forzar';
+
+  @override
+  String get foregroundService => 'Servicio en primer plano';
+
+  @override
+  String get format => 'Formato';
+
+  @override
+  String get found => 'Encontrado';
+
+  @override
+  String get gateway => 'Puerta de enlace';
+
+  @override
+  String get general => 'General';
+
+  @override
+  String get goBackQ => '¿Regresar?';
+
+  @override
+  String get goto => 'Ir a';
+
+  @override
+  String get hideTitleBar => 'Ocultar barra de título';
+
+  @override
+  String get highlight => 'Resaltar código';
+
+  @override
+  String get host => 'Anfitrión';
+
+  @override
+  String get hour => 'Horas';
+
+  @override
+  String get image => 'Imagen';
+
+  @override
+  String get import => 'Importar';
+
+  @override
+  String get inactive => 'Inactivo';
+
+  @override
+  String get init => 'Inicializar';
+
+  @override
+  String get inner => 'Interno';
+
+  @override
+  String get install => 'Instalar';
+
+  @override
+  String get invalid => 'Inválido';
+
+  @override
+  String get invalidUrl => 'URL no válida';
+
+  @override
+  String get justNow => 'Ahora mismo';
+
+  @override
+  String get key => 'Clave';
+
+  @override
+  String get language => 'Idioma';
+
+  @override
+  String get license => 'Licencia';
+
+  @override
+  String get loadingEllipsis => '...';
+
+  @override
+  String get local => 'Local';
+
+  @override
+  String get location => 'Ubicación';
+
+  @override
+  String get log => 'Registro';
+
+  @override
+  String get login => 'Iniciar sesión';
+
+  @override
+  String get loginTip => 'No es necesario registrarse, es gratuito.';
+
+  @override
+  String get logout => 'Cerrar sesión';
+
+  @override
+  String get logs => 'Registros';
+
+  @override
+  String get loss => 'Tasa de pérdida';
+
+  @override
+  String get manual => 'Manual';
+
+  @override
+  String get max => 'Máximo';
+
+  @override
+  String get memory => 'Memoria';
+
+  @override
+  String get menuHelp => 'Ayuda';
+
+  @override
+  String get menuInfo => 'Info';
+
+  @override
+  String get menuNavigate => 'Navegar';
+
+  @override
+  String get menuQuit => 'Salir';
+
+  @override
+  String get menuSettings => 'Ajustes';
+
+  @override
+  String get menuWiki => 'Wiki';
+
+  @override
+  String get migrateCfg => 'Migración de configuración';
+
+  @override
+  String get migrateCfgTip =>
+      'Para adaptarse a la nueva configuración necesaria';
+
+  @override
+  String get milliseconds => 'Milisegundos';
+
+  @override
+  String get min => 'Mínimo';
+
+  @override
+  String get minute => 'Minutos';
+
+  @override
+  String get mission => 'Misión';
+
+  @override
+  String get mode => 'Modo';
+
+  @override
+  String get more => 'Más';
+
+  @override
+  String get moveDown => 'Bajar';
+
+  @override
+  String get moveUp => 'Subir';
+
+  @override
+  String get ms => 'milisegundos';
+
+  @override
+  String get name => 'Nombre';
+
+  @override
+  String get net => 'Red';
+
+  @override
+  String get network => 'Red';
+
+  @override
+  String get next => 'Siguiente';
+
+  @override
+  String get node => 'Nodo';
+
+  @override
+  String get none => 'Ninguno';
+
+  @override
+  String get notAvailable => 'No disponible';
+
+  @override
+  String notExistFmt(Object file) {
+    return '$file no existe';
+  }
+
+  @override
+  String get note => 'Nota';
+
+  @override
+  String get ok => 'OK';
+
+  @override
+  String get opacity => 'Opacidad';
+
+  @override
+  String get open => 'Abrir';
+
+  @override
+  String get optional => 'Opcional';
+
+  @override
+  String get paste => 'Pegar';
+
+  @override
+  String get path => 'Ruta';
+
+  @override
+  String get permission => 'Permiso';
+
+  @override
+  String get permissionDenied => 'Permiso denegado.';
+
+  @override
+  String get pingAvg => 'Promedio:';
+
+  @override
+  String get pkg => 'Gestión de paquetes';
+
+  @override
+  String get port => 'Puerto';
+
+  @override
+  String get portForward => 'Reenvío de puertos';
+
+  @override
+  String get preview => 'Vista previa';
+
+  @override
+  String get previous => 'Anterior';
+
+  @override
+  String get primaryColorSeed => 'Color principal base';
+
+  @override
+  String get process => 'Proceso';
+
+  @override
+  String get prune => 'Podar';
+
+  @override
+  String get pwd => 'Contraseña';
+
+  @override
+  String get pwdTip =>
+      'Longitud de 6 a 32 caracteres, puede contener letras, números y signos de puntuación';
+
+  @override
+  String get read => 'Leer';
+
+  @override
+  String get ready => 'Listo';
+
+  @override
+  String get reboot => 'Reiniciar';
+
+  @override
+  String get reconnecting => 'Reconectando...';
+
+  @override
+  String get redo => 'Rehacer';
+
+  @override
+  String get refresh => 'Actualizar';
+
+  @override
+  String get register => 'Registrarse';
+
+  @override
+  String get remote => 'Remoto';
+
+  @override
+  String get rename => 'Renombrar';
+
+  @override
+  String get replace => 'Reemplazar';
+
+  @override
+  String get replaceAll => 'Reemplazar todo';
+
+  @override
+  String get reset => 'Restablecer';
+
+  @override
+  String get restart => 'Reiniciar';
+
+  @override
+  String get restore => 'Restaurar';
+
+  @override
+  String get result => 'Resultado';
+
+  @override
+  String get retry => 'Reintentar';
+
+  @override
+  String get route => 'Enrutamiento';
+
+  @override
+  String get run => 'Ejecutar';
+
+  @override
+  String get running => 'En ejecución';
+
+  @override
+  String get save => 'Guardar';
+
+  @override
+  String get saveFailed => 'Error al guardar';
+
+  @override
+  String get saved => 'Guardado';
+
+  @override
+  String get search => 'Buscar';
+
+  @override
+  String get second => 'Segundos';
+
+  @override
+  String get select => 'Seleccionar';
+
+  @override
+  String get sensors => 'Sensores';
+
+  @override
+  String get sequence => 'Secuencia';
+
+  @override
+  String get server => 'Servidor';
+
+  @override
+  String get servers => 'servidores';
+
+  @override
+  String get setting => 'Configuración';
+
+  @override
+  String get share => 'Compartir';
+
+  @override
+  String get shutdown => 'Apagar';
+
+  @override
+  String get size => 'Tamaño';
+
+  @override
+  String sizeTooLargeOnlyPrefix(Object bytes) {
+    return 'Contenido demasiado grande, mostrando solo los primeros $bytes';
+  }
+
+  @override
+  String get snippet => 'Fragmento de código';
+
+  @override
+  String get softWrap => 'Salto de línea suave';
+
+  @override
+  String get sort => 'Ordenar';
+
+  @override
+  String get sortByName => 'Por nombre';
+
+  @override
+  String get source => 'Origen';
+
+  @override
+  String get speed => 'Velocidad';
+
+  @override
+  String get start => 'Iniciar';
+
+  @override
+  String get stat => 'Estadísticas';
+
+  @override
+  String get stats => 'Estadísticas';
+
+  @override
+  String get stop => 'Detener';
+
+  @override
+  String get stopped => 'Detenido';
+
+  @override
+  String get storage => 'Almacenamiento';
+
+  @override
+  String get success => 'Éxito';
+
+  @override
+  String get sudoPassword => 'contraseña sudo';
+
+  @override
+  String sudoPwdTitle(Object pwd) {
+    return 'sudo $pwd';
+  }
+
+  @override
+  String get suspend => 'Suspender';
+
+  @override
+  String get switch_ => 'Interruptor';
+
+  @override
+  String get switcher => 'Conmutador';
+
+  @override
+  String get sync => 'Sincronizar';
+
+  @override
+  String get system => 'Sistema';
+
+  @override
+  String get tag => 'Etiqueta';
+
+  @override
+  String get tapToAuth => 'Toca para autenticarte';
+
+  @override
+  String get temperature => 'Temperatura';
+
+  @override
+  String get terminal => 'Terminal';
+
+  @override
+  String get test => 'Prueba';
+
+  @override
+  String get textScaler => 'Escalar texto';
+
+  @override
+  String get theme => 'Tema';
+
+  @override
+  String get themeMode => 'Modo de tema';
+
+  @override
+  String get thinking => 'Pensando';
+
+  @override
+  String get time => 'Tiempo';
+
+  @override
+  String get timedOut => 'Tiempo agotado';
+
+  @override
+  String get timeout => 'Tiempo de espera';
+
+  @override
+  String get times => 'Veces';
+
+  @override
+  String get total => 'Total';
+
+  @override
+  String get totalAttempts => 'Total';
+
+  @override
+  String get traffic => 'Tráfico';
+
+  @override
+  String get ttl => 'TTL';
+
+  @override
+  String get type => 'Tipo';
+
+  @override
+  String get undo => 'Deshacer';
+
+  @override
+  String get unknown => 'Desconocido';
+
+  @override
+  String get unsupported => 'No compatible';
+
+  @override
+  String get update => 'Actualizar';
+
+  @override
+  String get upload => 'Subir';
+
+  @override
+  String get uptime => 'Tiempo de actividad';
+
+  @override
+  String get used => 'Usado';
+
+  @override
+  String get user => 'Usuario';
+
+  @override
+  String get valid => 'Válido';
+
+  @override
+  String get value => 'Valor';
+
+  @override
+  String versionHasUpdate(Object build) {
+    return 'Nueva versión disponible: v1.0.$build, toca para actualizar';
+  }
+
+  @override
+  String versionUnknownUpdate(Object build) {
+    return 'Versión actual: v1.0.$build, toca para buscar actualizaciones';
+  }
+
+  @override
+  String versionUpdated(Object build) {
+    return 'Versión actual: v1.0.$build, ya tienes la última versión';
+  }
+
+  @override
+  String get view => 'Ver';
+
+  @override
+  String get viewErr => 'Ver error';
+
+  @override
+  String get write => 'Escribir';
+
+  @override
+  String get yesterday => 'Ayer';
+
+  @override
+  String durationDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count días',
+      one: '1 día',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String durationHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count horas',
+      one: '1 hora',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String durationMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count minutos',
+      one: '1 minuto',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String durationSeconds(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count segundos',
+      one: '1 segundo',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get appearanceSettings => 'Apariencia';
+
+  @override
+  String get appearancePreset => 'Tema predefinido';
+
+  @override
+  String get appearanceThemeSchemaRange => 'Esquema de tema compatible';
+
+  @override
+  String get appearanceThemeInstall => 'Instalar tema';
+
+  @override
+  String get appearanceThemeStore => 'Tienda de temas';
+
+  @override
+  String get appearanceInvalidTheme => 'Paquete de tema o catálogo no válido';
+
+  @override
+  String get themeStoreRefreshFailed => 'No se pudo leer el catálogo de temas.';
+
+  @override
+  String themeStoreDeleteTheme(String name) {
+    return '¿Eliminar «$name»? Sus archivos se quitan de este dispositivo. Si es el tema en uso, la aplicación vuelve al tema predeterminado.';
+  }
+
+  @override
+  String themeStoreUpdatedFmt(String ago) {
+    return 'actualizado $ago';
+  }
+
+  @override
+  String get themeStoreUpdatedJustNow => 'actualizado ahora mismo';
+
+  @override
+  String get themeStoreSortInUse => 'En uso primero';
+
+  @override
+  String themeStoreMakeOwnFmt(String doc) {
+    return '¿Quieres crear tu propio tema? Consulta [cómo crear uno]($doc). ¡Gracias por tu contribución!';
+  }
+
+  @override
+  String appearanceThemeNeedsNewerApp(String version) {
+    return 'Se necesita una versión más reciente de la app: $version';
+  }
+
+  @override
+  String get appearanceFontFamilies => 'Familias de fuentes de la interfaz';
+
+  @override
+  String get appearanceFontFamiliesTip =>
+      'Un nombre por línea; las fuentes se prueban en orden.';
+
+  @override
+  String get appearanceFontImport =>
+      'Importar archivo de fuente de la interfaz';
+
+  @override
+  String get appearanceIcons => 'Iconos de la aplicación';
+
+  @override
+  String get appearanceCorners => 'Esquinas';
+
+  @override
+  String get appearanceCardCorners => 'Esquinas de tarjetas';
+
+  @override
+  String get appearanceTileCorners => 'Esquinas de elementos';
+
+  @override
+  String get appearanceButtonCorners => 'Esquinas de botones';
+
+  @override
+  String appearanceThemeModeLocked(String mode) {
+    return 'Este tema solo admite $mode. Selecciona otro tema para cambiar de modo.';
+  }
+
+  @override
+  String get caseSensitive => 'Distinguir mayúsculas';
+
+  @override
+  String get flashlight => 'Linterna';
+
+  @override
+  String get regex => 'Expresión regular';
+
+  @override
+  String get showPwd => 'Mostrar contraseña';
+
+  @override
+  String existsFmt(String name) {
+    return '$name ya existe';
+  }
+
+  @override
+  String tooLargeFmt(String size) {
+    return 'Más de $size';
+  }
+
+  @override
+  String get appearanceIconPack => 'Paquete de iconos';
+
+  @override
+  String get appearanceIconPackTheme => 'Iconos del tema';
+
+  @override
+  String get themeStoreThemes => 'Temas';
+
+  @override
+  String get themeStoreIconPacks => 'Paquetes de iconos';
+
+  @override
+  String themeStoreDeleteIconPack(String name) {
+    return '¿Eliminar «$name»? Sus archivos se eliminarán de este dispositivo. Si es el paquete de iconos en uso, la app volverá a los iconos del tema.';
+  }
+}

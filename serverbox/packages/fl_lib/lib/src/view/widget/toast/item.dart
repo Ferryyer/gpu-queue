@@ -1,0 +1,766 @@
+part of 'toast.dart';
+
+/// Clips the top and the bottom, and lets the two sides through.
+///
+/// Growing into place is a vertical clip, so that half of it is the point. The
+/// sides are not: a toast slides in from one of them and casts a shadow on all
+/// four, and a rect that hugs its width cuts off both.
+class _SidesOpen extends CustomClipper<Rect> {
+  const _SidesOpen();
+
+  /// Wider than any window this could be asked to run in.
+  static const _slack = 4000.0;
+
+  @override
+  Rect getClip(Size size) => Rect.fromLTRB(-_slack, 0, size.width + _slack, size.height);
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Rect> oldClipper) => false;
+}
+
+/// A single toast.
+class _ToastItem extends StatefulWidget {
+  final _ToastEntry entry;
+
+  /// Width of the stack. Known here rather than measured, because whether the
+  /// title fits on one line has to be decided before the row is laid out.
+  final double width;
+
+  /// 0 is the front of the pile, the newest toast.
+  final int depth;
+
+  /// 0 piled, 1 opened. Drives what the depth is drawn as.
+  ///
+  /// The animation rather than its value, so that a frame of the pile opening
+  /// rebuilds one transform per toast and not a toast's whole subtree.
+  final Animation<double> open;
+
+  /// Whether there is more than one toast, and so a pile at all.
+  final bool piled;
+
+  /// Whether a tap may open the body. False while piled, where a tap means the
+  /// pile instead.
+  final bool bodyAllowed;
+
+  /// Whether the countdown is held, because the pile is open and being read.
+  final bool paused;
+
+  /// Opens or closes the pile. Null when there is only this one toast.
+  final VoidCallback? onPileToggle;
+
+  const _ToastItem({
+    super.key,
+    required this.entry,
+    required this.width,
+    required this.depth,
+    required this.open,
+    required this.piled,
+    required this.bodyAllowed,
+    required this.paused,
+    required this.onPileToggle,
+  });
+
+  @override
+  State<_ToastItem> createState() => _ToastItemState();
+}
+
+class _ToastItemState extends State<_ToastItem> with TickerProviderStateMixin {
+  static const _animeDuration = Duration(milliseconds: 240);
+  static const _radius = BorderRadius.all(Radius.circular(11));
+  static const _padding = EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+  static const _gap = 8.0;
+  static const _iconSize = 18.0;
+  static const _lineHeight = 18.0;
+  static const _chevronSlot = _iconSize + _gap;
+  static const _barHeight = 1.0;
+
+  /// How far a toast can be pulled inwards, away from the edge it hangs on.
+  /// It never reaches this, only approaches it, so the pull runs out of give.
+  static const _rubberLimit = 36.0;
+
+  /// Of the axis, past which letting go throws the toast out instead of back.
+  static const _dismissAt = 0.35;
+
+  /// Or this fast, in logical pixels a second, however far it got.
+  static const _dismissSpeed = 620.0;
+  static const _titleStyle = TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500, height: 1.3);
+
+  /// Space before the action button, and the button's own padding on each side.
+  static const _actionGap = 4.0;
+  static const _actionPadding = 8.0;
+
+  late final AnimationController _anime;
+
+  /// Height and opacity, which cannot overshoot.
+  late final CurvedAnimation _curve;
+
+  /// Displacement, which springs past its mark and settles back.
+  late final CurvedAnimation _slideCurve;
+
+  late final Animation<Offset> _slide;
+
+  /// Drives the countdown bar only. The dismissal itself is a [Timer]: a ticker
+  /// is muted while the window is not being drawn, and how long a message stays
+  /// should not depend on that.
+  late final AnimationController _countdown;
+
+  /// Runs the toast back to place, or the rest of the way out.
+  late final AnimationController _settle;
+
+  /// How far it has been pulled along the axis, before the rubber band. Signed
+  /// so that positive is towards the edge the toast hangs on, whichever that is.
+  final _drag = ValueNotifier(0.0);
+
+  var _settleFrom = 0.0;
+  var _settleTo = 0.0;
+  var _throwingOut = false;
+  var _dragging = false;
+
+  Timer? _timer;
+  Timer? _copiedTimer;
+  late bool _expanded = _data.expanded;
+  var _hovering = false;
+  var _copied = false;
+  var _expandable = false;
+
+  /// Whether the arrival animation has finished.
+  ///
+  /// It clips while it plays, which is the point of it; afterwards there is
+  /// nothing to clip and a clip would cut the shadow and any drag past the
+  /// toast's own bounds, so the whole thing comes out of the tree.
+  var _settled = false;
+
+  ToastData get _data => widget.entry.data;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.entry.mounted = true;
+    widget.entry.dismissing.addListener(_onDismissing);
+
+    _anime = AnimationController(vsync: this, duration: _animeDuration);
+    _curve = CurvedAnimation(
+      parent: _anime,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    _slideCurve = CurvedAnimation(
+      parent: _anime,
+      curve: _kSpring,
+      reverseCurve: Curves.easeInCubic,
+    );
+    // In from the edge it is pinned to. The dx is in logical direction — the
+    // `SlideTransition` below is given the text direction and flips it in RTL.
+    _slide = Tween<Offset>(
+      begin: switch (ToastConfig.align) {
+        ToastAlign.topEnd || ToastAlign.bottomEnd => const Offset(0.25, 0),
+        ToastAlign.topStart || ToastAlign.bottomStart => const Offset(-0.25, 0),
+        ToastAlign.topCenter => const Offset(0, -0.4),
+        ToastAlign.bottomCenter => const Offset(0, 0.4),
+      },
+      end: Offset.zero,
+    ).animate(_slideCurve);
+
+    _countdown = AnimationController(vsync: this, duration: _data.duration);
+
+    _settle = AnimationController(vsync: this, duration: Durations.short4)
+      ..addListener(_onSettleTick);
+
+    _anime
+      ..addStatusListener(_onAnimeStatus)
+      ..forward();
+    _syncTimer();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _expandable = _computeExpandable();
+  }
+
+  @override
+  void didUpdateWidget(_ToastItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Unconditional: opening the pile holds every countdown in it and closing it
+    // releases them, and everything else that reaches here leaves them alone.
+    _syncTimer();
+    // Whether the title fits was measured against the old width. A resized
+    // window is not a dependency change, so nothing else would remeasure it.
+    if (widget.width != oldWidget.width) {
+      _expandable = _computeExpandable();
+    }
+  }
+
+  @override
+  void dispose() {
+    // Back to unowned. An entry whose host went away has nothing left to play
+    // its exit animation, and must be droppable outright.
+    widget.entry.mounted = false;
+    widget.entry.dismissing.removeListener(_onDismissing);
+    _timer?.cancel();
+    _copiedTimer?.cancel();
+    _curve.dispose();
+    _slideCurve.dispose();
+    _countdown.dispose();
+    _settle.dispose();
+    _drag.dispose();
+    _anime.dispose();
+    super.dispose();
+  }
+
+  // -- Actions --
+
+  /// Whether the countdown should be holding right now.
+  bool get _held =>
+      _isExpanded ||
+      _hovering ||
+      _dragging ||
+      _throwingOut ||
+      widget.paused ||
+      widget.entry.dismissing.value;
+
+  /// Brings the countdown in line with [_held].
+  ///
+  /// Idempotent, and that is the point: it runs from every rebuild, and a
+  /// rebuild is not news. A toast next to this one leaving is a rebuild — it
+  /// changes `piled`, and with it `bodyAllowed` — and used to put this toast's
+  /// countdown back to full for it.
+  ///
+  /// What does restart it is being released, having been held: reading it is
+  /// what holding means, and a message that vanishes half a second after the
+  /// pointer leaves has not been read. The bar going back to full while held is
+  /// what says so.
+  void _syncTimer() {
+    if (_data.duration <= Duration.zero) return;
+
+    if (_held) {
+      _timer?.cancel();
+      _timer = null;
+      _countdown.stop();
+      _countdown.value = 0;
+      return;
+    }
+
+    if (_timer != null) return;
+    _timer = Timer(_data.duration, () => _ToastCtrl.dismiss(widget.entry));
+    _countdown.forward(from: 0);
+  }
+
+  void _onDismissing() {
+    if (!widget.entry.dismissing.value) return;
+    _timer?.cancel();
+    _countdown.stop();
+    // Removed only after the exit animation, so that the toasts below it slide
+    // up instead of jumping.
+    _anime.reverse().whenCompleteOrCancel(() => _ToastCtrl.remove(widget.entry));
+  }
+
+  void _onHover(bool hovering) {
+    _hovering = hovering;
+    _syncTimer();
+  }
+
+  void _onAnimeStatus(AnimationStatus status) {
+    final settled = status == AnimationStatus.completed;
+    if (settled == _settled) return;
+    setState(() => _settled = settled);
+  }
+
+  void _onSettleTick() {
+    final curve = _throwingOut ? Curves.easeOut : _kSpring;
+    _drag.value = _settleFrom + (_settleTo - _settleFrom) * curve.transform(_settle.value);
+  }
+
+  void _onDragStart() {
+    _settle.stop();
+    _throwingOut = false;
+    _dragging = true;
+    _syncTimer();
+  }
+
+  /// [delta] is in screen pixels along the axis; the sign is normalised so that
+  /// what is accumulated always counts positive towards the edge.
+  void _onDragUpdate(double delta) {
+    _drag.value += delta * _outwardSign;
+  }
+
+  void _onDragEnd(double velocity) {
+    _dragging = false;
+    final outward = velocity * _outwardSign;
+    final extent = _axisExtent;
+    final thrown = _drag.value > extent * _dismissAt || outward > _dismissSpeed;
+
+    _throwingOut = thrown;
+    _settleFrom = _drag.value;
+    _settleTo = thrown ? extent + _rubberLimit : 0;
+    // On completion only: a toast grabbed again on its way out has its settle
+    // cancelled, and is the reader's to keep rather than dismissed anyway.
+    _settle.forward(from: 0).then((_) {
+      // Gone from the screen but not yet from the pile: it still has to give up
+      // the height it holds, which is what moves the rest of the pile up. The
+      // same path an expiring toast takes, so both look the same.
+      if (_throwingOut) _ToastCtrl.dismiss(widget.entry);
+    });
+
+    // No longer under a finger. Still held if it is on its way out, which
+    // [_held] knows, so this needs no condition of its own.
+    _syncTimer();
+  }
+
+  void _toggleExpand() {
+    if (!_canOpenBody) return;
+    setState(() => _expanded = !_expanded);
+    _syncTimer();
+  }
+
+  /// A tap on the card itself, which is the pile's and nothing else's.
+  ///
+  /// The body has the chevron, always and only. Otherwise a tap would mean the
+  /// pile with two toasts on screen and the body with one, and on the way to a
+  /// body it would stop a countdown or start it over — a single toast should sit
+  /// there and expire on time however much it is tapped.
+  ///
+  /// [ToastData.onTap] takes precedence, being explicit.
+  void _onTap() {
+    final onTap = _data.onTap;
+    if (onTap != null) return onTap();
+    widget.onPileToggle?.call();
+  }
+
+  void _onLongPress() {
+    Pfs.copy(_data.textToCopy);
+    HapticFeedback.mediumImpact();
+
+    // Desktop has no haptics, so the toast says it itself.
+    setState(() => _copied = true);
+    _copiedTimer?.cancel();
+    _copiedTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  void _onAction() {
+    final action = _data.action;
+    if (action == null) return;
+    if (action.dismissOnTap) _ToastCtrl.dismiss(widget.entry);
+    action.onTap();
+  }
+
+  // -- Utils --
+
+  /// Whether the body is showing. [_expanded] is what the user asked for;
+  /// while piled there is no room to honour it.
+  bool get _isExpanded => _expanded && widget.bodyAllowed;
+
+  /// Whether a body can be opened at all right now.
+  bool get _canOpenBody => _expandable && widget.bodyAllowed;
+
+  /// The style the title is both measured and painted with.
+  ///
+  /// Taken from `bodyMedium`, which is what the card's own [Material] hands
+  /// down to everything inside it. `Material` *replaces* the ambient default
+  /// text style rather than merging with it, so the style above the toast host
+  /// — the app's, if it set one — is not what the title is painted with, and
+  /// measuring it there is measuring a different string than the one on screen.
+  ///
+  /// The `MediaQuery` overrides are then applied by hand, because `Text` applies
+  /// them at paint time on top of the style it was given — bold text, letter
+  /// spacing, word spacing, line height. A painter that skips them measures a
+  /// title the platform then bolds or widens, and the arrow below appears or
+  /// stays away on the wrong side of the boundary. `Text` applies each of them
+  /// again; they are replacements rather than factors, so it lands on the same
+  /// value.
+  TextStyle _resolveTitleStyle(BuildContext context) {
+    final base = (Theme.of(context).textTheme.bodyMedium ?? const TextStyle())
+        .merge(_titleStyle)
+        .copyWith(color: ComponentStyles.of(context).toast.textColor);
+    return _withTextOverrides(context, base);
+  }
+
+  /// [base] with what `Text` applies on top of any style at paint time: the
+  /// `MediaQuery` line height, letter and word spacing, and bold text.
+  static TextStyle _withTextOverrides(BuildContext context, TextStyle base) {
+    return base.copyWith(
+      height:
+          MediaQuery.maybeLineHeightScaleFactorOverrideOf(context) ?? base.height,
+      letterSpacing:
+          MediaQuery.maybeLetterSpacingOverrideOf(context) ?? base.letterSpacing,
+      wordSpacing:
+          MediaQuery.maybeWordSpacingOverrideOf(context) ?? base.wordSpacing,
+      fontWeight: MediaQuery.boldTextOf(context) ? FontWeight.bold : base.fontWeight,
+    );
+  }
+
+  /// Whether there is anything to reveal.
+  ///
+  /// A body, or a title too long for one line: `Toast.show('$e')` has nowhere
+  /// else to put the rest of the exception, and it is the shape most call sites
+  /// have. The title's room is what the icon, the chevron and the action
+  /// button leave of the width.
+  bool _computeExpandable() {
+    final data = _data;
+    if (data.content != null) return false;
+    if (data.body != null) return true;
+
+    final hasLeading = data.leading != null || data.iconData != null;
+    final action = data.action;
+    final available = widget.width -
+        _padding.horizontal -
+        (hasLeading ? _iconSize + _gap : 0) -
+        _chevronSlot -
+        (action == null ? 0 : _actionWidth(action.label));
+    if (available <= 0) return false;
+
+    final painter = _painter(data.title, _resolveTitleStyle(context))..layout(maxWidth: available);
+    final exceeded = painter.didExceedMaxLines;
+    painter.dispose();
+    return exceeded;
+  }
+
+  /// Width the action button takes, gap included: its label as [TextButton]
+  /// paints it — the button theme's text style, else the default
+  /// `labelLarge`, with [UIs.text12] merged in and the `MediaQuery` overrides
+  /// applied, as for the title.
+  double _actionWidth(String label) {
+    final button = TextButtonTheme.of(context).style?.textStyle?.resolve(const <WidgetState>{});
+    final base = (button ?? Theme.of(context).textTheme.labelLarge ?? const TextStyle()).merge(UIs.text12);
+    final style = _withTextOverrides(context, base);
+    final painter = _painter(label, style)..layout();
+    final width = painter.width;
+    painter.dispose();
+    return _actionGap + _actionPadding * 2 + width;
+  }
+
+  TextPainter _painter(String text, TextStyle style) => TextPainter(
+        text: TextSpan(text: text, style: style),
+        maxLines: 1,
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        locale: Localizations.maybeLocaleOf(context),
+      );
+
+  /// Whether the toast is dragged left and right rather than up and down. One
+  /// pinned to no side edge has no edge that way, so it goes up or down instead.
+  static bool get _horizontalAxis => !ToastConfig.align.isCenter;
+
+  /// Turns a screen delta along the axis into one that counts positive towards
+  /// the edge the toast hangs on — the only direction it can leave by.
+  ///
+  /// Dragging the other way is a drag across the content the toast covers, with
+  /// no edge at the end of it; [_rubberOf] gives it somewhere to go and nothing
+  /// to reach.
+  double get _outwardSign {
+    final align = ToastConfig.align;
+    if (!_horizontalAxis) return align.isTop ? -1 : 1;
+    final ltr = Directionality.of(context) == TextDirection.ltr;
+    return align.isEnd == ltr ? 1 : -1;
+  }
+
+  /// How far the toast actually moves, given how far it was pulled.
+  ///
+  /// Outwards it follows the finger. Inwards it gives way less and less, a
+  /// hyperbola that approaches [_rubberLimit] and never arrives, so the pull
+  /// runs out of travel rather than stopping at a wall.
+  static double _rubberOf(double pulled) {
+    if (pulled >= 0) return pulled;
+    final pull = -pulled;
+    return -pull * _rubberLimit / (pull + _rubberLimit);
+  }
+
+  /// Size of the toast along the drag axis, for the throw-out threshold.
+  double get _axisExtent {
+    if (_horizontalAxis) return widget.width;
+    return context.size?.height ?? 48;
+  }
+
+  // -- Widget build --
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = _data.accentColor(context);
+    final fromTop = ToastConfig.align.isTop;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+
+    // Everything above this is a transform, a clip or a size factor — the
+    // content itself does not change while any of them play, so it is worth a
+    // layer of its own to move around rather than redrawing every frame.
+    Widget card = RepaintBoundary(child: _buildCard(theme, accent));
+
+    // Only where a pointer can hover. On a touch platform it is an annotation
+    // in every hit test for an event that cannot arrive.
+    if (isDesktop) {
+      card = MouseRegion(
+        onEnter: (_) => _onHover(true),
+        onExit: (_) => _onHover(false),
+        child: card,
+      );
+    }
+
+    // Under reduced motion it only fades: no slide, and no growing out of the
+    // edge, which would push the rest of the stack along.
+    if (!_settled && reduceMotion) {
+      card = FadeTransition(opacity: _curve, child: card);
+    } else if (!_settled) {
+      final fade = FadeTransition(opacity: _curve, child: card);
+      card = SlideTransition(
+        position: _slide,
+        textDirection: Directionality.of(context),
+        // Grows out of the edge the stack hangs from, so what is already there
+        // does not shift as this one arrives. `SizeTransition` would do this,
+        // but it clips to a rect the width of the toast, which cuts off both the
+        // slide and the shadow — hence the clipper that leaves the sides open.
+        child: AnimatedBuilder(
+          animation: _curve,
+          child: fade,
+          builder: (_, child) => ClipRect(
+            clipper: const _SidesOpen(),
+            child: Align(
+              alignment: fromTop ? Alignment.topCenter : Alignment.bottomCenter,
+              heightFactor: _curve.value.clamp(0.0, 1.0),
+              child: child,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Outermost, so that neither the arrival clip nor anything else cuts a toast
+    // that is being pulled past its own bounds.
+    card = _buildDraggable(card);
+
+    // Under the front of a closed pile, where there is nothing to hit.
+    if (widget.depth > 0 && widget.piled && !widget.bodyAllowed) {
+      card = IgnorePointer(child: card);
+    }
+
+    // The depth is animated rather than taken as given: the toasts behind one
+    // that leaves are handed a new integer at once, and have to travel to it.
+    // The pile is told the value in between, so its layout travels too.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: widget.depth.toDouble()),
+      duration: reduceMotion ? Duration.zero : Durations.medium2,
+      curve: _kSpring,
+      child: card,
+      builder: (_, depth, child) {
+        final at = math.max(0.0, depth);
+        return _PileSlot(
+          depth: at,
+          child: AnimatedBuilder(
+            animation: widget.open,
+            child: child,
+            builder: (_, child) => _buildDepth(at, fromTop, child!),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Behind the front of the pile a toast is drawn a little smaller, and past
+  /// the peek limit not drawn at all. Both settle to normal as the pile opens.
+  ///
+  /// Neither is a layout change, so the pile still measures the full height each
+  /// toast will need once it is open.
+  Widget _buildDepth(double depth, bool fromTop, Widget child) {
+    if (depth == 0) return child;
+
+    final open = widget.open.value.clamp(0.0, 1.0);
+    final scale = _lerp(1 - depth * _kPileScaleStep, 1, open);
+    final opacity = math.max((1 - (depth - _kMaxPeek)).clamp(0.0, 1.0), open);
+    // Once open there is nothing to draw differently, and an identity transform
+    // still costs a layer push.
+    if (scale == 1 && opacity == 1) return child;
+
+    return Transform.scale(
+      scale: scale,
+      alignment: fromTop ? Alignment.topCenter : Alignment.bottomCenter,
+      child: opacity < 1 ? Opacity(opacity: opacity, child: child) : child,
+    );
+  }
+
+  Widget _buildDraggable(Widget child) {
+    final horizontal = _horizontalAxis;
+
+    return GestureDetector(
+      onHorizontalDragStart: horizontal ? (_) => _onDragStart() : null,
+      onHorizontalDragUpdate: horizontal ? (d) => _onDragUpdate(d.delta.dx) : null,
+      onHorizontalDragEnd: horizontal ? (d) => _onDragEnd(d.velocity.pixelsPerSecond.dx) : null,
+      onVerticalDragStart: horizontal ? null : (_) => _onDragStart(),
+      onVerticalDragUpdate: horizontal ? null : (d) => _onDragUpdate(d.delta.dy),
+      onVerticalDragEnd: horizontal ? null : (d) => _onDragEnd(d.velocity.pixelsPerSecond.dy),
+      child: ValBuilder.child(
+        listenable: _drag,
+        child: child,
+        builder: (pulled, child) {
+          final moved = _rubberOf(pulled) * _outwardSign;
+          return Transform.translate(
+            offset: horizontal ? Offset(moved, 0) : Offset(0, moved),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCard(ThemeData theme, Color accent) {
+    final scheme = theme.colorScheme;
+    // The theme's toast style ([ComponentStyles]) over this card's own look.
+    final style = theme.extension<ComponentStyles>()?.toast ?? const ToastStyle();
+    final surface = style.backgroundColor ?? scheme.surfaceContainerHigh;
+    final tinted = _data.color == null && _data.level == ToastLevel.none
+        ? surface
+        : Color.alphaBlend(accent.withValues(alpha: 0.08), surface);
+    // Says a long press was taken, for the platforms with no haptics to say it.
+    // The surface rather than a border, and animated by [Material] itself.
+    final color = _copied ? Color.alphaBlend(accent.withValues(alpha: 0.22), tinted) : tinted;
+
+    return Material(
+      color: color,
+      elevation: style.elevation ?? 4,
+      shadowColor: Colors.black.withValues(alpha: 0.3),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: style.radius == null
+            ? _radius
+            : BorderRadius.circular(style.radius!),
+        side: style.borderColor == null && style.borderWidth == null
+            ? BorderSide.none
+            : themeBorderSide(
+                style.borderColor ?? scheme.outlineVariant,
+                style.borderWidth ?? 1,
+              ),
+      ),
+      child: InkWell(
+        onTap: _data.onTap != null || widget.onPileToggle != null ? _onTap : null,
+        onLongPress: _onLongPress,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Opening a body is a height change, and one worth playing: the
+            // toast grows and the pile relayouts around it every frame.
+            //
+            // Not clipped here — the card's own clip is what reveals the body as
+            // the height passes over it, and a clip at this level would cut the
+            // shadow instead. No overshoot either: past the full height there is
+            // nothing left to reveal but blank space.
+            AnimatedSize(
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : Durations.medium2,
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              clipBehavior: Clip.none,
+              child: Padding(padding: _padding, child: _buildContent(theme, accent)),
+            ),
+            _buildCountdown(accent),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// How long is left, along the bottom edge.
+  ///
+  /// Behind a boundary of its own, and reusing the one box it colours: it ticks
+  /// every frame for the whole life of the toast, and without one that is the
+  /// card, its shadow and its text redrawn each of those frames.
+  Widget _buildCountdown(Color accent) {
+    if (_data.duration <= Duration.zero) return UIs.placeholder;
+
+    return RepaintBoundary(
+      child: SizedBox(
+        height: _barHeight,
+        child: ValBuilder.child(
+          listenable: _countdown,
+          child: ColoredBox(color: accent),
+          builder: (value, child) => FractionallySizedBox(
+            alignment: AlignmentDirectional.centerStart,
+            widthFactor: 1 - value,
+            child: child,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(ThemeData theme, Color accent) {
+    final data = _data;
+    final content = data.content;
+    final icon = data.iconData;
+    final leading = data.leading ?? (icon == null ? null : Icon(icon, size: _iconSize, color: accent));
+    final action = data.action;
+    final body = data.body;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (leading != null) ...[
+          SizedBox(width: _iconSize, height: _lineHeight, child: Center(child: leading)),
+          const SizedBox(width: _gap),
+        ],
+        Expanded(
+          child: content ??
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    data.title,
+                    style: _resolveTitleStyle(context),
+                    maxLines: _isExpanded ? null : 1,
+                    overflow: _isExpanded ? TextOverflow.clip : TextOverflow.ellipsis,
+                  ),
+                  if (_isExpanded && body != null) ...[
+                    const SizedBox(height: 5),
+                    Text(body, style: UIs.text12Grey),
+                  ],
+                ],
+              ),
+        ),
+        if (action != null)
+          Padding(
+            padding: const EdgeInsetsDirectional.only(start: _actionGap),
+            child: TextButton(
+              onPressed: _onAction,
+              style: TextButton.styleFrom(
+                foregroundColor: accent,
+                padding: const EdgeInsets.symmetric(horizontal: _actionPadding),
+                minimumSize: const Size(0, 28),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(action.label, style: UIs.text12),
+            ),
+          ),
+        if (_canOpenBody) ...[
+          const SizedBox(width: _gap),
+          // Its own target rather than the whole card: when the call site took
+          // the tap over with `onTap`, this is the only way left to open it.
+          SizedBox(
+            height: _lineHeight,
+            child: Semantics(
+              button: true,
+              expanded: _isExpanded,
+              label: l10n.more,
+              child: InkResponse(
+                onTap: _toggleExpand,
+                radius: 16,
+                child: AnimatedRotation(
+                  turns: _isExpanded ? 0.5 : 0,
+                  duration: MediaQuery.disableAnimationsOf(context)
+                      ? Duration.zero
+                      : Durations.short3,
+                  child: Icon(
+                    Icons.keyboard_arrow_down,
+                    size: _iconSize,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
