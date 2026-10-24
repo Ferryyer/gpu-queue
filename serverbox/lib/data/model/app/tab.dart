@@ -29,7 +29,12 @@ enum AppTab {
 
   /// Several views of several servers at once, split into panes.
   @HiveField(8)
-  workspace;
+  workspace,
+
+  @HiveField(9)
+  overview,
+  @HiveField(10)
+  tasks;
 
   /// Indices that named a tab which no longer exists, and so are never
   /// resolved as an integer.
@@ -70,7 +75,7 @@ enum AppTab {
   /// arranged is stored and keeps its own tabs (schema step m030 adds
   /// Virtualization where a PVE host was configured); one never arranged is
   /// this list, read at launch, so both are behind "more" there.
-  static const defaultOrder = [server, ssh, file, agent];
+  static const defaultOrder = [overview, tasks, server];
 
   /// The tabs not in [enabled], in declaration order — what "more" holds.
   ///
@@ -128,5 +133,4 @@ enum AppTab {
     }
     return null;
   }
-
 }

@@ -79,10 +79,13 @@ try:
    page.set_viewport_size({'width':width,'height':1100 if width>600 else 844})
    page.reload(wait_until='networkidle')
    page.screenshot(path=str(ARTIFACTS/filename),full_page=True)
+  page.locator('[data-id="GQ-0000000000000001"] .task-title').click()
   page.locator('[data-detail-stop]').click();expect(page.locator('#stop-dialog')).to_be_visible()
   audit=page.evaluate(AUDIT);assert not audit['failures'],audit
   page.locator('#cancel-stop').click()
+  page.locator('#back-to-tasks').click()
   page.request.post(BASE+'/test/fail');page.locator('#refresh').click()
+  page.locator('[data-id="GQ-0000000000000001"] .task-title').click()
   expect(page.locator('.pipeline-step.failed')).to_have_count(1)
   audit=page.evaluate(AUDIT);assert not audit['failures'],audit
   page.locator('[data-step="1"]').click();expect(page.locator('.log-box')).to_contain_text('evaluation failed')

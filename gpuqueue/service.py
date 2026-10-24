@@ -117,6 +117,10 @@ class Service:
         if resource.get('status') == 'closed' and public['state'] not in TERMINAL:
             public.update(state='interrupted', failureReason='GPU 已回收，任务中断；保留已有检查点，不自动重新申请或重跑')
         public['request_uuid'], public['job_uuid'] = request_id, job_id
+        public['execution'] = {'instance_id': request_id, 'job_id': job_id,
+                               'workspace': str(folder/'code'),
+                               'host': (resource.get('telemetry') or {}).get('host')}
+
         if internal.get('stop_confirmed') and public['state'] != 'completed':
             public.update(state='stopped',phase='任务已停止，已有产物保留')
             public.pop('failureReason',None)
