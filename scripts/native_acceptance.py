@@ -158,6 +158,7 @@ def main():
         save()
         if result['exitCode']:
             print(f'Failed; see {log}', file=sys.stderr)
+            print(result['output'][-12000:], file=sys.stderr)
             return 1
     if args.stage == 'build':
         app = APP / 'build/macos-qa/Build/Products/Release/GPU Queue.app'

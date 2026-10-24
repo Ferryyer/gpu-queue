@@ -41,16 +41,19 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('native PTY reports shell output, environment, directory and exit status', () async {
     final dir = await Directory.systemTemp.createTemp('gpuq-pty-');
+    // macOS /var is a symlink to /private/var; the shell reports its physical
+    // working directory. Compare the actual directory rather than its alias.
+    final directory = await dir.resolveSymbolicLinks();
     final pty = Pty.start('/bin/sh',
       arguments: ['-c', r'test -t 0 || exit 99; printf "%s:%s\n" "$PTY_FIXTURE" "$PWD"; exit 7'],
-      workingDirectory: dir.path, environment: {'PTY_FIXTURE': 'cpu-native-fixture'});
+      workingDirectory: directory, environment: {'PTY_FIXTURE': 'cpu-native-fixture'});
     var exited = false;
     try {
       final output = pty.output.cast<List<int>>().transform(utf8.decoder).join();
       expect(await pty.exitCode.timeout(const Duration(seconds: 10)), 7);
       exited = true;
       final text = await output.timeout(const Duration(seconds: 10));
-      expect(text, contains('cpu-native-fixture:${dir.path}'));
+      expect(text, contains('cpu-native-fixture:$directory'));
     } finally {
       if (!exited) pty.kill(ProcessSignal.sigkill);
       await dir.delete();
