@@ -318,12 +318,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         if (_sort == 'name') {
           tasks.sort((a, b) => '${a['name']}'.compareTo('${b['name']}'));
         } else {
-          num timestamp(Map<String, dynamic> t) {
-            final at = t['updated_at'] ?? t['created_at'];
-            return at is num
-                ? at
-                : DateTime.tryParse('$at')?.millisecondsSinceEpoch ?? 0;
-          }
+          int timestamp(Map<String, dynamic> t) =>
+              QueuePresentation.taskSortTime(t)?.millisecondsSinceEpoch ?? 0;
 
           tasks.sort((a, b) => timestamp(b).compareTo(timestamp(a)));
         }

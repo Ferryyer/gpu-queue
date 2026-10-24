@@ -39,6 +39,60 @@ void main() {
   }
 
   testWidgets(
+    'real update survives narrow rows, long names and 1.5x text with usable actions',
+    (tester) async {
+      for (final width in [390.0, 560.0, 900.0]) {
+        for (final scale in [1.0, 1.5]) {
+          var starts = 0;
+          await show(
+            tester,
+            Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: width,
+                child: QueueTaskRow(
+                  task: {...task, 'updated_at': '2026-10-24T20:00:00+08:00'},
+                  selected: false,
+                  onTap: () {},
+                  action: SizedBox(
+                    width: 100,
+                    child: FilledButton(
+                      onPressed: () => starts++,
+                      child: const Text('开始'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            scale: scale,
+          );
+          expect(find.text('更新 2026-10-24 12:00:00 UTC'), findsOneWidget);
+          expect(find.text('失败'), findsOneWidget);
+          final row = tester.getRect(find.byType(QueueTaskRow));
+          for (final item in [
+            find.text('更新 2026-10-24 12:00:00 UTC'),
+            find.text('失败'),
+            find.byType(FilledButton),
+          ]) {
+            final rect = tester.getRect(item);
+            expect(row.contains(rect.topLeft), isTrue);
+            expect(
+              row.contains(rect.bottomRight - const Offset(0.01, 0.01)),
+              isTrue,
+            );
+          }
+          if (width == 900 && scale == 1) {
+            expect(row.height, closeTo(64, 2));
+          }
+          await tester.tap(find.byType(FilledButton));
+          expect(starts, 1);
+          expect(tester.takeException(), isNull);
+        }
+      }
+    },
+  );
+
+  testWidgets(
     'compact rows keep long names, textual failure and no private IDs in both themes',
     (tester) async {
       for (final dark in [false, true]) {

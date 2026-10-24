@@ -3,6 +3,46 @@ import 'package:server_box/core/gpu_queue/presentation.dart';
 
 void main() {
   final now = DateTime.utc(2026, 10, 24, 12);
+  test('task update time uses real timestamps with a single UTC format', () {
+    final seconds = now.millisecondsSinceEpoch / 1000;
+    for (final value in [
+      seconds,
+      '2026-10-24T12:00:00Z',
+      '2026-10-24T20:00:00+08:00',
+      '2026-10-24T05:00:00-0700',
+    ]) {
+      final task = <String, dynamic>{'updated_at': value};
+      expect(QueuePresentation.taskUpdated(task), '更新 2026-10-24 12:00:00 UTC');
+      expect(QueuePresentation.taskSortTime(task), now);
+    }
+    expect(
+      QueuePresentation.taskSortTime({'updated_at': seconds + 1}),
+      now.add(const Duration(seconds: 1)),
+    );
+  });
+  test('missing updates stay missing even when creation time is available', () {
+    for (final value in [
+      null,
+      '',
+      'invalid',
+      '2026-10-24T12:00:00',
+      -1,
+      0,
+      double.nan,
+      double.infinity,
+      8640000000001,
+      {},
+      true,
+    ]) {
+      final task = <String, dynamic>{
+        'updated_at': value,
+        'created_at': '2026-10-24T12:00:00Z',
+      };
+      expect(QueuePresentation.taskUpdated(task), '更新时间未提供');
+      expect(QueuePresentation.taskSortTime(task), now);
+    }
+    expect(QueuePresentation.taskSortTime({}), isNull);
+  });
   Map<String, dynamic> resource({double age = 35, String status = 'online'}) =>
       {
         'status': status,

@@ -84,7 +84,7 @@ class QueueTaskRow extends StatelessWidget {
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minHeight: 64),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
             border: Border(
               left: BorderSide(
@@ -110,11 +110,44 @@ class QueueTaskRow extends StatelessWidget {
                         style: const TextStyle(fontSize: 14),
                       ),
                     ),
-                    Text(
-                      '${task['project'] ?? '未提供项目'} · ${QueuePresentation.compactRequirements(task)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
+                    LayoutBuilder(
+                      builder: (context, bounds) {
+                        final style = Theme.of(context).textTheme.bodySmall;
+                        final updated = QueuePresentation.taskUpdated(task);
+                        final scaler = MediaQuery.textScalerOf(context);
+                        final measure = TextPainter(
+                          text: TextSpan(text: updated, style: style),
+                          textDirection: Directionality.of(context),
+                          textScaler: scaler,
+                        )..layout();
+                        final inline =
+                            bounds.maxWidth >=
+                            measure.width + scaler.scale(80) + 12;
+                        measure.dispose();
+                        final metadata = Tooltip(
+                          message:
+                              '${task['project'] ?? '未提供项目'} · ${QueuePresentation.compactRequirements(task)}',
+                          child: Text(
+                            '${task['project'] ?? '未提供项目'} · ${QueuePresentation.compactRequirements(task)}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: style,
+                          ),
+                        );
+                        final time = Text(updated, style: style);
+                        return inline
+                            ? Row(
+                                children: [
+                                  Expanded(child: metadata),
+                                  const SizedBox(width: 12),
+                                  time,
+                                ],
+                              )
+                            : Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [metadata, time],
+                              );
+                      },
                     ),
                   ],
                 ),

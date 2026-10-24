@@ -53,6 +53,37 @@ abstract final class QueuePresentation {
     return value is String && value.trim().isNotEmpty ? value : '未提供';
   }
 
+  /// Task timestamps are ISO 8601 with an explicit zone or Unix seconds.
+  /// Reject ambiguous / malformed values; polling time is never a substitute.
+  static DateTime? taskTime(Object? value) {
+    if (value is num) {
+      if (!value.isFinite || value <= 0 || value > 8640000000000) return null;
+      return DateTime.fromMillisecondsSinceEpoch(
+        (value * 1000).round(),
+        isUtc: true,
+      );
+    }
+    if (value is! String ||
+        !RegExp(
+          r'(Z|[+-]\d{2}:?\d{2})$',
+          caseSensitive: false,
+        ).hasMatch(value)) {
+      return null;
+    }
+    return DateTime.tryParse(value)?.toUtc();
+  }
+
+  static DateTime? taskSortTime(Map<String, dynamic> task) =>
+      taskTime(task['updated_at']) ?? taskTime(task['created_at']);
+
+  static String taskUpdated(Map<String, dynamic> task) {
+    final at = taskTime(task['updated_at']);
+    if (at == null) return '更新时间未提供';
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '更新 ${at.year}-${two(at.month)}-${two(at.day)} '
+        '${two(at.hour)}:${two(at.minute)}:${two(at.second)} UTC';
+  }
+
   static String stepStatus(Object? state) =>
       const {
         'ready': '准备完成',
