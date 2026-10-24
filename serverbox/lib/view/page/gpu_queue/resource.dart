@@ -19,8 +19,14 @@ class QueueResourceView extends StatelessWidget {
     final now = DateTime.now();
     final fresh = QueueTarget.fresh(resource, now, connected: connected);
     final gpus = QueuePresentation.gpus(resource, now, connected: connected);
-    return Padding(
-      padding: const EdgeInsets.all(12),
+    return Container(
+      margin: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
