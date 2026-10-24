@@ -1,8 +1,10 @@
 import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/gpu_queue/controller.dart';
+import 'package:server_box/core/gpu_queue/presentation.dart';
 import 'package:server_box/core/gpu_queue/protocol.dart';
 import 'package:server_box/core/route.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
@@ -10,6 +12,7 @@ import 'package:server_box/data/provider/server/all.dart';
 import 'package:server_box/data/provider/server/single.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/data/ssh/terminal_source.dart';
+import 'package:server_box/view/page/gpu_queue/resource.dart';
 import 'package:server_box/view/page/server/detail/view.dart';
 import 'package:server_box/view/page/ssh/page/page.dart';
 import 'package:server_box/view/page/storage/sftp.dart';
@@ -127,9 +130,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
 
   void _message(Object text) {
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$text')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$text')));
     }
   }
 
@@ -518,13 +520,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                   if (queue.resources.isEmpty)
                                     const ListTile(title: Text('尚无 GPU 实例')),
                                   for (final resource in queue.resources)
-                                    ListTile(
-                                      title: Text(
-                                        '${resource['id']} · ${QueueTarget.fresh(resource, DateTime.now(), connected: connected) ? '实时' : '上次采样 · 非实时'}',
-                                      ),
-                                      subtitle: Text(
-                                        '采样时间 ${resource['telemetry']?['at'] ?? '未知'}\n${QueueTarget.fresh(resource, DateTime.now(), connected: connected) ? jsonEncode(resource['telemetry']?['gpus']) : '实时指标不可用'}',
-                                      ),
+                                    QueueResourceView(
+                                      resource: resource,
+                                      connected: connected,
                                     ),
                                 ],
                               ),
@@ -571,9 +569,6 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     final resource = queue.resources
         .where((r) => r['id'] == QueueTarget.instance(task))
         .firstOrNull;
-    final fresh =
-        resource != null &&
-        QueueTarget.fresh(resource, DateTime.now(), connected: queue.connected);
     final enabled = queue.connected && !queue.acting && !queue.loading;
     final steps = (task['step_records'] as List? ?? [])
         .cast<Map<String, dynamic>>();
@@ -592,8 +587,12 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
           ),
         ),
         SelectableText(
-          '${task['description'] ?? ''}\n${task['id']} · 固定版本 ${task['version'] ?? task['digest']}\n授权：${task['approved_at'] ?? '等待点击开始'}',
+          '${task['description'] ?? ''}\n${task['id']}\n授权：${task['approved_at'] ?? '等待点击开始'}',
         ),
+        const SizedBox(height: 16),
+        Text('申请资源需求', style: Theme.of(context).textTheme.titleMedium),
+        SelectableText(QueuePresentation.requirements(task)),
+        SelectableText('固定版本：${QueuePresentation.version(task)}'),
         const SizedBox(height: 16),
         Wrap(
           spacing: 8,
@@ -694,9 +693,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
           ],
         ),
         if (resource != null)
-          SelectableText(
-            'GPU 采样：${fresh ? '实时' : '上次采样 · 非实时'} · ${resource['telemetry']?['at'] ?? '未知时间'}\n${fresh ? jsonEncode(resource['telemetry']?['gpus']) : '实时指标不可用'}',
-          ),
+          QueueResourceView(resource: resource, connected: queue.connected),
         const Divider(height: 32),
         Text('执行步骤与日志', style: Theme.of(context).textTheme.titleLarge),
         for (var index = 0; index < names.length; index++)
@@ -704,7 +701,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
             key: PageStorageKey('${task['id']}:$index'),
             title: Text('${index + 1}. ${names[index]}'),
             subtitle: Text(
-              index < steps.length ? '${steps[index]['state']}' : '等待执行',
+              QueuePresentation.stepStatus(
+                index < steps.length ? steps[index]['state'] : null,
+              ),
             ),
             children: [
               Padding(

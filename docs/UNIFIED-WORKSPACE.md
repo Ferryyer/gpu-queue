@@ -67,6 +67,27 @@ python3 scripts/package_unified_macos.py --app 'serverbox/build/macos/Build/Prod
 
 同时验收 SSH 成功/任务服务失败、无权限、断线重连、空任务/空实例、停止取消与确认、启动 digest 冲突和回执丢失不重放；连续两轮刷新保持焦点、选中项和滚动位置。最后检查原生中文字体、深浅色、Safari 网页缩放/全屏以及真实安装更新与旧版配置保留。上述项目通过前，本分支不代表已交付可安装的统一桌面版。
 
+## MF-9 复验修正（2026-10-24）
+
+- 窄屏网页详情具备命名 `dialog` 语义、`aria-modal` 与背景 `inert` 隔离。Tab / Shift+Tab 在详情内循环，模态内不触发模式快捷键；Esc 或返回按钮恢复原任务焦点与页面滚动。切回桌面宽度时解除隔离。详情内的停止确认框保留自己的焦点循环，轮询和详情页签切换后恢复控件与详情滚动。
+- 原生任务详情在启动按钮**之前**独立展示「申请资源需求」、GPU 数量、每卡 GB 显存和固定版本；未知值显示「未提供」。申请需求与下方实际 GPU 实例分开。既有 Auto / 断线禁止启动逻辑保持。
+- 原生监控及任务内 GPU 卡共用 `QueueResourceView`：逐卡利用率、显存已用/总量 GiB、温度 °C；缺测显示破折号，过期、离线或断线不显示缓存指标。采样时间以相对时间呈现，tooltip 和主动打开的诊断框可查看绝对时间。JSON 仅在诊断框展开后出现；步骤状态转换为中文语义。
+
+此次复跑结果：65 项 Python、32 项 Node、19 项 Dart/Flutter 隔离测试通过，应用 `lib` 与新增测试定向 `dart analyze` 无问题，网页构建通过。19 项包含原 11 项协议/会话、6 项呈现边界和 2 项真实监控组件的 Flutter CPU 渲染/弹窗测试。通过以下命令重现：
+
+```sh
+node scripts/build.mjs
+node --test tests/cloud.test.js tests/monitor.test.js tests/modes.test.cjs tests/widget.test.cjs tests/widget-update.test.cjs
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/test_queue_dart.py --widgets --flutter <flutter可执行文件>
+cd serverbox
+dart analyze lib test/unit/app/queue_presentation_test.dart test/unit/app/queue_resource_widget_test.dart
+```
+
+隔离测试直接导入真实生产源文件，仅构建 Flutter 和锁定版本的 UI 依赖，不构建 SSH/PTY/Rust 应用；不能据此声称完整原生应用构建通过。再次尝试应用本身的 `flutter test --no-pub test/unit/app/queue_protocol_test.dart test/unit/app/queue_session_test.dart test/unit/app/queue_presentation_test.dart test/unit/app/queue_resource_widget_test.dart`，仍在 `flutter_pty` hook 报 `No compiler configured on host linux_x64`。
+
+Chromium 的 `tests/browser_unified_check.py` 已覆盖 390/640/800px 下完整正反向 Tab 顺序、各两轮 5 秒轮询、详情/列表滚动与任务焦点恢复、停止确认框、桌面尺寸切换及无意授权检查；保留此前 320–1440px 布局、排序和断线恢复检查。`tests/browser_monitor_check.py` 也通过。输出证据在 `build/unified/checks.json` 与截图，由任务评论以附件交付，全部为隔离 fixture。Mac、Safari、Swift 重连、SSH/SFTP 实机闭环和安装更新门槛仍待具备相应环境后完成；本次没有发布安装包、合并或生产部署。
+
 ## PR 关系
 
 本 PR 以 `codex/gpu-serverbox-integration` 为 base，只展示 MF-12 增量。先处理并合并 PR #1，再将本 PR 改 base 到 main、复核差异及构建。不覆盖 PR #1 的任何提交，不合并、不生产部署，也不改变 MF-7 隔离验收产物。

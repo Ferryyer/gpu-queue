@@ -66,12 +66,62 @@ try:
                 page.screenshot(path=str(OUT/'mobile-detail.png'))
                 page.locator('#back-to-tasks').click()
                 expect(page.locator('.task-row').first).to_be_visible()
+        # A narrow detail is a named modal. Walk the entire keyboard order in
+        # both directions and repeat while polling destroys/recreates its DOM.
+        modal_checks=[]
+        for width in [390,640,800]:
+            page.set_viewport_size({'width':width,'height':844})
+            row=page.locator('.task-row').last
+            row.focus();task_id=row.get_attribute('data-id')
+            origin_scroll=page.evaluate('scrollY')
+            page.keyboard.press('Enter')
+            expect(page.get_by_role('dialog',name='任务详情',exact=True)).to_be_visible()
+            assert page.locator('.tasks-panel').evaluate('(el)=>el.inert')
+            mode=page.locator('body').get_attribute('data-mode')
+            count=page.locator('#detail button:not([disabled])').count()
+            page.locator('[data-detail-tab="events"]').focus()
+            page.keyboard.press('Tab')
+            expect(page.locator('#back-to-tasks')).to_be_focused()
+            for key in ['Tab','Shift+Tab']:
+                for _ in range(count+2):
+                    page.keyboard.press(key)
+                    assert page.evaluate('document.querySelector("#detail").contains(document.activeElement)'),(width,key)
+            assert page.locator('body').get_attribute('data-mode')==mode
+            page.locator('[data-detail-tab="events"]').focus()
+            page.locator('#detail').evaluate('(el)=>el.scrollTop=el.scrollHeight')
+            detail_scroll=page.locator('#detail').evaluate('(el)=>el.scrollTop')
+            page.wait_for_timeout(10500)
+            expect(page.locator('[data-detail-tab="events"]')).to_be_focused()
+            assert page.locator('#detail').evaluate('(el)=>el.scrollTop')==detail_scroll
+            assert page.locator('.task-row.selected').get_attribute('data-id')==task_id
+            page.screenshot(path=str(OUT/f'modal-{width}.png'))
+            page.keyboard.press('Escape')
+            expect(page.locator(f'[data-id="{task_id}"]')).to_be_focused()
+            assert page.evaluate('scrollY')==origin_scroll
+            assert not page.locator('.tasks-panel').evaluate('(el)=>el.inert')
+            assert not page.locator('[aria-modal="true"]').count()
+            modal_checks.append({'width':width,'tabLoop':True,'reverseTabLoop':True,'focusPolls':2,'scrollRestored':True})
+        # Existing confirmation dialogs remain modal above the detail modal.
+        page.locator('.task-row').first.focus();page.keyboard.press('Enter')
+        page.locator('[data-detail-stop]').click()
+        expect(page.locator('#stop-dialog')).to_be_visible()
+        page.keyboard.press('Shift+Tab')
+        assert page.evaluate('document.querySelector("#stop-dialog").contains(document.activeElement)')
+        page.locator('#cancel-stop').click()
+        page.keyboard.press('Escape')
+        # Resizing back to desktop clears inert/ARIA isolation and page lock.
+        page.locator('.task-row').first.focus();page.keyboard.press('Enter')
+        page.set_viewport_size({'width':1440,'height':1000})
+        expect(page.locator('body')).not_to_have_class('detail-open')
+        assert page.locator('[inert]').count()==0
+        page.locator('#interaction-mode').focus();page.keyboard.press('Shift+Tab')
+        expect(page.locator('body')).to_have_attribute('data-mode','auto')
         # Explicit actions only: toggling modes, failed reads and recovery do
         # not authorize any ready fixture task.
         assert next(t for t in page.request.get('http://127.0.0.1:8765/api/state').json()['tasks'] if t['id']=='GQ-0000000000000004')['approved_at'] is None
         assert not errors,errors
         browser.close()
-        (OUT/'checks.json').write_text(json.dumps({'focusPolls':2,'keyboardActionAfterPoll':True,'widths':[320,390,640,800,1024,1440],'freshnessFailureRecovery':True,'mobileDetail':True,'errors':errors},indent=2))
-        print('Unified web checks passed: two polls + Enter, disconnected/recovered metrics, responsive task-first layout, mobile detail.')
+        (OUT/'checks.json').write_text(json.dumps({'focusPolls':2,'keyboardActionAfterPoll':True,'widths':[320,390,640,800,1024,1440],'freshnessFailureRecovery':True,'mobileDetail':True,'modalChecks':modal_checks,'nestedStopDialog':True,'resizeClearsIsolation':True,'errors':errors},indent=2))
+        print('Unified web checks passed: two polls + Enter, disconnected/recovered metrics, responsive task-first layout, mobile detail + modal keyboard loops at 390/640/800px.')
 finally:
     server.terminate();server.communicate(timeout=10)
