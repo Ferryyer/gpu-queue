@@ -74,7 +74,10 @@ test('the actual release ZIP has only allowed paths, regular files and bounded s
  try {
   cp.execFileSync('python3',[path.join(__dirname,'../scripts/package-widget.py'),'--output-dir',temp]);
   const archive=path.join(temp,'GPU任务台-桌面小组件-macOS.zip');
-  const names=cp.execFileSync('unzip',['-Z','-1',archive],{encoding:'utf8'});
+  // macOS zipinfo may escape UTF-8 bytes according to its build/locale. Read
+  // canonical ZIP names for these legacy parser fixtures; archiveBytes below
+  // validates the actual production binary path independently of zipinfo.
+  const names=cp.execFileSync('python3',['-c','import zipfile,sys; print("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))',archive],{encoding:'utf8'});
   const metadata=cp.execFileSync('unzip',['-Z','-l',archive],{encoding:'utf8'});
   U.archiveEntries(names);U.archiveMetadata(metadata);
   const escaped=names.replace(/[^\x00-\x7f]/g,c=>'#U'+c.charCodeAt(0).toString(16).padStart(4,'0'));
