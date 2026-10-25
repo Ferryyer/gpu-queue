@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -90,7 +91,15 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(request('GET','/api/state')[0],200)
             host_status, host_body = request('GET', '/api/host')
             self.assertEqual(host_status, 200)
-            self.assertTrue(json.loads(host_body)['available'])
+            host = json.loads(host_body)
+            if sys.platform.startswith('linux'):
+                self.assertTrue(host['available'])
+            else:
+                # The UID thread sampler reads Linux /proc. On a Mac release
+                # runner the HTTP endpoint must report unavailable, not a
+                # successful empty/zero sample.
+                self.assertFalse(host['available'])
+                self.assertIsNone(host['at'])
             self.assertEqual(request('GET', '/api/host', host='evil.example:8790')[0],403)
             self.assertEqual(request('GET', '/monitor.js')[0],200)
             health_status,health_body=request('GET','/api/health')
