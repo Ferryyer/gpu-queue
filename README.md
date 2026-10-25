@@ -1,5 +1,11 @@
 # GPU Queue
 
+## 统一桌面应用
+
+[下载最新 GPU Queue Mac 版本](https://github.com/Ferryyer/gpu-queue/releases/latest) · [完整发布记录与校验和](https://github.com/Ferryyer/gpu-queue/releases)
+
+适用 Apple Silicon、macOS 13+。在 Release 页面下载 DMG 和 SHA256SUMS，退出旧版后拖入 Applications。统一应用采用手动覆盖安装；旧桌面小组件的 ZIP 下载和更新入口继续保留。客户端安装不会替换服务器调度服务，版本源码以相应 Release 标签为准。
+
 个人 GPU 任务台：网页、CPU 调度服务，以及 macOS 桌面小组件。
 
 这是为 linlishuo 的 Markflow 环境编写的个人工具，包含用户身份、SSH 入口和平台适配，并非开箱即用的多用户产品。
