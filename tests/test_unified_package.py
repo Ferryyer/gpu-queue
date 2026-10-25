@@ -14,7 +14,7 @@ class UnifiedPackageTests(unittest.TestCase):
             executable=contents/'MacOS/GPU Queue';executable.write_bytes(b'CPU test fixture, not a Mac binary')
             info={'CFBundleVersion':package.BUILD,'CFBundleShortVersionString':package.MARKETING,'CFBundleIdentifier':'local.fixture.gpuq','CFBundleExecutable':'GPU Queue'}
             (contents/'Info.plist').write_bytes(plistlib.dumps(info))
-            self.assertEqual(package.inspect_app(app)['build'],2000)
+            self.assertEqual(package.inspect_app(app)['build'],int(package.BUILD))
             info['CFBundleVersion']='1816';(contents/'Info.plist').write_bytes(plistlib.dumps(info))
             with self.assertRaises(ValueError):package.inspect_app(app)
             info['CFBundleVersion']=package.BUILD;info['CFBundleExecutable']='../outside';(contents/'Info.plist').write_bytes(plistlib.dumps(info))
