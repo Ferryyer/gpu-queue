@@ -10,6 +10,16 @@
 
 这是为 linlishuo 的 Markflow 环境编写的个人工具，包含用户身份、SSH 入口和平台适配，并非开箱即用的多用户产品。
 
+## ServerBox 融合
+
+`serverbox/` 为带 GPU 桥接、账号线程卡片和 Mac 自动重连的完整原生客户端源码。
+网页新增逐实例 GPU 监控、页面内趋势、JSON 导出及账号线程面板；原生客户端新增任务台入口与暖纸色主题。
+关于页捐赠与产品推广已移除；源码中未发现内购或功能订阅锁。
+
+详见 [融合范围与验证](docs/SERVER-MONITOR.md) 和 [原生构建说明](serverbox/README.gpu-console.md)。
+原生构建仍需 Flutter/Xcode/Rust 及所列依赖；当前改动没有更新线上服务或发布 Mac 安装包。
+ServerBox 与其依赖保留各自许可证和来源信息。
+
 ## 组成
 
 - `gpuqueue/`：任务固定版本、启动授权、队列控制、平台资源适配及本地网页服务。
@@ -21,6 +31,16 @@
 - `worker/`、`drizzle/`、`.openai/`：旧 Sites 发布实现及配置记录；现用服务通过个人 SSH 通道访问。
 
 [下载 macOS 桌面小组件 1.1.3](https://raw.githubusercontent.com/Ferryyer/gpu-queue/main/downloads/GPU-Queue-Widget-1.1.3-macOS.zip) · [校验和](downloads/SHA256SUMS)
+
+## 1.1.2 更新报“安装包文件清单不符”
+
+可手动安装 [1.1.4 修复包](https://raw.githubusercontent.com/Ferryyer/gpu-queue/codex/mf-8-widget-update-fix/downloads/GPU-Queue-Widget-1.1.4-macOS.zip)。
+退出小组件及更新窗口，完整解压 ZIP，双击“安装桌面小组件.command”覆盖安装。
+安装保留 SSH 配置、窗口位置和偏好；服务器任务继续运行。旧更新器在安装新版前就会报错，因此需要这一次手动覆盖。
+
+1.1.4 直接校验 ZIP 中央目录与文件头，保留下载大小、SHA-256、精确文件白名单和文件类型/大小检查，不再解析 macOS `unzip` 输出。
+修复包目前在上述审阅分支和 issue 附件，正式更新入口仍为 1.1.3；未改动已发布的旧版包。
+验证与限制见 [更新修复说明](docs/widget-update-1.1.4.md)。
 
 ## 安装桌面小组件
 

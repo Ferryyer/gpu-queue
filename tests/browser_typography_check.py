@@ -65,7 +65,7 @@ try:
   page.set_viewport_size({'width':640,'height':550})
   page.locator('#interaction-mode').click();expect(page.locator('#interaction-mode')).to_have_attribute('aria-pressed','true')
   page.keyboard.press('Shift+Tab');expect(page.locator('#interaction-mode')).to_have_attribute('aria-pressed','false')
-  page.locator('#search-toggle').click();page.locator('#search').fill('no-such-task');expect(page.locator('.empty')).to_be_visible()
+  page.locator('#search-toggle').click();page.locator('#search').fill('no-such-task');expect(page.locator('#task-list .empty')).to_be_visible()
   page.locator('#search').fill('');page.locator('#search').focus();page.keyboard.press('Shift+Tab')
   expect(page.locator('#interaction-mode')).to_have_attribute('aria-pressed','false')
   page.set_viewport_size({'width':1440,'height':1100})

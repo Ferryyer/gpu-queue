@@ -1,0 +1,97 @@
+/* Shared ServerBox design tokens for website/ and monitor/frontend: a neutral
+   palette, pill buttons, 12px containers, and Plus Jakarta Sans with system
+   fallbacks. Consumers load the webfont themselves.
+
+   Dark mode: follows the system by default; an explicit `.dark` / `.light`
+   class on <html> overrides the preference (panel theme toggle). */
+
+:root {
+  color-scheme: light;
+
+  --sb-black: #000000;
+  --sb-near-black: #262626;
+  /* Text tiers, by contrast on --sb-snow (WCAG AA is 4.5:1): stone 6.71,
+     silver 4.74. Status colors are text too (badges, errors), so they meet
+     4.5:1 on white, on snow and on their own 10% tint (worst 5.26). */
+  --sb-stone: #595959;
+  --sb-silver: #707070;
+  --sb-border: #d4d4d4;
+  --sb-light-gray: #e5e5e5;
+  --sb-snow: #fafafa;
+  --sb-white: #ffffff;
+  --sb-ring: rgba(59, 130, 246, 0.5);
+  --sb-success: #166534;
+  --sb-warning: #92400e;
+  --sb-danger: #b91c1c;
+
+  --sb-radius-container: 12px;
+
+  --sb-font-display: 'Plus Jakarta Sans', 'SF Pro Rounded', system-ui, -apple-system, sans-serif;
+  --sb-font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --sb-font-mono: ui-monospace, 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', monospace;
+}
+
+/* On --sb-white (#171717): stone 7.11, silver 5.54 (4.68 on --sb-light-gray),
+   success 7.87, warning 5.63, danger 6.48; on their own 10% tint at least
+   5.42. Silver stays below stone, as in light: a placeholder as bright as the
+   text it stands in for (#d4d4d4 against #e5e5e5, 1.18:1) reads as a value. */
+.dark {
+  color-scheme: dark;
+
+  --sb-black: #f5f5f5;
+  --sb-near-black: #e5e5e5;
+  --sb-stone: #a3a3a3;
+  --sb-silver: #8f8f8f;
+  --sb-border: #404040;
+  --sb-light-gray: #262626;
+  --sb-snow: #0f0f0f;
+  --sb-white: #171717;
+  --sb-ring: rgba(147, 197, 253, 0.55);
+  --sb-success: #22c55e;
+  --sb-warning: #d97706;
+  --sb-danger: #f87171;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+
+    --sb-black: #f5f5f5;
+    --sb-near-black: #e5e5e5;
+    --sb-stone: #a3a3a3;
+    --sb-silver: #8f8f8f;
+    --sb-border: #404040;
+    --sb-light-gray: #262626;
+    --sb-snow: #0f0f0f;
+    --sb-white: #171717;
+    --sb-ring: rgba(147, 197, 253, 0.55);
+    --sb-success: #22c55e;
+    --sb-warning: #d97706;
+    --sb-danger: #f87171;
+  }
+}
+
+/* Components use semantic colors instead of raw grays, so dark mode does not
+   require component-level `dark:` variants. */
+@theme inline {
+  --color-bg: var(--sb-snow);
+  --color-surface: var(--sb-white);
+  --color-fg: var(--sb-near-black);
+  --color-fg-strong: var(--sb-black);
+  --color-muted-fg: var(--sb-stone);
+  --color-faint-fg: var(--sb-silver);
+  --color-line: var(--sb-border);
+  --color-soft: var(--sb-light-gray);
+  --color-ring: var(--sb-ring);
+
+  --color-accent: #3b82f6;
+  --color-success: var(--sb-success);
+  --color-warning: var(--sb-warning);
+  --color-danger: var(--sb-danger);
+
+  --radius-container: var(--sb-radius-container);
+
+  --font-display: var(--sb-font-display);
+  --font-body: var(--sb-font-body);
+  --font-mono: var(--sb-font-mono);
+}

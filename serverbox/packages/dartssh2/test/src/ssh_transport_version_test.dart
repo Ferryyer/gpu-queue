@@ -1,0 +1,179 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:dartssh2/dartssh2.dart';
+import 'package:test/test.dart';
+
+void main() {
+  group('SSH transport version exchange', () {
+    test('accepts SSH-1.99 server banner', () async {
+      final socket = _FakeSSHSocket();
+      final client = SSHClient(
+        socket,
+        username: 'demo',
+      );
+
+      socket.addIncoming('SSH-1.99-OpenSSH_3.6.1p2\r\n');
+      await _pumpUntil(() => client.remoteVersion != null);
+
+      expect(client.remoteVersion, 'SSH-1.99-OpenSSH_3.6.1p2');
+
+      client.close();
+    });
+
+    test('rejects non SSH-2 compatible server banners', () async {
+      final socket = _FakeSSHSocket();
+      final client = SSHClient(
+        socket,
+        username: 'demo',
+      );
+
+      socket.addIncoming('SSH-1.5-OpenSSH_1.2\r\n');
+
+      await expectLater(
+        client.authenticated,
+        throwsA(
+          predicate((error) {
+            return error is SSHAuthAbortError &&
+                error.reason is SSHHandshakeError;
+          }),
+        ),
+      );
+
+      client.close();
+    });
+
+    test('does not busy loop on partial packet after handshake', () async {
+      final socket = _FakeSSHSocket();
+      final client = SSHClient(
+        socket,
+        username: 'demo',
+      );
+
+      // Complete the version exchange.
+      socket.addIncoming('SSH-2.0-OpenSSH_3.6.1p2\r\n');
+      await _pumpUntil(() => client.remoteVersion != null);
+
+      // Send the first 4 bytes of a packet indicating a length of 100.
+      socket.addRawIncoming(Uint8List.fromList([0, 0, 0, 100]));
+
+      // Wait a moment. If there is a microtask busy loop, the delayed future
+      // will never run and the test will timeout.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      client.close();
+    });
+
+    test('reschedules processing when more data remains in the buffer',
+        () async {
+      final socket = _FakeSSHSocket();
+      final client = SSHClient(
+        socket,
+        username: 'demo',
+      );
+
+      // Send the version banner followed by an invalid packet length in the
+      // same chunk. Processing must continue into the queued remainder and
+      // surface the packet error instead of stopping after the banner.
+      socket.addRawIncoming(
+        Uint8List.fromList([
+          ...latin1.encode('SSH-2.0-OpenSSH_3.6.1p2\r\n'),
+          0,
+          0,
+          0,
+          0,
+        ]),
+      );
+
+      await expectLater(
+        client.authenticated,
+        throwsA(
+          predicate((error) {
+            return error is SSHAuthAbortError && error.reason is SSHPacketError;
+          }),
+        ),
+      );
+
+      expect(client.remoteVersion, 'SSH-2.0-OpenSSH_3.6.1p2');
+
+      client.close();
+    });
+  });
+}
+
+Future<void> _pumpUntil(bool Function() condition) async {
+  for (var i = 0; i < 50; i++) {
+    if (condition()) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+  fail('Timed out waiting for condition');
+}
+
+class _FakeSSHSocket implements SSHSocket {
+  final _inputController = StreamController<Uint8List>();
+  final _doneCompleter = Completer<void>();
+  final _sink = _RecordingSink();
+
+  @override
+  Stream<Uint8List> get stream => _inputController.stream;
+
+  @override
+  StreamSink<List<int>> get sink => _sink;
+
+  @override
+  Future<void> get done => _doneCompleter.future;
+
+  void addIncoming(String data) {
+    _inputController.add(Uint8List.fromList(latin1.encode(data)));
+  }
+
+  void addRawIncoming(Uint8List data) {
+    _inputController.add(data);
+  }
+
+  @override
+  Future<void> close() async {
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.complete();
+    }
+    await _inputController.close();
+  }
+
+  @override
+  void destroy() {
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.complete();
+    }
+    unawaited(_inputController.close());
+  }
+
+  @override
+  Future<void> flush() async {}
+}
+
+class _RecordingSink implements StreamSink<List<int>> {
+  @override
+  void add(List<int> data) {
+    // SSHTransport writes protocol lines and packets to the sink.
+    latin1.decode(data);
+  }
+
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) {}
+
+  @override
+  Future<void> addStream(Stream<List<int>> stream) async {
+    await for (final data in stream) {
+      add(data);
+    }
+  }
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> get done async {}
+}

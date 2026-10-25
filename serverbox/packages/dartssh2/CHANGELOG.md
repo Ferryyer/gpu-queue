@@ -1,0 +1,309 @@
+## [2.22.5] - 2026-07-30
+- Exported `src/ssh_userauth.dart` in `lib/dartssh2.dart` to expose `SSHUserInfoRequest`, `SSHUserInfoPrompt`, `SSHAuthMethod`, and `SSHChangePasswordResponse` [#188]. Thanks [@vicajilau].
+
+## [2.22.4] - 2026-07-27
+- Advertised standard RFC 8731 key exchange name `curve25519-sha256` alongside legacy `curve25519-sha256@libssh.org` [#187]. Thanks [@nickn17].
+
+## [2.22.3] - 2026-07-20
+- Fixed an SSH channel leak in `SftpClient.close()` by closing the underlying SSH channel and returning `Future<void>` to allow awaiting channel teardown [#186]. Thanks [@keinstn].
+
+## [2.22.2] - 2026-07-15
+- Added `flush()` to `SSHSocket`, `SSHClient`, and `SSHChannel` to allow force flushing of buffered outgoing data [#183]. Thanks [@vicajilau].
+
+## [2.22.1] - 2026-07-13
+- Fixed a keepalive issue where overlapping pings could occur and caught errors during ping execution. Thanks [@vicajilau].
+
+## [2.22.0] - 2026-07-03
+- Added optional `handshakeTimeout` and `authTimeout` to `SSHClient` to limit connection negotiation and user authentication times [#182]. Thanks [@GT-610].
+
+## [2.21.1] - 2026-07-02
+- Fixed an `SSHTransport` busy-loop (100% CPU / ANR) that occurred when a partial packet remained in the read buffer [#179]. Thanks [@vicajilau].
+
+## [2.21.0] - 2026-07-01
+- Added `SSHSession.waitForExit({Duration? timeout})` to await remote process exit status with an optional timeout [#176]. Thanks [@GT-610].
+- Hardened SOCKS5 dynamic forwarding (half-close streaming, dialing guards, timeout cancellation, malformed UTF-8 decoding, and buffer limits) [#175]. Thanks [@GT-610].
+- Hardened SSH agent channel frame validation (rejecting empty or oversized frames) and fallback RSA signature type checks [#175]. Thanks [@GT-610].
+- Improved EC private key parsing with proper ASN.1 OID curve detection, public point derivation validation, and robust comments decoding [#175]. Thanks [@GT-610].
+
+## [2.20.0] - 2026-06-30
+- **BREAKING**: Bumped the minimum Dart SDK constraint to `3.0.0` [#23]. Thanks [@vicajilau].
+- **BREAKING**: Declared `OpenSSHKeyPair` as an `abstract mixin class` to comply with Dart 3.0 class modifier rules [#23]. Thanks [@vicajilau].
+- Offloaded all cryptographic key exchange (KEX) calculations to background isolates using `Isolate.run` on platforms that support it, preventing the Flutter main thread from blocking/freezing during connection [#23]. Thanks [@vicajilau].
+- Refactored internal key exchange isolate communication payloads (X25519, NIST Curves, DH) to use Dart 3.0 type-safe Records [#23]. Thanks [@vicajilau].
+
+## [2.19.0] - 2026-06-30
+- Added tolerant HTTP-date parsing to accept all RFC 7231 §7.1.1.1 HTTP-date formats (`IMF-fixdate`, `RFC 850`, `asctime`) for HTTP response headers [#170]. Thanks [@GT-610].
+- Added chunked transfer-encoding decoding for HTTP response bodies according to RFC 7230 §4.1, improving interoperability with HTTP/1.1 servers [#171]. Thanks [@GT-610].
+- Added support for OpenSSH's `posix-rename@openssh.com` SFTP extension to perform atomic renames with POSIX semantics (replace destination if it exists) when advertised by the server [#172]. Thanks [@GT-610].
+- Added `SftpFile.downloadToRandomAccess` to download a remote file directly into a `dart:io` `RandomAccessFile` using out-of-order pipelined writes, maximizing download performance on high-latency links [#173]. Thanks [@GT-610].
+- Fixed a connection drop bug during AEAD (AES-GCM) decryption caused by incorrect padding length validation offset calculation [#168]. Thanks [@nuclear06].
+
+## [2.18.0] - 2026-05-18
+- Fixed AES-GCM cipher encryption and decryption sequence number/nonce counter resetting during key exchanges [#165]. Thanks [@vicajilau].
+- **BREAKING**: `SSHHostkeyVerifyHandler` now receives an OpenSSH-style `SHA256:<base64>` host key fingerprint instead of the previous raw MD5 digest, so host key pinning code must be updated accordingly [#162]. Thanks [@thyssentishman].
+
+## [2.17.1] - 2026-04-12
+- Made `SSHPem.decode` accept CRLF (`\r\n`) line endings in addition to LF when parsing PEM content [#157]. Thanks [@gkc].
+
+## [2.17.0] - 2026-03-28
+- Improved Web/WASM compatibility by updating `SSHSocket` conditional imports so web runtimes consistently use the web socket shim and avoid incorrect native socket selection [#88]. Thanks [@vicajilau].
+- Added local dynamic forwarding (`SSHClient.forwardDynamic`) with SOCKS5 `NO AUTH` + `CONNECT`, including configurable handshake/connect timeouts and connection limits.
+- Added AES-GCM (`aes128-gcm@openssh.com`, `aes256-gcm@openssh.com`) AEAD groundwork in transport and cipher negotiation; currently opt-in (not enabled by default yet). `chacha20-poly1305@openssh.com` remains pending [#26]. Thanks [@vicajilau].
+
+## [2.16.0] - 2026-03-24
+- **BREAKING**: Changed `SSHChannelController.sendEnv()` from `void` to `Future<bool>` to properly await environment variable setup responses and avoid race conditions with PTY requests [#102]. Thanks [@itzhoujun] and [@vicajilau].
+- Clarified shell stdio wiring for CLI-only usage and guarded `example/shell.dart` against missing local terminal handles (for example GUI-launched Windows `.exe`) [#121]. Thanks [@bradmartin333] and [@vicajilau].
+- Added support for parsing legacy unencrypted `EC PRIVATE KEY` PEM format in `SSHKeyPair.fromPem` [#109]. Thanks [@jooy2] and [@vicajilau].
+- Added `SSHClient.runWithResult()` to expose command output together with `exitCode` and `exitSignal` while keeping `run()` as a convenience API [#99]. Thanks [@falrom] and [@vicajilau].
+- Added non-breaking high-level SFTP `download()` / `downloadTo()` APIs and read pipeline tuning knobs (`chunkSize`, `maxPendingRequests`) for improved large-file throughput while preserving stream compatibility [#124]. Thanks [@vicajilau].
+- Made SFTP directory/file name parsing tolerant to malformed UTF-8 bytes to avoid `FormatException` on non-UTF-8 server filenames [#95]. Thanks [@vicajilau].
+
+## [2.15.0] - 2026-03-20
+- Updated `pointycastle` dependency to `^4.0.0` [#131]. Thanks [@vicajilau].
+- Added foundational X11 forwarding support with session x11-req API, incoming x11 channel handling, and protocol tests [#1]. Thanks [@vicajilau].
+- Exposed SSH ident configuration from `SSHClient` [#135]. Thanks [@Remulic] and [@vicajilau].
+- Propagated the underlying exception in `SSHAuthAbortError` through `reason` for better diagnostics [#133]. Thanks [@james-thorpe] and [@vicajilau].
+- Accepted `SSH-1.99-*` server banners as SSH-2 compatible during version exchange and added regression tests [#132]. Thanks [@james-thorpe] and [@vicajilau].
+- Added SSH agent forwarding support (`auth-agent-req@openssh.com`) with in-memory agent handling and RSA sign-request flag support [#139]. Thanks [@Wackymax] and [@vicajilau].
+- Normalized HTTP response line parsing in `SSHHttpClientResponse` to handle CRLF endings consistently and avoid trailing line-ending artifacts in parsed status/header fields [#145]. Thanks [@vicajilau].
+- Fixed SFTP packet encoding/decoding consistency: `SftpInitPacket.decode` now parses extension pairs correctly and `SftpExtendedReplyPacket.encode` now preserves raw payload bytes [#145]. Thanks [@vicajilau].
+
+## [2.14.0] - 2026-03-19
+- Fixed SSH connections through bastion hosts where the target server sends its version string immediately upon connection (which is standard behavior per RFC 4253) [#141]. Thanks [@shihuili1218].
+- Adds a new forwardLocalUnix() function, which is an equivalent of ssh -L localPort:remoteSocketPath [#140]. Thanks [@isegal].
+
+## [2.13.0] - 2025-06-22
+- docs: Update NoPorts naming [#115]. [@XavierChanth].
+- Add parameter disableHostkeyVerification [#123]. Thanks [@alexander-irion].
+- Add support for server-initiated re-keying [#125]. Thanks [@MarBazuz].
+- Add support for new algorithms "mac-sha2-256-96", "hmac-sha2-512-96", "hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com" [#126] [#127]. Thanks [@reinbeumer].
+
+## [2.12.0] - 2025-02-08
+- Fixed streams and channel not closing after receiving SSH_Message_Channel_Close [#116]. [@cbenhagen].
+- Fixed lint issues.
+- Added tests.
+- Updated dependencies.
+
+## [2.11.0] - 2024-11-19
+- Fixed Type 'Uint8' not found issue.
+
+## [2.10.0] - 2024-08-29
+- Improved Readme.
+- Bug fix in SftpFileWriter for [#50], [#71], [#100].
+- Added DartShell product [#101].
+- Fixed dynamic return on SftpFileOpenMode in | operator [#80].
+- DCM updated.
+- Fixed warnings related with new DCM version.
+- Dependencies updated.
+- Fixed Flutter 3.24 issue.
+
+## [2.9.1-pre] - 2023-04-02
+- Make the type of `SSHForwardChannel.sink` to `StreamSink<List<int>>` to match
+  its super class.
+- Added `SSHHttpClient` for easy http request forwarding.
+
+## [2.9.0-pre] - 2023-03-31
+- Better handling of channel close.
+- Make `SSHForwardChannel` implement `SSHSocket` for better interoperability.
+
+## [2.8.2] - 2023-03-07
+- Make `SftpFileWriter` implement `Future<void>` for backward compatibility.
+
+## [2.8.1] - 2023-03-07
+- Export `SftpFileWriter`
+
+## [2.8.0] - 2023-03-06
+- `SftpFile.write` now returns a `SftpFileWriter` that can be used to control
+  the writing process.
+- Support `SftpClient.statvfs` and `SftpFile.statvfs`.
+- Support automatic keepalive.
+
+## 2.7.3
+- Update README.md
+- Move cli into separate package.
+- Properly handle chunk read error during stream read.
+
+## 2.7.2+3
+- Update README.md
+
+## 2.7.2+2
+- Update README.md
+
+## 2.7.2+1
+- Update README.md
+
+## 2.7.2
+- Upgrade `pinenacl` to `0.5.0`.
+- Fix bug in exporting openssh private key to pem, thanks [@PIDAMI]
+
+## 2.7.1
+- Upgrade rsa authentication algorithm to rsa-sha2-256.
+
+## 2.7.0
+- Support encrypted RSA format private key
+
+## 2.6.1
+- Allow username with `@` in `dartssh2` command [#24]
+
+## 2.6.0
+- Allow ignoring stdout or stderr in `SSHClient.run`.
+- Add `SSHAuthFailError` and `SSHAuthAbortError`.
+- Fix file type detection.
+- Fix empty identity handling [#21]
+- Add connection reset handing.
+- Add more tests
+
+## 2.5.0
+- Fix js import path [#18].
+- Ignore remote data after channel closed.
+
+## 2.4.4
+- Fix lint errors
+
+## 2.4.3
+- Remove unused dependencies
+- Fix lint errors
+
+## 2.4.2
+- Fix null check error in `kill()` [#17]
+- More examples in README.md
+## 2.4.1
+- More examples in README.md
+- Limit the maximum size of channel packets
+
+## 2.4.0
+- Support session stdin streaming and EOF
+
+## 2.3.1
+- Support ssh v2 when version string does not contain CR [#14], thanks [@Migarl]
+
+## 2.3.1-pre
+- Add remoteVersion field to SSHClient
+
+## 2.3.0-pre
+- Add description field in SSHChannelOpenError
+
+## 2.2.0
+- Update README.md
+- Support export keypair to PEM
+
+## 2.1.0-pre
+- Update README.md
+- Support loading OpenSSH encrypted pem files.
+
+## 2.0.0-pre
+- Implements local port forwarding
+- Implements remote port forwarding
+- Implements SFTP client
+- More supported algorithms
+- Added `dartsftp` command
+
+## 1.2.0-pre
+
+- Rework login logic.
+- `dartssh` command now supports login with public key.
+
+## 1.1.4-pre
+
+- `dartssh` command now supports terminal window resize.
+
+## 1.1.3-pre
+
+- Add `--verbose` option in `dartssh` command.
+
+## 1.1.2-pre
+
+- Fix typos.
+
+## 1.1.1-pre
+
+- Organize exports.
+## 1.1.0-pre
+
+- Dependency update.
+- Sound null safety.
+- Replace deprecated `pedantic` with `package:lints`
+- Fix crash running vim by [@linhanyu].  [#1]
+
+## 1.0.4+4
+
+- Increase test coverage and documentation.
+
+## 1.0.3+3
+
+- Fix tunneled WebSocket issue.
+
+## 1.0.2+2
+
+- Add example/README.md
+
+## 1.0.1+1
+
+- Add SSHTunneledSocketImpl, SSHTunneledWebSocketImpl, and SSHTunneledBaseClient.
+
+## 1.0.0+0
+
+- Initial release.
+
+[#165]: https://github.com/TerminalStudio/dartssh2/issues/165
+[#162]: https://github.com/TerminalStudio/dartssh2/issues/162
+[#141]: https://github.com/TerminalStudio/dartssh2/pull/141
+[#140]: https://github.com/TerminalStudio/dartssh2/pull/140
+[#145]: https://github.com/TerminalStudio/dartssh2/pull/145
+[#153]: https://github.com/TerminalStudio/dartssh2/pull/153
+[#157]: https://github.com/TerminalStudio/dartssh2/pull/157
+[#102]: https://github.com/TerminalStudio/dartssh2/issues/102
+[#99]: https://github.com/TerminalStudio/dartssh2/issues/99
+[#109]: https://github.com/TerminalStudio/dartssh2/issues/109
+[#121]: https://github.com/TerminalStudio/dartssh2/issues/121
+[#124]: https://github.com/TerminalStudio/dartssh2/issues/124
+[#95]: https://github.com/TerminalStudio/dartssh2/issues/95
+[#88]: https://github.com/TerminalStudio/dartssh2/issues/88
+[#26]: https://github.com/TerminalStudio/dartssh2/issues/26
+[#139]: https://github.com/TerminalStudio/dartssh2/pull/139
+[#132]: https://github.com/TerminalStudio/dartssh2/pull/132
+[#133]: https://github.com/TerminalStudio/dartssh2/pull/133
+[#135]: https://github.com/TerminalStudio/dartssh2/pull/135
+[#131]: https://github.com/TerminalStudio/dartssh2/pull/131
+[#127]: https://github.com/TerminalStudio/dartssh2/pull/127
+[#126]: https://github.com/TerminalStudio/dartssh2/pull/126
+[#125]: https://github.com/TerminalStudio/dartssh2/pull/125
+[#123]: https://github.com/TerminalStudio/dartssh2/pull/123
+[#101]: https://github.com/TerminalStudio/dartssh2/pull/101
+[#100]: https://github.com/TerminalStudio/dartssh2/issues/100
+[#80]: https://github.com/TerminalStudio/dartssh2/issues/80
+[#71]: https://github.com/TerminalStudio/dartssh2/issues/71
+[#50]: https://github.com/TerminalStudio/dartssh2/issues/50
+[#24]: https://github.com/TerminalStudio/dartssh2/issues/24
+[#23]: https://github.com/TerminalStudio/dartssh2/issues/23
+[#21]: https://github.com/TerminalStudio/dartssh2/issues/21
+[#18]: https://github.com/TerminalStudio/dartssh2/issues/18
+[#17]: https://github.com/TerminalStudio/dartssh2/issues/17
+[#14]: https://github.com/TerminalStudio/dartssh2/pull/14
+[#175]: https://github.com/TerminalStudio/dartssh2/pull/175
+[#176]: https://github.com/TerminalStudio/dartssh2/pull/176
+[#179]: https://github.com/TerminalStudio/dartssh2/pull/179
+[#182]: https://github.com/TerminalStudio/dartssh2/pull/182
+[#183]: https://github.com/TerminalStudio/dartssh2/pull/183
+[#186]: https://github.com/TerminalStudio/dartssh2/pull/186
+[#187]: https://github.com/TerminalStudio/dartssh2/pull/187
+[#1]: https://github.com/TerminalStudio/dartssh/pull/1/files
+[#188]: https://github.com/TerminalStudio/dartssh2/issues/188
+
+[@linhanyu]: https://github.com/linhanyu
+[@Migarl]: https://github.com/Migarl
+[@PIDAMI]: https://github.com/PIDAMI
+[@XavierChanth]: https://github.com/XavierChanth
+[@MarBazuz]: https://github.com/MarBazuz
+[@reinbeumer]: https://github.com/reinbeumer
+[@alexander-irion]: https://github.com/alexander-irion
+[@Remulic]: https://github.com/Remulic
+[@james-thorpe]: https://github.com/james-thorpe
+[@itzhoujun]: https://github.com/itzhoujun
+[@jooy2]: https://github.com/jooy2
+[@falrom]: https://github.com/falrom
+[@bradmartin333]: https://github.com/bradmartin333
+[@Wackymax]: https://github.com/Wackymax
+[@gkc]: https://github.com/gkc
+[@vicajilau]: https://github.com/vicajilau
+[@GT-610]: https://github.com/GT-610

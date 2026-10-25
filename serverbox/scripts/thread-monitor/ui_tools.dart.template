@@ -1,0 +1,35 @@
+import 'dart:io';
+
+import 'package:flutter_tools/runner.dart' as runner;
+import 'package:flutter_tools/src/base/process.dart';
+import 'package:flutter_tools/src/base/template.dart';
+import 'package:flutter_tools/src/cache.dart';
+import 'package:flutter_tools/src/commands/test.dart';
+import 'package:flutter_tools/src/commands/assemble.dart';
+import 'package:flutter_tools/src/build_system/build_system.dart';
+import 'package:flutter_tools/src/build_system/build_targets.dart';
+import 'package:flutter_tools/src/build_system/targets/macos.dart';
+import 'package:flutter_tools/src/isolated/build_targets.dart';
+import 'package:flutter_tools/src/isolated/mustache_template.dart';
+import 'package:flutter_tools/src/globals.dart' as globals;
+
+// Reuse the current release's unchanged native frameworks. Only the Dart UI
+// needs recompilation; these UI tests do not exercise or rebuild native FFI.
+class UiAssemble extends AssembleCommand {
+  UiAssemble() : super(buildSystem: globals.buildSystem);
+  @override
+  List<Target> createTargets() => [const CompileMacOSFramework()];
+}
+
+Future<void> main(List<String> args) async {
+  Cache.flutterRoot = Platform.environment['FLUTTER_ROOT'] ??
+      (throw ArgumentError('Set FLUTTER_ROOT to the matching Flutter SDK'));
+  await runner.run(args, () => [TestCommand(), UiAssemble()],
+    shutdownHooks: ShutdownHooks(),
+    reportCrashes: false,
+    overrides: {
+      BuildTargets: () => const BuildTargetsImpl(),
+      TemplateRenderer: () => const MustacheTemplateRenderer(),
+    },
+  );
+}
