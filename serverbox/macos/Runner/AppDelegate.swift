@@ -137,6 +137,7 @@ class AppDelegate: FlutterAppDelegate {
 
 private enum GPUQueueUpdate {
   static var installing = false
+  static var activeWork: URL?
   static var statusURL: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("GPU Queue/Updater/status.json")
@@ -151,6 +152,14 @@ private enum GPUQueueUpdate {
   static func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     switch call.method {
+    case "installStatus":
+      let state = readState()
+      if state?["phase"] as? String == "failed" { installing = false }
+      result(state)
+    case "cancelInstall":
+      if let work = activeWork { try? Data().write(to: work.appendingPathComponent("cancel")) }
+      installing = false
+      result(nil)
     case "confirmLaunch":
       if var state = readState(), state["phase"] as? String == "awaiting_launch",
          state["build"] as? String == build,
@@ -183,6 +192,7 @@ private enum GPUQueueUpdate {
       let helper = destination.appendingPathComponent("Contents/Helpers/GPUQueueUpdater")
       let id = UUID().uuidString
       let work = URL(fileURLWithPath: dmg).deletingLastPathComponent()
+      activeWork = work
       let plan = work.appendingPathComponent("plan.json")
       let statePath = statusURL
       DispatchQueue.global(qos: .userInitiated).async {

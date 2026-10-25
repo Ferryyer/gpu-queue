@@ -89,7 +89,18 @@ abstract final class MacAutoUpdate {
       });
       handedOff = true;
       progress.value = ('准备完成，正在重启应用…', null);
+      // Normally the process exits in half a second. If a close/save prompt
+      // prevents quitting, surface the helper's timeout instead of a stuck dialog.
+      final quitDeadline = DateTime.now().add(const Duration(seconds: 75));
+      while (DateTime.now().isBefore(quitDeadline)) {
+        await Future<void>.delayed(const Duration(seconds: 1));
+        final status = await _channel.invokeMapMethod<String, dynamic>('installStatus');
+        if (status?['phase'] == 'failed') throw StateError(status?['message']?.toString() ?? '安装未完成');
+      }
+      await _channel.invokeMethod<void>('cancelInstall');
+      throw StateError('应用未能退出，已取消更新。请关闭待保存窗口后重试。');
     } catch (error) {
+      handedOff = false;
       if (context.mounted && dialogOpen) { context.popDialog(); dialogOpen = false; }
       if (context.mounted) {
         await context.showRoundDialog(title: '更新未完成', child: Text('$error\n当前应用仍保留，可重新检查更新后重试。'), actions: [Btn.ok()]);

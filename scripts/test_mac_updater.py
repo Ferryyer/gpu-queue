@@ -38,7 +38,10 @@ app.run()
 
 
 def run(*command):
-    subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        print(result.stdout.decode(errors='replace'), file=sys.stderr)
+        result.check_returncode()
 
 
 def wait_for(predicate, timeout=40):
@@ -147,6 +150,10 @@ def main():
                 assert data.read_text() == '{"ssh":"keep","token":"fixture"}'
                 results.append({'scenario': scenario, 'passed': True})
                 print(f'PASS {scenario}', flush=True)
+            except Exception:
+                log.flush()
+                print((out/f'{scenario}.log').read_text(errors='replace'), file=sys.stderr)
+                raise
             finally:
                 if child and child.poll() is None:
                     child.terminate()
@@ -161,6 +168,8 @@ def main():
                             os.kill(pid, signal.SIGTERM)
                     except (ProcessLookupError, subprocess.CalledProcessError):
                         pass
+                if (work/'volume').is_mount():
+                    run('hdiutil', 'detach', '-force', str(work/'volume'))
                 log.close()
     (out/'report.json').write_text(json.dumps({'native': True, 'scenarios': results}, indent=2)+'\n')
 

@@ -61,6 +61,7 @@ var state: [String: Any] = [:]
 var stage: URL?
 var mount: URL?
 var lockFD: Int32 = -1
+var ownedWork: URL?
 func status(_ phase: String, _ message: String? = nil) throws {
   state["phase"] = phase
   state["message"] = message
@@ -78,6 +79,7 @@ do {
   }
   let destination = URL(fileURLWithPath: try string("destination")).standardizedFileURL
   let work = planURL.deletingLastPathComponent()
+  ownedWork = work
   let dmg = URL(fileURLWithPath: try string("dmg"))
   let bundleID = try string("bundleID")
   let build = try string("build")
@@ -132,13 +134,13 @@ do {
   #else
   let architecture = "x86_64"
   #endif
-  try command("/usr/bin/lipo", ["-verify_arch", architecture,
-                              candidate.appendingPathComponent("Contents/MacOS/\(executable)").path])
+  try command("/usr/bin/lipo", [candidate.appendingPathComponent("Contents/MacOS/\(executable)").path,
+                              "-verify_arch", architecture])
   let staged = parent.appendingPathComponent(".GPUQueue-staged-\(id).app")
   stage = staged
   try command("/usr/bin/ditto", [candidate.path, staged.path])
   try command("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path])
-  try command("/usr/bin/hdiutil", ["detach", volume.path])
+  try command("/usr/bin/hdiutil", ["detach", "-force", volume.path])
   mount = nil
   let backup = parent.appendingPathComponent("GPU Queue.previous-\(currentBuild)-\(id).app")
   state["backup"] = backup.path
@@ -191,8 +193,12 @@ do {
 } catch {
   try? status("failed", error.localizedDescription)
   fputs("\(error.localizedDescription)\n", stderr)
-  if let volume = mount { try? command("/usr/bin/hdiutil", ["detach", volume.path]) }
+  if let volume = mount {
+    do { try command("/usr/bin/hdiutil", ["detach", "-force", volume.path]); mount = nil }
+    catch { fputs("Could not detach update volume: \(error)\n", stderr) }
+  }
   if let staged = stage { try? fm.removeItem(at: staged) }
+  if mount == nil, let work = ownedWork { try? fm.removeItem(at: work) }
   exit(1)
 }
 if lockFD >= 0 { flock(lockFD, LOCK_UN); close(lockFD) }
