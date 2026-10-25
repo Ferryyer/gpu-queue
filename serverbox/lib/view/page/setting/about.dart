@@ -51,7 +51,7 @@ final class _AppAboutPageState extends State<_AppAboutPage>
                 Btn.elevated(
                   icon: const Icon(Icons.view_list_outlined),
                   text: 'GPU Queue',
-                  onTap: () => GpuQueue.uri.toString().launchUrl(),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GpuQueuePage())),
                 ),
               ].joinWith(UIs.width13),
             ),

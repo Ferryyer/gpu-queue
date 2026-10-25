@@ -6,26 +6,10 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter_pty/src/flutter_pty_bindings_generated.dart';
-
-const _libName = 'flutter_pty';
-
-final DynamicLibrary _dylib = () {
-  if (Platform.isMacOS || Platform.isIOS) {
-    return DynamicLibrary.open('$_libName.framework/$_libName');
-  }
-  if (Platform.isAndroid || Platform.isLinux) {
-    return DynamicLibrary.open('lib$_libName.so');
-  }
-  if (Platform.isWindows) {
-    return DynamicLibrary.open('$_libName.dll');
-  }
-  throw UnsupportedError('Unknown platform: ${Platform.operatingSystem}');
-}();
-
-final _bindings = FlutterPtyBindings(_dylib);
+import 'package:flutter_pty/src/native_bindings.dart';
 
 final _init = () {
-  return _bindings.Dart_InitializeApiDL(NativeApi.initializeApiDLData);
+  return PtyNative.initialize(NativeApi.initializeApiDLData);
 }();
 
 void _ensureInitialized() {
@@ -115,7 +99,7 @@ class Pty {
       options.ref.working_directory = nullptr;
     }
 
-    _handle = _bindings.pty_create(options);
+    _handle = PtyNative.create(options);
 
     calloc.free(options);
 
@@ -186,19 +170,19 @@ class Pty {
   Future<int> get exitCode => _exitCodeCompleter.future;
 
   /// The process id of the process running in the pseudo-terminal.
-  int get pid => _bindings.pty_getpid(_handle);
+  int get pid => PtyNative.getpid(_handle);
 
   /// Write data to the pseudo-terminal.
   void write(Uint8List data) {
     final buf = malloc<Int8>(data.length);
     buf.asTypedList(data.length).setAll(0, data);
-    _bindings.pty_write(_handle, buf.cast(), data.length);
+    PtyNative.write(_handle, buf.cast(), data.length);
     malloc.free(buf);
   }
 
   /// Resize the pseudo-terminal.
   void resize(int rows, int cols) {
-    _bindings.pty_resize(_handle, rows, cols);
+    PtyNative.resize(_handle, rows, cols);
   }
 
   /// Kill the process running in the pseudo-terminal.
@@ -214,7 +198,7 @@ class Pty {
   /// This is needed when ackRead is set to true as the pty will wait for this signal to happen
   /// before any additional data is sent.
   void ackRead() {
-    _bindings.pty_ack_read(_handle);
+    PtyNative.ackRead(_handle);
   }
 
   void _onExitCode(dynamic exitCode) {
@@ -227,7 +211,7 @@ class Pty {
 }
 
 String? _getPtyError() {
-  final error = _bindings.pty_error();
+  final error = PtyNative.error();
 
   if (error == nullptr) {
     return null;

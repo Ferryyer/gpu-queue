@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:fl_lib/fl_lib.dart';
 import 'package:fl_lib/theme.dart';
@@ -14,8 +13,8 @@ import 'package:server_box/core/chan.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/core/motion.dart';
 import 'package:server_box/core/service/diagnostics_upload.dart';
-import 'package:server_box/core/utils/local_server.dart';
 import 'package:server_box/core/utils/gpu_queue_theme.dart';
+import 'package:server_box/core/utils/local_server.dart';
 import 'package:server_box/data/model/app/feature.dart';
 import 'package:server_box/data/model/app/tab.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
@@ -35,11 +34,9 @@ Widget _buildHomeWithWindowFrame() {
   return VirtualWindowFrame(title: BuildData.name, child: const HomePage());
 }
 
-ThemeData _theme({Color? seed, Brightness? brightness}) => gpuQueueTheme(buildAppTheme(
-  AppThemeSource.current(),
-  seed: seed,
-  brightness: brightness,
-));
+ThemeData _theme({Color? seed, Brightness? brightness}) => gpuQueueTheme(
+  buildAppTheme(AppThemeSource.current(), seed: seed, brightness: brightness),
+);
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});

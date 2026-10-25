@@ -8,6 +8,7 @@ import 'package:server_box/data/model/app/tab.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/view/page/agent/agent.dart';
 import 'package:server_box/view/page/benchmark/tab.dart';
+import 'package:server_box/view/page/gpu_queue/page.dart';
 import 'package:server_box/view/page/remote_desktop/tab.dart';
 import 'package:server_box/view/page/server/tab/tab.dart';
 import 'package:server_box/view/page/snippet/list.dart';
@@ -22,6 +23,8 @@ import 'package:server_box/view/widget/nav_rail.dart';
 extension AppTabViewX on AppTab {
   Widget get page {
     return switch (this) {
+      AppTab.overview => const GpuQueuePage(overview: true),
+      AppTab.tasks => const GpuQueuePage(),
       AppTab.server => const ServerPage(),
       AppTab.ssh => const SSHTabPage(),
       AppTab.file => const FileTabPage(),
@@ -47,6 +50,8 @@ extension AppTabViewX on AppTab {
 
   String get label {
     return switch (this) {
+      AppTab.overview => '总览',
+      AppTab.tasks => '任务',
       AppTab.server => libL10n.server,
       // Not "SSH": a terminal is what this tab holds, and SSH is only where
       // most of them happen to come from. One already comes from a monitor
@@ -143,6 +148,8 @@ class _AppTabIcon extends StatelessWidget {
             IconStyle.mingcute;
         final icon = mingcute
             ? switch (tab) {
+                AppTab.overview => Icons.dashboard_outlined,
+                AppTab.tasks => Icons.checklist,
                 AppTab.server =>
                   selected ? MingCute.server_fill : MingCute.server_line,
                 AppTab.ssh =>
@@ -165,6 +172,8 @@ class _AppTabIcon extends StatelessWidget {
                   selected ? MingCute.layout_4_fill : MingCute.layout_4_line,
               }
             : switch (tab) {
+                AppTab.overview => Icons.dashboard_outlined,
+                AppTab.tasks => Icons.checklist,
                 AppTab.server =>
                   selected ? BoxIcons.bxs_server : BoxIcons.bx_server,
                 AppTab.ssh =>

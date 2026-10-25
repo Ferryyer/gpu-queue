@@ -12,7 +12,7 @@ from .core import Store, canonical
 from .control import Control, ControlError
 from .host_monitor import HostMonitor
 
-ASSETS = {'/monitor.js': ('monitor.js','text/javascript; charset=utf-8'), '/': ('index.html','text/html; charset=utf-8'), '/index.html': ('index.html','text/html; charset=utf-8'), '/style.css': ('style.css','text/css; charset=utf-8'), '/app.js': ('app.js','text/javascript; charset=utf-8'), '/model.js': ('model.js','text/javascript; charset=utf-8')}
+ASSETS = {'/detail-modal.js': ('detail-modal.js','text/javascript; charset=utf-8'), '/monitor.js': ('monitor.js','text/javascript; charset=utf-8'), '/': ('index.html','text/html; charset=utf-8'), '/index.html': ('index.html','text/html; charset=utf-8'), '/style.css': ('style.css','text/css; charset=utf-8'), '/app.js': ('app.js','text/javascript; charset=utf-8'), '/model.js': ('model.js','text/javascript; charset=utf-8')}
 SOCKET = Path('/tmp') / f'gpuq-{os.getuid()}' / 'web.sock'
 
 class Handler(BaseHTTPRequestHandler):

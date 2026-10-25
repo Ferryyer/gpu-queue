@@ -31,6 +31,10 @@ class AppTabAdapter extends TypeAdapter<AppTab> {
         return AppTab.virt;
       case 8:
         return AppTab.workspace;
+      case 9:
+        return AppTab.overview;
+      case 10:
+        return AppTab.tasks;
       default:
         return AppTab.server;
     }
@@ -57,6 +61,10 @@ class AppTabAdapter extends TypeAdapter<AppTab> {
         writer.writeByte(7);
       case AppTab.workspace:
         writer.writeByte(8);
+      case AppTab.overview:
+        writer.writeByte(9);
+      case AppTab.tasks:
+        writer.writeByte(10);
     }
   }
 

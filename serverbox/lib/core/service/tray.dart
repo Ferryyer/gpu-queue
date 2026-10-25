@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:server_box/core/gpu_queue/controller.dart';
 import 'package:server_box/data/model/app/tab.dart';
 import 'package:server_box/data/model/app/tray.dart';
 import 'package:server_box/data/provider/app/session_requests.dart';
@@ -61,6 +62,10 @@ class TrayService with WindowListener, WidgetsBindingObserver {
   final _watched = <String, ProviderSubscription<ServerState>>{};
 
   ProviderSubscription<ServersState>? _watchedAll;
+  ProviderSubscription<QueueSession>? _watchedQueue;
+  QueueSession? _queue;
+  String? _queueId;
+  ValueListenable<String>? _queueServiceListenable;
   ValueListenable<String>? _localeListenable;
 
   /// What was last pushed, so an unchanged model is not pushed again.
@@ -80,6 +85,8 @@ class TrayService with WindowListener, WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _localeListenable = Stores.setting.locale.listenable()
       ..addListener(_onLocaleChanged);
+    _queueServiceListenable = Stores.setting.gpuQueueServer.listenable()
+      ..addListener(_subscribeQueue);
     await _applyCloseBehaviour();
 
     _watchedAll = _ref.listen<ServersState>(
@@ -100,6 +107,9 @@ class TrayService with WindowListener, WidgetsBindingObserver {
     }
     _watched.clear();
     _watchedAll?.close();
+    _queueServiceListenable?.removeListener(_subscribeQueue);
+    _queue?.removeListener(_schedule);
+    _watchedQueue?.close();
     if (isDesktop) unawaited(_invoke('destroy'));
   }
 
@@ -125,7 +135,33 @@ class TrayService with WindowListener, WidgetsBindingObserver {
     }
   }
 
+  void _subscribeQueue() {
+    final configured = Stores.setting.gpuQueueServer.fetch();
+    final id = _ref.read(serversProvider).servers.containsKey(configured)
+        ? configured
+        : '';
+    if (_queueId == id) return;
+    _queueId = id;
+    _queue?.removeListener(_schedule);
+    _watchedQueue?.close();
+    _watchedQueue = null;
+    _queue = null;
+    if (id.isNotEmpty) {
+      _watchedQueue = _ref.listen<QueueSession>(queueControllerProvider(id), (
+        _,
+        next,
+      ) {
+        _queue?.removeListener(_schedule);
+        _queue = next;
+        next.addListener(_schedule);
+        _schedule();
+      }, fireImmediately: true);
+    }
+    _schedule();
+  }
+
   void _resubscribe(ServersState state) {
+    _subscribeQueue();
     final ids = state.serverOrder.toSet();
     for (final id in _watched.keys.toList()) {
       if (ids.contains(id)) continue;
@@ -205,11 +241,17 @@ class TrayService with WindowListener, WidgetsBindingObserver {
       );
     }
 
+    final queue = _queue;
+    final taskSummary = queue == null
+        ? ''
+        : queue.connected
+        ? ' · ${queue.tasks.where((t) => t['state'] == 'ready').length} 待启动 / ${queue.tasks.where((t) => t['state'] == 'running').length} 运行中'
+        : ' · 任务服务不可用';
     final model = TrayModel(
       lines: lines,
       config: settings,
       labels: TrayMenuLabels(
-        open: '${libL10n.open} ServerBox',
+        open: '${libL10n.open} GPU Queue$taskSummary',
         servers: libL10n.servers,
         empty: libL10n.empty,
         settings: libL10n.setting,
@@ -238,6 +280,7 @@ class TrayService with WindowListener, WidgetsBindingObserver {
     switch (call.method) {
       case 'open':
         await _showWindow();
+        _ref.read(homeTabRequestProvider.notifier).go(AppTab.tasks);
       case 'settings':
         await _openSettings();
       case 'quit':

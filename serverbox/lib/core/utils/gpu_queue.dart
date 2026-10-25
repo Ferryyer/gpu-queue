@@ -8,13 +8,20 @@ abstract final class GpuQueue {
 
   static Uri? parseAddress(String value) {
     final uri = Uri.tryParse(value);
-    if (uri == null || uri.scheme != 'http' ||
+    if (uri == null ||
+        uri.scheme != 'http' ||
         !const ['127.0.0.1', 'localhost', '::1'].contains(uri.host) ||
-        uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment ||
-        uri.port < 1 || uri.port > 65535 ||
-        (uri.path.isNotEmpty && uri.path != '/')) return null;
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        uri.port < 1 ||
+        uri.port > 65535 ||
+        (uri.path.isNotEmpty && uri.path != '/')) {
+      return null;
+    }
     return uri;
   }
 
-  static Uri get uri => parseAddress(address) ?? Uri.parse('http://127.0.0.1:8790/');
+  static Uri get uri =>
+      parseAddress(address) ?? Uri.parse('http://127.0.0.1:8790/');
 }

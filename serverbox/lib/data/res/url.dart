@@ -1,7 +1,7 @@
 abstract final class Urls {
   static const myGithub = 'https://github.com/lollipopkit';
   static const githubApi = 'https://api.github.com/repos/lollipopkit';
-  static const thisRepo = '$myGithub/flutter_server_box';
+  static const thisRepo = 'https://github.com/Ferryyer/gpu-queue';
 
   /// One file out of this repository's default branch.
   ///
@@ -16,7 +16,7 @@ abstract final class Urls {
   /// repositories and a new one should not need an app release. The copy in
   /// `assets/catalog/repos.toml` is what a first run with no network uses.
   static const themeCatalog = '$rawRepo/assets/catalog/repos.toml';
-  static const githubReleasesApi = '$githubApi/flutter_server_box/releases';
+  static const githubReleasesApi = 'https://api.github.com/repos/Ferryyer/gpu-queue/releases';
   static const appStore = 'https://apps.apple.com/app/id1586449703';
   static const appHelp = '$thisRepo#-help';
   static const appWiki = '$thisRepo/wiki';

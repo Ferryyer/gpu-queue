@@ -36,14 +36,12 @@ git -C third_party/ish-arm64 submodule update --init --recursive
 ## GPU Queue 融合
 
 个人任务台代码位于仓库根目录，`serverbox/` 保留原生 SSH、SFTP、进程查看、账号线程卡片、GPU 桥接和 Mac 隧道重连。
-服务器详情工具栏及“关于”页新增 **GPU Queue**：打开 `http://127.0.0.1:8790/`。
-先按根目录 `docs/OPERATIONS.md` 建立任务台的 Unix socket SSH 转发；原 ServerBox
-的 `22224` SSH 隧道与任务台的 `8790` HTTP 转发是两条不同连接，按钮不创建隧道。
+MF-12 将 GPU Queue 任务页原生接入应用：总览、任务、服务器、设置，任务详情可进入已明确关联服务器的 SSH 终端与 SFTP 工作目录。用户仅维护服务器列表中的 SSH 配置，应用通过现有会话访问远端私有任务 socket，不再要求单独建立 8790 网页转发。
+
+首次使用在任务页选择任务服务所在服务器并点击连接。GPU 实例与实际服务器需要显式关联；没有可靠关联时按钮禁用。任务服务故障、SSH 故障和采样过期分别显示。完整流程、安装更新命令与尚未完成的 Mac 验收见 [统一工作台说明](../docs/UNIFIED-WORKSPACE.md)。
 
 原生界面采用暖纸色、陶土色按钮和衬线大标题，深色模式使用暖灰色。
-可用 `--dart-define=GPU_QUEUE_STYLE=false` 恢复上游主题行为。
-如果本地端口不同，构建时传 `--dart-define=GPU_QUEUE_URL=http://127.0.0.1:8791/`。
-只接受无凭据、无查询参数的 HTTP 回环根地址，链接不携带启动授权。
+可用 `--dart-define=GPU_QUEUE_STYLE=false` 恢复上游主题行为。旧 `GPU_QUEUE_URL` 地址解析工具仅为兼容保留，原生任务入口不再通过其启动外部浏览器。
 
 关于页移除了捐赠按钮和其他产品推广，保留原作者、贡献者、数据来源与许可证。
 源码依赖和功能入口检查未发现内购 SDK、订阅校验或高级功能锁，因而没有伪造购买状态；

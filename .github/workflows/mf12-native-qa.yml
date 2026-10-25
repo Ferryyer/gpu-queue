@@ -1,0 +1,101 @@
+name: MF-12 Mac release
+
+on:
+  push:
+    branches: [codex/mf-12-unified-workspace]
+    paths:
+      - serverbox/**
+      - scripts/native_acceptance.py
+      - scripts/test_pty_native.py
+      - scripts/package_unified_macos.py
+      - scripts/package_mac_preview.py
+      - .github/workflows/mf12-native-qa.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mf12-native-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac-native:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+      CARGO_BUILD_JOBS: 3
+    steps:
+      - name: Check out the exact public candidate without stored credentials
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/Ferryyer/gpu-queue.git
+          git -C source fetch --depth=1 origin "$CANDIDATE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+      - name: Prepare the pinned Flutter SDK
+        run: |
+          git init flutter-sdk
+          git -C flutter-sdk remote add origin https://github.com/flutter/flutter.git
+          git -C flutter-sdk fetch --depth=1 origin tag 3.47.8
+          git -C flutter-sdk checkout --detach 737ba8f885dc774b53b442759999a312c9461e4e
+          ./flutter-sdk/bin/flutter --version
+          printf '%s\n' "$GITHUB_WORKSPACE/flutter-sdk/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned Rust and IronRDP
+        working-directory: source
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          if [ "$(uname -m)" = arm64 ]; then target=aarch64-apple-darwin; else target=x86_64-apple-darwin; fi
+          rustup target add --toolchain 1.98.1 "$target"
+          git clone --no-checkout https://github.com/lollipopkit/IronRDP.git serverbox/third_party/ironrdp
+          git -C serverbox/third_party/ironrdp checkout --detach debc16c0039936bef2fb0ded046b171ecced3885
+          git -C serverbox/third_party/ironrdp submodule update --init --recursive
+      - name: Restore native compiler cache
+        id: native-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/serverbox/.dart_tool/hooks_runner
+          key: mf12-macos15-arm64-flutter3478-rust1981-${{ hashFiles('source/serverbox/**/Cargo.lock', 'source/serverbox/**/pubspec.lock', 'source/serverbox/**/hook/*.dart', 'source/serverbox/**/rust_build_environment.dart') }}
+      - name: Generate Mac app without preflight or test gates
+        working-directory: source
+        run: python3 scripts/native_acceptance.py --stage build --package-only
+      - name: Package the installable Mac release
+        working-directory: source
+        run: python3 scripts/package_mac_preview.py
+      - name: Publish the Mac release
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          tag=v2.0.2002
+          gh release create "$tag" build/unified-release/* \
+            --repo Ferryyer/gpu-queue --target "$CANDIDATE_SHA" \
+            --latest --title 'GPU Queue 2.0.2002 · Mac 发布版' \
+            --notes-file build/unified-release/RELEASE-NOTES.md
+      - name: Upload native evidence and unsigned QA app
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mf12-native-mac-qa-${{ github.sha }}
+          path: |
+            source/build/native-acceptance/
+            source/build/unified-release/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Save native compiler cache even if app compilation fails
+        if: always() && steps.native-cache.outputs.cache-hit != 'true' && steps.native-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/serverbox/.dart_tool/hooks_runner
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
