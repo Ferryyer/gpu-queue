@@ -1,0 +1,145 @@
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import Mock
+
+from gpuqueue.control import Control
+from gpuqueue.core import HOME, Store, read_json
+from gpuqueue.platform import Markflow, PlatformError, TRUSTED_SENDER
+from gpuqueue.service import Service
+
+
+REQUEST = '11111111-1111-4111-8111-111111111111'
+
+
+class RequestDiagnosticsTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(dir=HOME/'scratch')
+        self.home = Path(self.temp.name)
+        self.store = Store(self.home/'queue')
+        self.adapter = Markflow(self.store, {'home': str(self.home), 'username': 'linlishuo'})
+        self.service = Service({}, self.store, self.adapter)
+        self.control = Control(self.store)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def task(self):
+        project = self.home/'project'
+        project.mkdir(exist_ok=True)
+        (project/'step.py').write_text('pass\n')
+        task, _ = self.store.submit({
+            'schema_version': 1, 'title': 'single GPU', 'project': str(project),
+            'code_files': ['step.py'], 'resources': {'gpus': 1, 'memory_gb': 2, 'estimated_hours': 1},
+            'steps': [{'name': 'step', 'argv': ['/usr/bin/python3', '{code}/step.py'], 'outputs': []}],
+        })
+        self.control.start(task['id'], task['digest'])
+        return task
+
+    def notice(self, title, message='ready-original'):
+        return dict(sender=dict(id=TRUSTED_SENDER), message_id=message,
+                    content=title+'\n申请：'+REQUEST)
+
+    def test_historical_ready_notice_does_not_restart_timed_out_probes(self):
+        resource = dict(id=REQUEST, status='unknown', ready_message='ready-original',
+                        error='GPU 检查超时', samples=[])
+        self.adapter.resources = {REQUEST: resource}
+        self.adapter.lark = Mock(return_value=dict(messages=[
+            self.notice('GPU已启动并通过成员权限与共享盘检查'),
+            self.notice('GPU已启动并通过成员权限与共享盘检查', 'another-historical-ready'),
+        ]))
+        self.adapter.submit_job = Mock()
+        self.adapter.refresh()
+        self.assertEqual(resource['status'], 'unknown')
+        self.adapter.submit_job.assert_not_called()
+        # Also survives an adapter restart using persisted metadata.
+        restarted = Markflow(self.store, self.adapter.config)
+        restarted.lark = self.adapter.lark
+        restarted.submit_job = Mock()
+        restarted.resources[REQUEST]['notice_checked'] = 0
+        restarted.refresh()
+        restarted.submit_job.assert_not_called()
+
+    def test_first_ready_notice_still_allows_one_probe_and_closure_wins(self):
+        resource = dict(id=REQUEST, status='pending')
+        self.adapter.resources = {REQUEST: resource}
+        self.adapter.lark = Mock(return_value=dict(messages=[self.notice('GPU已启动并通过成员权限与共享盘检查')]))
+        self.adapter.submit_job = Mock(return_value='probe-job')
+        self.adapter.refresh()
+        self.adapter.submit_job.assert_called_once()
+        resource['notice_checked'] = 0
+        self.adapter.lark.return_value = dict(messages=[self.notice('GPU已回收', 'closure')])
+        self.adapter.refresh()
+        self.assertEqual(resource['status'], 'closed')
+        self.adapter.submit_job.assert_called_once()
+
+    def test_unknown_old_resource_blocks_new_application_with_visible_reason(self):
+        task = self.task()
+        self.adapter.resources = {REQUEST: dict(id=REQUEST, status='unknown', error='GPU 检查超时')}
+        self.adapter.refresh = Mock()
+        self.adapter.lark = Mock()
+        self.service.cycle()
+        public = self.control.state()['tasks'][0]
+        self.assertEqual(public['state'], 'waiting_gpu')
+        self.assertIn(REQUEST, public['phase'])
+        self.assertIn('暂停新增申请', public['phase'])
+        self.assertIsNone(self.store.get(task['id'])['internal']['request_uuid'])
+        self.adapter.lark.assert_not_called()
+
+    def test_ambiguous_submission_is_not_reported_as_submitted(self):
+        task = self.task()
+        self.adapter.resources = {REQUEST: dict(id=REQUEST, status='pending', recorded_phase='submission_unknown')}
+        selection, reason = self.adapter.select(task, [])
+        self.assertIsNone(selection)
+        self.assertIn('提交回执待核查', reason)
+        self.assertNotIn('已提交', reason)
+
+    def test_failure_and_recovery_are_published_in_same_cycle(self):
+        task = self.task()
+        self.adapter.refresh = Mock(side_effect=PlatformError('network unavailable'))
+        self.adapter.request = Mock(return_value=None)
+        self.service.cycle()
+        state = self.control.state()
+        self.assertEqual(state['heartbeat']['error'], 'network unavailable')
+        self.assertIn('network unavailable', state['tasks'][0]['phase'])
+        self.adapter.request.assert_not_called()
+        self.adapter.refresh.side_effect = None
+        self.adapter.resources = {REQUEST: dict(id=REQUEST, status='unknown')}
+        self.service.cycle()
+        state = self.control.state()
+        self.assertIsNone(state['heartbeat']['error'])
+        self.assertIn('可用状态待核查', state['tasks'][0]['phase'])
+        self.assertIsNone(read_json(self.store.root/'service-status.json')['error'])
+
+    def test_browser_approved_task_submits_once_and_persists_receipt(self):
+        task = self.task()
+        self.adapter.refresh = Mock()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        request = task['internal']['request_uuid']
+        folder = self.home/'.local/state/markflow-gpu-requests'/request
+        self.assertEqual(read_json(folder/'state.json')['state'], 'submitted')
+        self.assertEqual(read_json(folder/'receipt.json'), {'record_id': 'receipt'})
+        self.assertEqual(task['public']['request_uuid'], request)
+        self.assertEqual(len(self.adapter.lark.call_args_list), 2)
+        self.assertIn('+form-submit', self.adapter.lark.call_args_list[1].args[0])
+        self.service.cycle()
+        self.assertEqual(len(self.adapter.lark.call_args_list), 2)
+
+    def test_form_timeout_retains_uuid_and_never_retries_submission(self):
+        task = self.task()
+        self.adapter.refresh = Mock()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, subprocess.TimeoutExpired('form-submit', 90)])
+        self.service.cycle()
+        request = self.store.get(task['id'])['internal']['request_uuid']
+        folder = self.home/'.local/state/markflow-gpu-requests'/request
+        self.assertEqual(read_json(folder/'state.json')['state'], 'submission_unknown')
+        self.service.cycle()
+        self.assertEqual(len(self.adapter.lark.call_args_list), 2)
+        self.assertIn('提交回执待核查', self.control.state()['tasks'][0]['phase'])
+
+
+if __name__ == '__main__':
+    unittest.main()

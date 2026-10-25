@@ -100,9 +100,15 @@ class Markflow:
             # The policy footer also contains "回收"; classify the title only.
             title = content.splitlines()[0].strip()
             if title.startswith('GPU已启动并通过成员权限与共享盘检查'):
+                # Search returns historical notices on every poll. Once a ready
+                # notice has been consumed, it cannot undo a failed/timed-out
+                # probe and enqueue more work on an unresponsive allocation.
+                if resource.get('ready_notice_consumed') or resource.get('ready_message'):
+                    continue
                 if resource['status'] not in ['online', 'closed', 'failed']:
                     resource['status'] = 'ready'
                 resource['ready_message'] = message.get('message_id')
+                resource['ready_notice_consumed'] = True
             elif re.match(r'^GPU.*(已回收|已关闭|已终止)', title):
                 resource['status'] = 'closed'
             elif re.match(r'^GPU.*(申请失败|启动失败|申请被拒)', title):
@@ -225,15 +231,19 @@ class Markflow:
         atomic_json(state_file, {'state': 'submitting', 'request': request_id, 'task': task['id'], 'created_at': now(), 'release_when_done': release_when_done, 'authorization': {'source': 'gpuq_browser_start', 'at': task['internal']['approved_at'], 'digest': task['digest']}})
         task['internal']['request_uuid'] = request_id
         self.store.save(task)
-        self.resources[request_id] = {'id': request_id, 'status': 'pending', 'type': resource['type'], 'gpus': resource['gpus'], 'samples': [], 'owned_by_gpuq': True, 'release_when_done': release_when_done}
+        self.resources[request_id] = {'id': request_id, 'status': 'pending', 'recorded_phase': 'submitting', 'type': resource['type'], 'gpus': resource['gpus'], 'samples': [], 'owned_by_gpuq': True, 'release_when_done': release_when_done}
         self.persist()
         try:
             relative = str((folder/'request.json').relative_to(self.home))
             receipt = self.lark(['base', '+form-submit', '--share-token', FORM, '--json', '@'+relative, '--yes'], timeout=90)
             atomic_json(folder/'receipt.json', receipt)
             atomic_json(state_file, {**read_json(state_file), 'state': 'submitted', 'submitted_at': now()})
+            self.resources[request_id]['recorded_phase'] = 'submitted'
+            self.persist()
         except BaseException:
             atomic_json(state_file, {**read_json(state_file), 'state': 'submission_unknown', 'updated_at': now()})
+            self.resources[request_id]['recorded_phase'] = 'submission_unknown'
+            self.persist()
             raise
         return request_id
 
@@ -267,6 +277,13 @@ class Markflow:
                 return (resource, [g['uuid'] for g in available[:required['gpus']]]), ''
         if any(r['status'] == 'online' and r.get('type') == required['type'] and time.time()-r.get('telemetry', {}).get('at', 0)<=90 for r in self.resources.values()):
             return None, 'GPU 已就绪；当前空闲显存或并行条件尚不满足任务要求'
-        if any(r['status'] == 'pending' for r in self.resources.values()):
-            return None, 'GPU 申请已提交，等待平台就绪通知'
+        for resource in self.resources.values():
+            if resource['status'] in ['closed', 'failed']:
+                continue
+            request_id = resource['id']
+            if resource.get('recorded_phase') in ['submitting', 'submission_unknown']:
+                return None, f'申请 {request_id} 的提交回执待核查；已暂停新增申请，避免重复提交'
+            if resource['status'] == 'pending':
+                return None, f'已有 GPU 申请 {request_id} 等待平台就绪通知；未新增申请'
+            return None, f'旧申请 {request_id} 的可用状态待核查；已暂停新增申请。'+resource.get('error', '等待有效 GPU 探测回执')
         return None, '等待可复用 GPU；持续低占用且显存充足时最多并行两个任务'

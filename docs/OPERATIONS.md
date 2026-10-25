@@ -65,6 +65,12 @@ gpuq doctor
 
 ## 服务与数据
 
+### 已点击开始却没有新申请
+
+`gpuq-submit` 负责固定任务并入队，`markflow-gpu` 的表单适配器由 CPU 调度服务调用；skill 本身不向运行中的服务发送启动命令。先用 `gpuq status <任务编号>` 核对授权时间、申请 UUID 与 `phase`。没有新 UUID 且提示“旧申请的可用状态待核查”，表示旧资源尚未确认终止，服务为避免重复占卡暂停新增申请。任务历史完成或只读探测超时不能作为实例已回收的证据；需要匹配旧 UUID 的平台终止通知或用户确认。
+
+旧启动通知只消费一次，不能把探测超时的实例重新标成就绪。表单提交超时保留同一 UUID 与 `submission_unknown`，网页显示“提交回执待核查”，不能当作已受理；不生成新 UUID 重试。服务每轮结束同步真实错误与任务阶段，查询飞书失败也会显示在网页。测试 `tests/test_request_diagnostics.py` 覆盖这些路径，所有平台写入均为隔离模拟。
+
 - `gpuq`：CPU 调度服务；`gpuq-web`：网页服务，均由 `mf-services` 管理。
 - 私有网页 socket：`/tmp/gpuq-21005/web.sock`，所属目录 0700、socket 0600；不监听公网 TCP。
 - 持久任务库：`~/.local/state/gpuq/queue.sqlite3`。`tasks` 保存固定任务，`controls` 独立保存启动授权、顺序和领取状态，`queue_audit` 记录网页决策。排序与领取通过 SQLite 事务和队列版本防止竞争。

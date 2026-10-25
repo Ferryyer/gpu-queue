@@ -268,20 +268,33 @@ class Service:
         if changed:
             self.platform.persist()
 
+    def cycle(self):
+        try:
+            self.tick()
+            self.error = None
+        except QueueChanged:
+            pass
+        except Exception as error:
+            message = redact(str(error))[:400]
+            if message != self.error:
+                print('Queue service: '+message, flush=True)
+            self.error = message
+            for task in self.store.tasks():
+                if task['internal'].get('approved_at') and task['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']:
+                    task['public']['phase'] = 'GPU 申请或状态核查未完成；已暂停新增申请：'+message
+                    self.store.save(task)
+        # tick publishes before platform I/O to read browser decisions. Publish
+        # again afterwards so failures and recovered states reach the UI now.
+        try:
+            self.sync()
+        except Exception as error:
+            self.error = redact(str(error))[:400]
+        atomic_json(self.store.root/'service-status.json', {'at': now(), 'error': self.error, 'pid': os.getpid()})
+
     def serve(self):
         lock = (self.store.root/'service.lock').open('a')
         fcntl.flock(lock, fcntl.LOCK_EX|fcntl.LOCK_NB)
         print('GPU queue service started; browser approval is required.', flush=True)
         while True:
-            try:
-                self.tick()
-                self.error = None
-            except QueueChanged:
-                pass
-            except Exception as error:
-                message = redact(str(error))[:400]
-                if message != self.error:
-                    print('Queue service: '+message, flush=True)
-                self.error = message
-            atomic_json(self.store.root/'service-status.json', {'at': now(), 'error': self.error, 'pid': os.getpid()})
+            self.cycle()
             time.sleep(5)
