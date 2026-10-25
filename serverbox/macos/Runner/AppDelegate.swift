@@ -36,6 +36,11 @@ class AppDelegate: FlutterAppDelegate {
     }
 
     if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
+      let updateChannel = FlutterMethodChannel(
+        name: "work.gpuqueue/update", binaryMessenger: controller.engine.binaryMessenger)
+      updateChannel.setMethodCallHandler { call, result in
+        GPUQueueUpdate.handle(call, result)
+      }
       let channel = FlutterMethodChannel(name: "about", binaryMessenger: controller.engine.binaryMessenger)
       channel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
         if call.method == "showAboutPanel" {
@@ -127,5 +132,122 @@ class AppDelegate: FlutterAppDelegate {
       }
     }
     super.applicationDidFinishLaunching(notification)
+  }
+}
+
+private enum GPUQueueUpdate {
+  static var installing = false
+  static var activeWork: URL?
+  static var statusURL: URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("GPU Queue/Updater/status.json")
+  }
+  static func readState() -> [String: Any]? {
+    guard let data = try? Data(contentsOf: statusURL) else { return nil }
+    return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+  }
+  static func writeState(_ value: [String: Any]) throws {
+    try JSONSerialization.data(withJSONObject: value).write(to: statusURL, options: .atomic)
+  }
+  static func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+    switch call.method {
+    case "installStatus":
+      let state = readState()
+      if state?["phase"] as? String == "failed" { installing = false }
+      result(state)
+    case "cancelInstall":
+      if let work = activeWork { try? Data().write(to: work.appendingPathComponent("cancel")) }
+      installing = false
+      result(nil)
+    case "confirmLaunch":
+      if var state = readState(), state["phase"] as? String == "awaiting_launch",
+         state["build"] as? String == build,
+         state["destination"] as? String == Bundle.main.bundleURL.standardizedFileURL.path {
+        state["phase"] = "complete"
+        try? writeState(state)
+      }
+      result(nil)
+    case "lastResult":
+      if var state = readState(), state["notified"] as? Bool != true,
+         ["complete", "rolled_back"].contains(state["phase"] as? String ?? "") {
+        state["notified"] = true
+        try? writeState(state)
+        result(state)
+      } else { result(nil) }
+    case "install":
+      guard !installing else {
+        result(FlutterError(code: "busy", message: "正在安装更新", details: nil)); return
+      }
+      guard let args = call.arguments as? [String: Any],
+            let dmg = args["dmg"] as? String, let hash = args["sha256"] as? String,
+            let nextBuild = args["build"] as? Int,
+            hash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
+            nextBuild > (Int(build ?? "0") ?? 0),
+            let bundleID = Bundle.main.bundleIdentifier else {
+        result(FlutterError(code: "invalid_update", message: "无效的更新信息", details: nil)); return
+      }
+      installing = true
+      let destination = Bundle.main.bundleURL.standardizedFileURL
+      let helper = destination.appendingPathComponent("Contents/Helpers/GPUQueueUpdater")
+      let id = UUID().uuidString
+      let work = URL(fileURLWithPath: dmg).deletingLastPathComponent()
+      activeWork = work
+      let plan = work.appendingPathComponent("plan.json")
+      let statePath = statusURL
+      DispatchQueue.global(qos: .userInitiated).async {
+        do {
+          let fm = FileManager.default
+          try fm.createDirectory(at: statePath.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                 attributes: [.posixPermissions: 0o700])
+          let body: [String: Any] = ["id": id, "destination": destination.path,
+            "dmg": dmg, "sha256": hash, "build": String(nextBuild), "bundleID": bundleID,
+            "pid": ProcessInfo.processInfo.processIdentifier, "status": statePath.path]
+          try JSONSerialization.data(withJSONObject: body).write(to: plan, options: .atomic)
+          let process = Process()
+          process.executableURL = helper
+          process.arguments = [plan.path]
+          let logURL = statePath.deletingLastPathComponent().appendingPathComponent("install.log")
+          if !fm.fileExists(atPath: logURL.path) { fm.createFile(atPath: logURL.path, contents: nil) }
+          let log = try FileHandle(forWritingTo: logURL)
+          try log.truncate(atOffset: 0)
+          process.standardOutput = log
+          process.standardError = log
+          try process.run()
+          // Process has inherited its log descriptor; it survives the app exiting.
+          try log.close()
+          let deadline = Date().addingTimeInterval(180)
+          while Date() < deadline {
+            if let state = readState(), state["id"] as? String == id {
+              if state["phase"] as? String == "ready" {
+                DispatchQueue.main.async {
+                  result(nil)
+                  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
+                }
+                return
+              }
+              if state["phase"] as? String == "failed" {
+                throw NSError(domain: "GPUQueueUpdater", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: state["message"] as? String ?? "更新准备失败"])
+              }
+            }
+            if !process.isRunning { throw NSError(domain: "GPUQueueUpdater", code: 2,
+              userInfo: [NSLocalizedDescriptionKey: "安装器未能启动，请查看安装日志。"] ) }
+            Thread.sleep(forTimeInterval: 0.1)
+          }
+          // A slow copy can finish after this deadline. Explicit cancellation
+          // prevents that helper from installing later when the user quits.
+          try Data().write(to: work.appendingPathComponent("cancel"))
+          throw NSError(domain: "GPUQueueUpdater", code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "更新准备超时，应用仍在运行，请稍后重试。"])
+        } catch {
+          DispatchQueue.main.async {
+            installing = false
+            result(FlutterError(code: "install_failed", message: error.localizedDescription, details: nil))
+          }
+        }
+      }
+    default: result(FlutterMethodNotImplemented)
+    }
   }
 }

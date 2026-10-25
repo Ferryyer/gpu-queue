@@ -2,13 +2,15 @@ name: MF-33 verified Mac release
 
 on:
   push:
-    branches: [codex/mf-33-release]
+    branches: [codex/mf-33-auto-update]
     paths:
       - serverbox/**
       - scripts/native_acceptance.py
       - scripts/test_pty_native.py
       - scripts/package_unified_macos.py
       - scripts/package_mac_preview.py
+      - scripts/test_mac_updater.py
+      - scripts/test_queue_dart.py
       - .github/workflows/mf33-release.yml
       - gpuqueue/**
       - tests/**
@@ -45,6 +47,9 @@ jobs:
           mkdir -p "$HOME/scratch"
           python3 -m unittest discover -s tests -p 'test_*.py'
           node --test tests/cloud.test.js tests/modes.test.cjs tests/widget.test.cjs tests/widget-update.test.cjs
+      - name: Exercise native installer and rollback with signed disposable apps
+        working-directory: source
+        run: python3 scripts/test_mac_updater.py
       - name: Prepare the pinned Flutter SDK
         run: |
           git init flutter-sdk
@@ -83,10 +88,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ github.sha }}
         run: |
-          tag=v2.0.2003
+          tag=v2.0.2004
           gh release create "$tag" build/unified-release/* \
             --repo Ferryyer/gpu-queue --target "$CANDIDATE_SHA" \
-            --latest --title 'GPU Queue 2.0.2003 · GPU 申请修复版' \
+            --latest --title 'GPU Queue 2.0.2004 · 应用内自动安装更新' \
             --notes-file build/unified-release/RELEASE-NOTES.md
       - name: Upload native evidence and unsigned QA app
         if: always()
@@ -96,6 +101,7 @@ jobs:
           path: |
             source/build/native-acceptance/
             source/build/unified-release/
+            source/build/mac-updater-tests/
           if-no-files-found: warn
           retention-days: 7
       - name: Save native compiler cache even if app compilation fails

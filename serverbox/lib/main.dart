@@ -22,6 +22,7 @@ import 'package:server_box/core/service/theme_host.dart';
 import 'package:server_box/core/service/watch_sync.dart';
 import 'package:server_box/core/service/widget_sync.dart';
 import 'package:server_box/core/sync.dart';
+import 'package:server_box/core/update/mac_update.dart';
 import 'package:server_box/core/utils/rootfs.dart';
 import 'package:server_box/core/utils/rootfs_manifest_source.dart';
 import 'package:server_box/core/utils/sandbox_import.dart';
@@ -293,6 +294,7 @@ Future<void> _initData() async {
   // It may effect the following logic, so await it.
   // DO DB migration before load any provider.
   await _doDbMigrate();
+  MacAutoUpdate.configure();
 
   if (Stores.setting.betaTest.fetch()) AppUpdate.chan = AppUpdateChan.beta;
 

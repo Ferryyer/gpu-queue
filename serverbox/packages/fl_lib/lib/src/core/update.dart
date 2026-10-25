@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 
 abstract final class AppUpdateIface {
   static final newestBuild = ValueNotifier<int?>(null);
+  /// Optional host installer. Called only after the user presses Update.
+  static Future<void> Function(BuildContext context, String url, int build)? installer;
 
   /// - [noticeBuilder] is shown above the release notes, for whatever this
   ///   particular app has to say alongside an update — which build the user is
@@ -97,9 +99,9 @@ abstract final class AppUpdateIface {
           TextButton(
             onPressed: () {
               if (!force) context.popDialog();
-              _doUpdate(context, fileUrl);
+              _doUpdate(context, fileUrl, newest);
             },
-            child: Text(l10n.update),
+            child: Text(installer != null ? '下载并安装' : l10n.update),
           )
         ],
       );
@@ -171,7 +173,12 @@ abstract final class AppUpdateIface {
     );
   }
 
-  static Future<void> _doUpdate(BuildContext context, String url) async {
+  static Future<void> _doUpdate(BuildContext context, String url, int build) async {
+    final install = installer;
+    if (install != null) {
+      await install(context, url, build);
+      return;
+    }
     switch (Pfs.type) {
       case Pfs.windows || Pfs.linux || Pfs.ios || Pfs.macos || Pfs.android:
         await url.launchUrl();
