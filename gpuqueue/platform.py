@@ -61,6 +61,24 @@ class Markflow:
     def persist(self):
         self.store.metadata('resources', self.resources)
 
+    @staticmethod
+    def probe_timed_out(resource):
+        # The error prefix recognizes timeout evidence written before this
+        # policy existed. Unknown states and notification failures do not count.
+        return resource.get('status') == 'unknown' and bool(
+            resource.get('probe_timeout') or
+            resource.get('error', '').startswith('GPU 检查超时'))
+
+    def replacement_candidates(self, task):
+        internal = task['internal']
+        if not (self.store.metadata('resource_policy') or {}).get('replace_timed_out_gpu'):
+            return []
+        if not internal.get('approved_at') or internal.get('timeout_replacement') or internal.get('job_uuid') or internal.get('dispatch') in ['submitting', 'submitted', 'unknown']:
+            return []
+        return [r for r in self.resources.values() if self.probe_timed_out(r)
+                and r.get('recorded_phase') not in ['submitting', 'submission_unknown']
+                and (r.get('ready_message') or r.get('ready_notice_consumed') or r.get('telemetry'))]
+
     def discover(self):
         base = self.home / '.local/state/markflow-gpu-requests'
         for folder in sorted(base.iterdir() if base.exists() else []):
@@ -163,7 +181,9 @@ class Markflow:
                 specification = self.job_folder(resource['id'])/(probe['job']+'.json')
                 if not status and specification.exists():
                     specification.unlink()
-                resource.update(status='unknown', probe=None, error='GPU 检查超时；不会据此重复申请')
+                resource.update(status='unknown', probe=None,
+                                probe_timeout={'at': now(), 'job': probe['job']},
+                                error='GPU 检查超时；旧实例是否回收尚未确认')
             return
         if time.time()-resource.get('probe_checked', 0) >= 30:
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
@@ -195,7 +215,11 @@ class Markflow:
     def request(self, task):
         if not task['internal'].get('approved_at'):
             raise PlatformError('任务未在网页启动')
-        unresolved = [r for r in self.resources.values() if r['status'] not in ['closed', 'failed']]
+        if task['internal'].get('job_uuid') or task['internal'].get('dispatch') in ['submitting', 'submitted', 'unknown']:
+            return None
+        replacements = self.replacement_candidates(task)
+        replacement_ids = [r['id'] for r in replacements]
+        unresolved = [r for r in self.resources.values() if r['status'] not in ['closed', 'failed'] and r.get('id') not in replacement_ids]
         required = task['doc']['resources']
         # A known smaller allocation may be insufficient. Unknown or busy usable
         # allocations must be reconciled rather than treated as absent.
@@ -207,7 +231,8 @@ class Markflow:
         if read_json(self.store.root/'tasks'/task['id']/'run/stop.json',{}).get('digest') == task['digest']:
             return None
         resource = task['doc']['resources']
-        request_id = task['internal'].get('request_uuid') or str(uuid.uuid4())
+        prior_request = task['internal'].get('request_uuid')
+        request_id = prior_request if prior_request and prior_request not in replacement_ids else str(uuid.uuid4())
         fields = {'申请标识': request_id, '服务器用户名': self.config['username'], '用途': task['doc']['title']+'；'+task['doc']['description'], '资源类型': resource['type'], '卡数': resource['gpus'], '预计小时': resource['estimated_hours'], '工作目录': task['doc']['project'], '规则确认': '已阅读并同意'}
         questions = data.get('questions', [])
         for question in questions:
@@ -228,8 +253,13 @@ class Markflow:
             return None
         atomic_json(folder/'request.json', {'fields': fields})
         release_when_done = bool((self.store.metadata('resource_policy') or {}).get('release_when_queue_idle'))
-        atomic_json(state_file, {'state': 'submitting', 'request': request_id, 'task': task['id'], 'created_at': now(), 'release_when_done': release_when_done, 'authorization': {'source': 'gpuq_browser_start', 'at': task['internal']['approved_at'], 'digest': task['digest']}})
+        replacement = {'prior_requests': replacement_ids, 'request': request_id, 'at': now(), 'reason': '旧 GPU 只读探测超时，按用户偏好补申请一次'} if replacement_ids else None
+        atomic_json(state_file, {'state': 'submitting', 'request': request_id, 'task': task['id'], 'created_at': now(), 'release_when_done': release_when_done, 'authorization': {'source': 'gpuq_browser_start', 'at': task['internal']['approved_at'], 'digest': task['digest']}, 'timeout_replacement': replacement})
         task['internal']['request_uuid'] = request_id
+        task['public']['request_uuid'] = request_id
+        if replacement:
+            task['internal']['timeout_replacement'] = replacement
+            task['public']['events'].append(replacement['reason']+'；不代表旧实例已回收')
         self.store.save(task)
         self.resources[request_id] = {'id': request_id, 'status': 'pending', 'recorded_phase': 'submitting', 'type': resource['type'], 'gpus': resource['gpus'], 'samples': [], 'owned_by_gpuq': True, 'release_when_done': release_when_done}
         self.persist()
@@ -277,13 +307,22 @@ class Markflow:
                 return (resource, [g['uuid'] for g in available[:required['gpus']]]), ''
         if any(r['status'] == 'online' and r.get('type') == required['type'] and time.time()-r.get('telemetry', {}).get('at', 0)<=90 for r in self.resources.values()):
             return None, 'GPU 已就绪；当前空闲显存或并行条件尚不满足任务要求'
+        replaceable = {r['id'] for r in self.replacement_candidates(task)}
         for resource in self.resources.values():
             if resource['status'] in ['closed', 'failed']:
+                continue
+            if resource['id'] in replaceable:
                 continue
             request_id = resource['id']
             if resource.get('recorded_phase') in ['submitting', 'submission_unknown']:
                 return None, f'申请 {request_id} 的提交回执待核查；已暂停新增申请，避免重复提交'
             if resource['status'] == 'pending':
                 return None, f'已有 GPU 申请 {request_id} 等待平台就绪通知；未新增申请'
+            if task['internal'].get('timeout_replacement') and self.probe_timed_out(resource):
+                continue
             return None, f'旧申请 {request_id} 的可用状态待核查；已暂停新增申请。'+resource.get('error', '等待有效 GPU 探测回执')
+        if task['internal'].get('timeout_replacement'):
+            return None, '本任务已补申请一次；等待新申请回执或核查新资源，不再自动补申请'
+        if replaceable:
+            return None, '旧 GPU 查询超时；将按已保存偏好为本任务补申请一次，旧实例未确认回收'
         return None, '等待可复用 GPU；持续低占用且显存充足时最多并行两个任务'

@@ -1,5 +1,6 @@
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock
@@ -139,6 +140,117 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.service.cycle()
         self.assertEqual(len(self.adapter.lark.call_args_list), 2)
         self.assertIn('提交回执待核查', self.control.state()['tasks'][0]['phase'])
+
+    def enable_replacement(self):
+        self.store.metadata('resource_policy', {'replace_timed_out_gpu': True})
+        resource = dict(id=REQUEST, status='unknown', recorded_phase='submitted',
+                        ready_message='old-ready', type='H卡离线', gpus=1,
+                        error='GPU 检查超时；不会据此重复申请')
+        self.adapter.resources = {REQUEST: resource}
+        self.adapter.refresh = Mock()
+        return resource
+
+    def test_timeout_policy_submits_one_replacement_and_keeps_old_state_unknown(self):
+        task = self.task()
+        old = self.enable_replacement()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'new-receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        request = task['internal']['request_uuid']
+        self.assertNotEqual(request, REQUEST)
+        self.assertEqual(task['internal']['timeout_replacement']['prior_requests'], [REQUEST])
+        state = read_json(self.home/'.local/state/markflow-gpu-requests'/request/'state.json')
+        self.assertEqual(state['state'], 'submitted')
+        self.assertEqual(state['timeout_replacement']['request'], request)
+        self.assertEqual(old['status'], 'unknown')
+        self.service.cycle()
+        self.assertEqual(len(self.adapter.lark.call_args_list), 2)
+        self.assertIn(request, self.control.state()['tasks'][0]['phase'])
+
+    def test_replacement_budget_survives_restart_and_second_gpu_timeout(self):
+        task = self.task()
+        self.enable_replacement()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        request = task['internal']['request_uuid']
+        self.adapter.resources[request].update(status='unknown', ready_message='new-ready',
+                    error='GPU 检查超时', recorded_phase='submitted')
+        self.adapter.persist()
+        restarted = Markflow(self.store, self.adapter.config)
+        restarted.refresh = Mock()
+        restarted.lark = Mock()
+        Service({}, self.store, restarted).cycle()
+        restarted.lark.assert_not_called()
+        self.assertIn('已补申请一次', self.control.state()['tasks'][0]['phase'])
+        self.assertEqual(self.store.get(task['id'])['internal']['request_uuid'], request)
+
+    def test_pending_or_ambiguous_submission_or_generic_unknown_cannot_replace(self):
+        task = self.task()
+        self.enable_replacement()
+        self.service.sync()
+        task = self.store.get(task['id'])
+        for changes in [dict(status='pending'), dict(recorded_phase='submission_unknown'),
+                        dict(error='notification network timeout'), dict(ready_message=None)]:
+            with self.subTest(changes=changes):
+                resource = self.enable_replacement()
+                resource.update(changes)
+                self.adapter.lark = Mock()
+                self.assertIsNone(self.adapter.request(task))
+                self.adapter.lark.assert_not_called()
+
+    def test_timeout_replacement_does_not_authorize_unstarted_or_dispatched_tasks(self):
+        task = self.task()
+        self.enable_replacement()
+        self.adapter.lark = Mock()
+        with self.assertRaises(PlatformError):
+            self.adapter.request(task)
+        task['internal'].update(approved_at='browser', job_uuid='existing-job', dispatch='submitted')
+        self.assertIsNone(self.adapter.request(task))
+        self.adapter.lark.assert_not_called()
+
+    def test_timeout_after_ready_before_dispatch_can_use_a_new_request_uuid(self):
+        task = self.task()
+        self.enable_replacement()
+        self.service.sync()
+        task = self.store.get(task['id'])
+        task['internal']['request_uuid'] = REQUEST
+        self.store.save(task)
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'receipt'}])
+        self.service.cycle()
+        self.assertNotEqual(self.store.get(task['id'])['internal']['request_uuid'], REQUEST)
+
+    def test_form_timeout_on_replacement_preserves_new_uuid_without_retry(self):
+        task = self.task()
+        self.enable_replacement()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, subprocess.TimeoutExpired('form-submit', 90)])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        request = task['internal']['request_uuid']
+        self.assertEqual(task['public']['request_uuid'], request)
+        self.assertNotEqual(request, REQUEST)
+        self.service.cycle()
+        self.assertEqual(len(self.adapter.lark.call_args_list), 2)
+        self.assertIn('提交回执待核查', self.control.state()['tasks'][0]['phase'])
+
+    def test_existing_healthy_gpu_is_reused_before_requesting_replacement(self):
+        self.task()
+        self.enable_replacement()
+        self.adapter.resources['healthy'] = dict(id='healthy', status='online', type='H卡离线',
+            telemetry=dict(at=time.time(), gpus=[dict(uuid='GPU-ready', total_mb=81559, used_mb=1)], apps=[]))
+        self.adapter.lark = Mock()
+        self.service.dispatch = Mock()
+        self.service.cycle()
+        self.service.dispatch.assert_called_once()
+        self.assertEqual(self.service.dispatch.call_args.args[1][0]['id'], 'healthy')
+        self.adapter.lark.assert_not_called()
+
+    def test_actual_probe_timeout_records_evidence_without_claiming_release(self):
+        resource = dict(id=REQUEST, status='ready', probe=dict(job='unclaimed', at=time.time()-101))
+        self.adapter.refresh_probe(resource)
+        self.assertTrue(self.adapter.probe_timed_out(resource))
+        self.assertEqual(resource['status'], 'unknown')
+        self.assertEqual(resource['probe_timeout']['job'], 'unclaimed')
 
 
 if __name__ == '__main__':
