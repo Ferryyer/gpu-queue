@@ -100,3 +100,14 @@ python3 scripts/test_pty_native.py --flutter /具体SDK/bin/flutter
 新版本发布使用独立 tag 与 build，不覆盖 preview.1 或旧 Widget 稳定更新入口。沿用既有 bundle ID、数据名称、钥匙串账户和 SSH/SFTP 入口；切换服务重置详情选择，实例仍需明确绑定服务器。只有点击开始会授权当前版本，Auto 策略位于工具栏的「队列策略与连接状态」，停止仍需确认。
 
 工程验证包含生产 Flutter 组件的浅深色、长标题、侧栏收起、416px 日志与复制、文本放大、刷新后焦点/滚动保持；这些 Linux CPU 渲染检查不能代替 Mac 安装和字体验收。下载后在 MF-18 验收 SSH/SFTP、双服务器、安装覆盖/配置保留、休眠、中文字体和全屏。
+
+
+## 2.0.2002 发布交付
+
+用户要求直接完成发布版。本次从 PR #3 的 8ec5920 创建新版本 2.0.2002 / build 2002，包含已批准界面和任务更新时间 P2 修复。工作流在 Apple Silicon Mac 上执行必要编译、ad-hoc 签名和 DMG 打包，发布独立 v2.0.2002 tag，为非预发布 GitHub Latest Release；旧 preview.1/preview.2 资产保留。
+
+发布入口：https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2002
+
+下载 GPU-Queue-macos-arm64-2002-unsigned.dmg 与 SHA256SUMS，校验后挂载并将应用拖入 Applications；先退出旧应用并保留备份。沿用既有 bundle ID、数据目录及钥匙串定义。未申请 Apple Developer ID 或公证，unsigned/ad-hoc 状态继续在文件名、元数据和发布说明披露。非预发布渠道不等于 Mac 安装/配置/SSH/SFTP 人工验收通过；26 项 CPU 组件/队列检查与定向静态分析已通过，不重复空跑。
+
+旧 Widget 更新入口不迁移；统一应用以新 DMG 手动更新，不向旧 Widget 推送不兼容的包。PR #3 保持未合并，本次不部署服务器或启动 GPU 作业。

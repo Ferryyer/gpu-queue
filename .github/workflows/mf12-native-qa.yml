@@ -1,4 +1,4 @@
-name: MF-12 Mac acceptance preview
+name: MF-12 Mac release
 
 on:
   push:
@@ -66,19 +66,19 @@ jobs:
       - name: Generate Mac app without preflight or test gates
         working-directory: source
         run: python3 scripts/native_acceptance.py --stage build --package-only
-      - name: Package the installable acceptance preview
+      - name: Package the installable Mac release
         working-directory: source
         run: python3 scripts/package_mac_preview.py
-      - name: Publish the acceptance preview
+      - name: Publish the Mac release
         working-directory: source
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_SHA: ${{ github.sha }}
         run: |
-          tag=v2.0.2001-preview.2
+          tag=v2.0.2002
           gh release create "$tag" build/unified-release/* \
             --repo Ferryyer/gpu-queue --target "$CANDIDATE_SHA" \
-            --prerelease --latest=false --title 'GPU Queue 2.0.2001 · 原生设计预览 2' \
+            --latest --title 'GPU Queue 2.0.2002 · Mac 发布版' \
             --notes-file build/unified-release/RELEASE-NOTES.md
       - name: Upload native evidence and unsigned QA app
         if: always()
