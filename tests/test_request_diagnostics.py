@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 from gpuqueue.control import Control
-from gpuqueue.core import HOME, Store, read_json
+from gpuqueue.core import HOME, Store, read_json, atomic_json
 from gpuqueue.platform import Markflow, PlatformError, TRUSTED_SENDER
 from gpuqueue.service import Service
 
@@ -251,6 +251,58 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.assertTrue(self.adapter.probe_timed_out(resource))
         self.assertEqual(resource['status'], 'unknown')
         self.assertEqual(resource['probe_timeout']['job'], 'unclaimed')
+
+    def test_gpu_side_nvidia_query_timeout_is_eligible_for_replacement(self):
+        resource = self.enable_replacement()
+        resource.update(status='ready', probe=dict(job='gpu-side-timeout', at=time.time()))
+        folder = self.adapter.job_folder(REQUEST)/'gpu-side-timeout'
+        atomic_json(folder/'status.json', dict(state='finished', exit_code=124))
+        (folder/'output.log').write_text('GPUQ_PROBE_TIMEOUT=1\n')
+        self.adapter.refresh_probe(resource)
+        self.assertTrue(self.adapter.probe_timed_out(resource))
+        task = self.task()
+        self.service.sync()
+        self.assertEqual([r['id'] for r in self.adapter.replacement_candidates(self.store.get(task['id']))], [REQUEST])
+
+    def test_generic_probe_failure_is_not_treated_as_timeout(self):
+        resource = self.enable_replacement()
+        resource.pop('error')
+        resource.update(status='ready', probe=dict(job='failed-probe', at=time.time()))
+        folder = self.adapter.job_folder(REQUEST)/'failed-probe'
+        atomic_json(folder/'status.json', dict(state='finished', exit_code=124))
+        (folder/'output.log').write_text('unrelated exit code\n')
+        self.adapter.refresh_probe(resource)
+        self.assertFalse(self.adapter.probe_timed_out(resource))
+
+    def test_old_notice_failure_does_not_veto_authorized_timeout_replacement(self):
+        task = self.task()
+        old = self.enable_replacement()
+        del self.adapter.refresh
+        self.adapter.lark = Mock(side_effect=[PlatformError('old notice unavailable'),
+                                             {'questions': []}, {'record_id': 'new-receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        self.assertIsNotNone(task['internal']['request_uuid'])
+        self.assertEqual(old['notice_error'], 'old notice unavailable')
+        self.assertIsNone(self.control.state()['heartbeat']['error'])
+
+    def test_old_notice_failure_does_not_block_an_existing_replacement(self):
+        task = self.task()
+        old = self.enable_replacement()
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'receipt'}])
+        self.service.cycle()
+        new_request = self.store.get(task['id'])['internal']['request_uuid']
+        old['notice_checked'] = 0
+        del self.adapter.refresh
+        def notices(args, **kwargs):
+            if REQUEST in args:
+                raise PlatformError('old notice unavailable')
+            self.assertIn(new_request, args)
+            return {'messages': []}
+        self.adapter.lark = Mock(side_effect=notices)
+        self.service.cycle()
+        self.assertIsNone(self.control.state()['heartbeat']['error'])
+        self.assertIn(new_request, self.control.state()['tasks'][0]['phase'])
 
 
 if __name__ == '__main__':

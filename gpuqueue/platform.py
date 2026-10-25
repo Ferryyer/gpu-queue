@@ -24,14 +24,19 @@ def reserve_mb(gpu, parallel=False):
     # margin applies only when admitting another task onto an occupied GPU.
     return max(2048, gpu['total_mb'] * .1) if parallel else 2048
 
-PROBE_SCRIPT = '''import subprocess,json,time,socket
+PROBE_SCRIPT = '''import subprocess,json,time,socket,sys
 def query(fields,kind='gpu'):
  p=subprocess.run(['nvidia-smi','--query-'+kind+'='+fields,'--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=20)
  if p.returncode:raise RuntimeError('nvidia-smi query failed')
  return p.stdout.strip()
-gpus=query('index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu')
-at=time.time()
-print('GPUQ_TELEMETRY='+json.dumps({'gpus':gpus,'apps':query('gpu_uuid,pid','compute-apps'),'at':at,'host':socket.gethostname()}))
+try:
+ gpus=query('index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu')
+ at=time.time()
+ apps=query('gpu_uuid,pid','compute-apps')
+except subprocess.TimeoutExpired:
+ print('GPUQ_PROBE_TIMEOUT=1',flush=True)
+ sys.exit(124)
+print('GPUQ_TELEMETRY='+json.dumps({'gpus':gpus,'apps':apps,'at':at,'host':socket.gethostname()}))
 '''
 
 class PlatformError(RuntimeError):
@@ -174,7 +179,13 @@ class Markflow:
                 resource['samples'] = [sample for sample in resource['samples'] if stamp-sample['at'] < 420]
                 return
             if status.get('state') in ['failed', 'finished']:
-                resource.update(status='unknown', probe=None, error='GPU 只读检查失败，无法确认资源可用')
+                output = folder/'output.log'
+                timed_out = (status.get('exit_code') == 124 and output.is_file() and
+                             'GPUQ_PROBE_TIMEOUT=1' in output.read_text(errors='replace').splitlines())
+                resource.update(status='unknown', probe=None,
+                                error='GPU 检查超时；旧实例是否回收尚未确认' if timed_out else 'GPU 只读检查失败，无法确认资源可用')
+                if timed_out:
+                    resource['probe_timeout'] = {'at': now(), 'job': probe['job']}
                 return
             if time.time()-probe['at'] > 100:
                 # Only remove a diagnostic that has not been claimed.
@@ -196,6 +207,10 @@ class Markflow:
             # Resource monitoring outlives compute jobs. These existing read-only
             # probes never request GPUs or authorize model execution.
             errors = []
+            replaceable = set()
+            for task in self.store.tasks():
+                replaceable.update(r['id'] for r in self.replacement_candidates(task))
+                replaceable.update(task['internal'].get('timeout_replacement', {}).get('prior_requests', []))
             for resource in list(self.resources.values()):
                 # A failed notification query must not prevent reading a probe
                 # already completed in shared HOME, or skip other allocations.
@@ -203,7 +218,12 @@ class Markflow:
                     try:
                         refresh(resource)
                     except (PlatformError, OSError, subprocess.SubprocessError) as error:
-                        errors.append(error)
+                        if refresh == self.refresh_notice and resource['id'] in replaceable and self.probe_timed_out(resource):
+                            # An unreachable historical notice must not veto the
+                            # user's timeout policy or block a newer allocation.
+                            resource['notice_error'] = str(error)[:400]
+                        else:
+                            errors.append(error)
             if errors:
                 # Keep the scheduler fail-closed while publishing any real
                 # samples recovered above; never refresh their GPU timestamp.
