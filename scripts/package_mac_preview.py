@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,30 +17,34 @@ def main():
     report = json.loads((ROOT / 'build/native-acceptance/report.json').read_text())
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     arch = platform.machine()
-    # Local ad-hoc signing is required to run an Apple Silicon app. The user
-    # requested direct upload, so there is no signature/launch/test gate here.
+    version, build = re.search(r'^version: ([0-9.]+)\+([0-9]+)$',
+                              (ROOT/'serverbox/pubspec.yaml').read_text(), re.M).groups()
+    tag = 'v'+version
+    if not report.get('macBuildVerified') or report.get('sourceCommit') != commit:
+        raise RuntimeError('Release requires native tests and build evidence for this exact commit')
     subprocess.run(['codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', str(app)], check=True)
+    subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
     out = ROOT / 'build/unified-release'
     out.mkdir(parents=True, exist_ok=True)
     subprocess.run(['python3', 'scripts/package_unified_macos.py', '--app', str(app),
                     '--allow-unsigned', '--out', str(out)], cwd=ROOT, check=True)
     metadata_path = out / 'unified-release.json'
     metadata = json.loads(metadata_path.read_text())
-    metadata.update(releaseTag='v2.0.2002', channel='release', sourceCommit=commit,
+    metadata.update(releaseTag=tag, channel='release', sourceCommit=commit,
                     architecture=arch, minimumMacOS='13.0', signature='ad-hoc',
-                    notarized=False, launchSmokePassed=False, checksSkippedByUser=True,
+                    notarized=False, launchSmokePassed=False, checksSkippedByUser=False,
                     interactiveSshSftpVerified=False, installationVerified=False)
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + '\n')
     (out / 'native-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
-    (out / 'RELEASE-NOTES.md').write_text(f'''GPU Queue Mac 发布版，版本 2.0.2002 (2002)，仅适用 Apple Silicon（M1/M2/M3/M4 等）、macOS 13+。
+    (out / 'RELEASE-NOTES.md').write_text(f'''GPU Queue Mac 发布版，版本 {version} ({build})，适用 Apple Silicon、macOS 13+。
 
-源码：`{commit}`，分支 `codex/mf-12-unified-workspace`，PR #3 尚未合并。
+源码：`{commit}`，分支 `codex/mf-33-release`。基于 2.0.2002 统一桌面应用，合入已合并的 PR #6。
 
-下载 `GPU-Queue-macos-arm64-2002-unsigned.dmg`，用 SHA256SUMS 校验后挂载，拖入 Applications。请先备份现有 GPU Queue.app，优先在独立 macOS 测试用户验收；保留原有配置和钥匙串。此包只有本地 ad-hoc 签名，**没有 Apple Developer ID 签名或公证**，文件名保留 unsigned 表明它未经 Developer ID 签名或公证；本版通过 DMG 手动安装。macOS 可能阻止打开；核对来源和校验和后，在系统设置 → 隐私与安全性中选择“仍要打开”。不要全局关闭 Gatekeeper。
+更新：旧 GPU 只读查询超时后，按个人偏好为已启动但未投放的任务补申请一次；重启不重复申请。修复 GPU 内部查询超时识别、旧通知重复触发探测和旧卡通知错误阻塞补申请。申请提交回执不明时仍保留原 UUID 核查；网页和原生任务详情显示真实阶段与申请编号。服务器适配器已在个人服务更新，安装客户端不会替换服务器代码。
 
-用户要求直接上传，本轮跳过预检、测试、签名复验和启动冒烟，仅执行生成安装包所需的编译与打包；详见 native-report.json。本版实现 MF-9 已批准的原生侧栏、紧凑任务行、按需右侧详情与日志、浅深色主题；采用 Georgia / 宋体-简展示标题、系统正文 / 苹方及 Menlo 日志。未捆绑 Anthropic 字体。本版还包含真实任务更新时间、统一 UTC 格式、缺失提示与窄列表/1.5 倍文字兼容修复。26 项相关检查与定向静态分析已通过，不重复执行。Mac 人工验收仍待执行。任务→服务器→SSH/SFTP→结果、双服务器、休眠/字体/全屏、安装覆盖与旧配置保留仍待用户本机验收。清单见仓库 docs/MAC-NATIVE-HANDOFF.md 和 MF-18。
+下载 `GPU-Queue-macos-arm64-{build}-unsigned.dmg`，核对 SHA256SUMS 后挂载，退出旧应用并拖入 Applications。保留 SSH 配置和钥匙串。此包使用 ad-hoc 签名，未做 Apple Developer ID 签名或公证；如系统阻止打开，核对来源后在系统设置的隐私与安全性中选择“仍要打开”。
 
-按用户“直接完成发布版”要求，本版作为非预发布的 GitHub Latest Release 发布；发布渠道不代表已经完成 Apple 公证或 Mac 人工验收。保留旧 Widget 下载/更新入口，不向旧 Widget 自动推送统一应用，不部署服务器，不启动真实 GPU 作业。若需回退，退出此版并恢复先前备份的应用。工程错误由 GPU 任务台设计开发继续处理。
+发布前执行 CPU 调度回归、JavaScript 更新兼容测试、Mac 原生环境检查、PTY/Swift/Flutter 测试及完整 Xcode 构建，并验证 ad-hoc 签名，原生结果见 native-report.json。真实服务器 SSH/SFTP、安装覆盖、休眠、字体和全屏的人工作业验收尚未在本轮完成；详见 docs/MAC-NATIVE-HANDOFF.md。保留旧 Widget 更新入口。若需回退，退出新版并恢复此前备份的应用。
 ''', encoding='utf-8')
     # Every published file except the checksum manifest is covered.
     (out / 'SHA256SUMS').write_text(''.join(
