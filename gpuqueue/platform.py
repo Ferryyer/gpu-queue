@@ -164,11 +164,12 @@ class Markflow:
                 continue  # Keep the original receipt and try again next cycle.
 
     def probe_failure(self, resource, message, timed_out=False):
+        was_timeout = self.probe_timed_out(resource)
         failures = resource.get('probe_failures', 0)+1
         resource.update(status='unknown', error=message, probe_failures=failures,
                         probe_retry_at=time.time()+min(300, 30*2**min(failures-1, 4)))
-        if timed_out:
-            resource['probe_timeout'] = {'at': now(), 'job': (resource.get('probe') or {}).get('job')}
+        if timed_out or was_timeout:
+            resource.setdefault('probe_timeout', {'at': now(), 'job': (resource.get('probe') or {}).get('job')})
 
     def refresh_probe(self, resource):
         if resource['status'] in ['pending', 'closed', 'failed']:
@@ -258,13 +259,20 @@ class Markflow:
             for task in self.store.tasks():
                 replaceable.update(r['id'] for r in self.replacement_candidates(task))
                 replaceable.update(task['internal'].get('timeout_replacement', {}).get('prior_requests', []))
+            def record_error(resource, error, notice=False):
+                if resource['id'] in replaceable and self.probe_timed_out(resource):
+                    # Monitoring an old timed-out allocation must not veto an
+                    # already authorized replacement or its newer allocation.
+                    resource['notice_error' if notice else 'error'] = str(error)[:400]
+                else:
+                    errors.append(error)
             # Collect all outstanding receipts before potentially slow notice I/O.
             for resource in list(self.resources.values()):
                 if resource.get('probe'):
                     try:
                         self.refresh_probe(resource)
                     except (PlatformError, OSError, subprocess.SubprocessError, ValueError) as error:
-                        errors.append(error)
+                        record_error(resource, error)
             for resource in list(self.resources.values()):
                 # A failed notification query must not prevent reading a probe
                 # already completed in shared HOME, or skip other allocations.
@@ -272,12 +280,7 @@ class Markflow:
                     try:
                         refresh(resource)
                     except (PlatformError, OSError, subprocess.SubprocessError, ValueError) as error:
-                        if refresh == self.refresh_notice and resource['id'] in replaceable and self.probe_timed_out(resource):
-                            # An unreachable historical notice must not veto the
-                            # user's timeout policy or block a newer allocation.
-                            resource['notice_error'] = str(error)[:400]
-                        else:
-                            errors.append(error)
+                        record_error(resource, error, notice=refresh == self.refresh_notice)
             if errors:
                 # Keep the scheduler fail-closed while publishing any real
                 # samples recovered above; never refresh their GPU timestamp.
