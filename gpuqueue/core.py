@@ -80,8 +80,8 @@ def normalize(manifest, source='Codex'):
         raise ValueError('单个任务申请 1–4 张 GPU')
     if resources['type'] not in ['H卡离线', '4090联网']:
         raise ValueError('未知资源类型')
-    if not isinstance(resources['estimated_hours'], (int, float)) or not 0 < resources['estimated_hours'] < 18:
-        raise ValueError('预计时长是规划值，须大于 0 且短于 18 小时')
+    if type(resources['estimated_hours']) not in (int, float) or not 2/60 <= resources['estimated_hours'] < 18:
+        raise ValueError('预计时长是规划值，须至少 2 分钟且短于 18 小时')
     memory = resources['memory_gb']
     if memory is not None and (not isinstance(memory, (int, float)) or memory <= 0):
         raise ValueError('memory_gb 为每卡显存需求的正数，未知时留空并保持串行')
