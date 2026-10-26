@@ -38,6 +38,28 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('employee welcome and overview work with large text on narrow screens', (tester) async {
+    for (final dark in [false, true]) {
+      var adds = 0, guides = 0;
+      await show(tester, QueueWelcome(hasServers: false, onAdd: () => adds++, onGuide: () => guides++), size: const Size(390, 600), scale: 1.5, dark: dark);
+      await tester.ensureVisible(find.text('添加服务器'));
+      await tester.tap(find.text('添加服务器'));
+      await tester.tap(find.text('员工接入指南'));
+      expect(adds, 1);
+      expect(guides, 1);
+      expect(tester.takeException(), isNull);
+      String? filter;
+      await show(tester, QueueOverview(tasks: [
+        {'state': 'execution_unknown'}, {'state': 'waiting_gpu'}, {'state': 'completed'},
+      ], filter: 'all', onFilter: (value) => filter = value), size: const Size(390, 600), scale: 1.5, dark: dark);
+      expect(find.text('需要处理 1'), findsOneWidget);
+      expect(find.text('等待资源 1'), findsOneWidget);
+      await tester.tap(find.text('需要处理 1'));
+      expect(filter, 'failed');
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets(
     'real update survives narrow rows, long names and 1.5x text with usable actions',
     (tester) async {

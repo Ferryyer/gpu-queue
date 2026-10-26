@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--flutter', default='flutter')
     parser.add_argument('--widgets', action='store_true', help='Also render production GPU monitor widgets on the CPU Flutter test engine')
+    parser.add_argument('--offline', action='store_true', help='Use already cached pub dependencies')
     args = parser.parse_args()
     build = ROOT/'build'
     build.mkdir(exist_ok=True)
@@ -26,7 +27,7 @@ def main():
         for name in names:
             source = (ROOT/'serverbox/test/unit/app'/name).read_text()
             (harness/'test'/name).write_text(source)
-        subprocess.run([args.flutter, 'pub', 'get'], cwd=harness, check=True)
+        subprocess.run([args.flutter, 'pub', 'get', *(['--offline'] if args.offline else [])], cwd=harness, check=True)
         # Resolve the real production library; no copies, mocks, or native app
         # hooks. Only the small declared dependency graph is built by this harness.
         config = harness/'.dart_tool/package_config.json'

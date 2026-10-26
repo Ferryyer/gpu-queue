@@ -20,7 +20,7 @@ void main() {
       now.add(const Duration(seconds: 1)),
     );
   });
-  test('missing updates stay missing even when creation time is available', () {
+  test('legacy tasks label creation honestly instead of inventing update time', () {
     for (final value in [
       null,
       '',
@@ -38,7 +38,7 @@ void main() {
         'updated_at': value,
         'created_at': '2026-10-24T12:00:00Z',
       };
-      expect(QueuePresentation.taskUpdated(task), '更新时间未提供');
+      expect(QueuePresentation.taskUpdated(task), '提交 2026-10-24 12:00:00 UTC');
       expect(QueuePresentation.taskSortTime(task), now);
     }
     expect(QueuePresentation.taskSortTime({}), isNull);
@@ -149,6 +149,19 @@ void main() {
       QueuePresentation.sampleAbsolute(resource()),
       startsWith('2026-10-24'),
     );
+  });
+  test('live legacy 4090 shape uses step activity and no invented VRAM', () {
+    final task = <String, dynamic>{
+      'created_at': '2026-10-24T12:00:00Z',
+      'resources': {'type': '4090联网', 'gpus': 1, 'memory_gb': null},
+      'step_records': [{'finished_at': now.millisecondsSinceEpoch / 1000 + 60}],
+    };
+    expect(QueuePresentation.taskUpdated(task), '活动 2026-10-24 12:01:00 UTC');
+    expect(QueuePresentation.compactRequirements(task), '4090联网 · 1 GPU · 显存未指定');
+    expect(QueuePresentation.matches({'state': 'execution_unknown'}, 'failed'), isTrue);
+    expect(QueuePresentation.matches({'state': 'waiting_gpu'}, 'waiting'), isTrue);
+    expect(QueuePresentation.nextAction({'state': 'completed'}), contains('平台回执'));
+    expect(QueuePresentation.handoff({...task, 'id': 'GQ-test', 'log': 'secret', 'execution': {'workspace': '/private'}}), isNot(contains('/private')));
   });
   test('step states use Chinese semantics with a safe unknown fallback', () {
     expect(QueuePresentation.stepStatus('running'), '正在执行');

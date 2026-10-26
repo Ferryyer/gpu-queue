@@ -1,0 +1,108 @@
+name: Employee Mac release candidate
+
+on:
+  push:
+    branches: [codex/employee-readiness]
+    paths:
+      - serverbox/**
+      - docs/**
+      - scripts/install_personal_service.py
+      - scripts/native_acceptance.py
+      - scripts/test_pty_native.py
+      - scripts/package_unified_macos.py
+      - scripts/package_mac_preview.py
+      - scripts/test_mac_updater.py
+      - scripts/test_queue_dart.py
+      - scripts/sync_app_version.py
+      - .github/workflows/employee-release.yml
+      - gpuqueue/**
+      - tests/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: employee-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac-native:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    timeout-minutes: 60
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.1
+      CARGO_BUILD_JOBS: 3
+    steps:
+      - name: Check out the exact public candidate without stored credentials
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/Ferryyer/gpu-queue.git
+          git -C source fetch --depth=1 origin "$CANDIDATE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+      - name: Verify CPU scheduler and update compatibility
+        working-directory: source
+        run: |
+          mkdir -p "$HOME/scratch"
+          python3 scripts/sync_app_version.py --check
+          python3 -m unittest discover -s tests -p 'test_*.py'
+          node --test tests/cloud.test.js tests/modes.test.cjs tests/widget.test.cjs tests/widget-update.test.cjs
+      - name: Exercise native installer and rollback with signed disposable apps
+        working-directory: source
+        run: python3 scripts/test_mac_updater.py
+      - name: Prepare the pinned Flutter SDK
+        run: |
+          git init flutter-sdk
+          git -C flutter-sdk remote add origin https://github.com/flutter/flutter.git
+          git -C flutter-sdk fetch --depth=1 origin tag 3.47.8
+          git -C flutter-sdk checkout --detach 737ba8f885dc774b53b442759999a312c9461e4e
+          ./flutter-sdk/bin/flutter --version
+          printf '%s\n' "$GITHUB_WORKSPACE/flutter-sdk/bin" >> "$GITHUB_PATH"
+      - name: Prepare pinned Rust and IronRDP
+        working-directory: source
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          if [ "$(uname -m)" = arm64 ]; then target=aarch64-apple-darwin; else target=x86_64-apple-darwin; fi
+          rustup target add --toolchain 1.98.1 "$target"
+          git clone --no-checkout https://github.com/lollipopkit/IronRDP.git serverbox/third_party/ironrdp
+          git -C serverbox/third_party/ironrdp checkout --detach debc16c0039936bef2fb0ded046b171ecced3885
+          git -C serverbox/third_party/ironrdp submodule update --init --recursive
+      - name: Restore native compiler cache
+        id: native-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/serverbox/.dart_tool/hooks_runner
+          key: mf12-macos15-arm64-flutter3478-rust1981-${{ hashFiles('source/serverbox/**/Cargo.lock', 'source/serverbox/**/pubspec.lock', 'source/serverbox/**/hook/*.dart', 'source/serverbox/**/rust_build_environment.dart') }}
+      - name: Verify native prerequisites, run tests, and build Mac app
+        working-directory: source
+        run: python3 scripts/native_acceptance.py --stage build
+      - name: Package the installable Mac release
+        working-directory: source
+        run: python3 scripts/package_mac_preview.py
+      - name: Upload native evidence and unsigned QA app
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: employee-native-${{ github.sha }}
+          path: |
+            source/build/native-acceptance/
+            source/build/unified-release/
+            source/build/mac-updater-tests/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Save native compiler cache even if app compilation fails
+        if: always() && steps.native-cache.outputs.cache-hit != 'true' && steps.native-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            source/serverbox/.dart_tool/hooks_runner
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}

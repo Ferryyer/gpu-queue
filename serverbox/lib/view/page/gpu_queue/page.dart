@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ import 'package:server_box/data/ssh/terminal_source.dart';
 import 'package:server_box/view/page/gpu_queue/resource.dart';
 import 'package:server_box/view/page/gpu_queue/workspace.dart';
 import 'package:server_box/view/page/server/detail/view.dart';
+import 'package:server_box/view/page/server/edit/edit.dart';
 import 'package:server_box/view/page/ssh/page/page.dart';
 import 'package:server_box/view/page/storage/sftp.dart';
 
@@ -37,6 +39,104 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
   int _detailTab = 0;
   final _search = TextEditingController();
   final _listScroll = ScrollController();
+  @override
+  void initState() {
+    super.initState();
+    if (widget.overview) _sort = 'attention';
+  }
+
+  void _guide() => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('员工接入指南'),
+      content: const SingleChildScrollView(child: SelectableText(
+        '① 请管理员开通个人 CPU 账号，取得自己的 SSH 连接信息。不要导入其他同事的密钥或应用数据库。\n\n'
+        '② 在「服务器」添加或导入自己的连接；此处选择 CPU 上的任务服务，不是临时 GPU 实例。\n\n'
+        '③ 让 Agent 阅读发布包中的 EMPLOYEE-SETUP.md，在本人 HOME 安装个人服务，完成本人飞书授权。已有服务无需重复安装。\n\n'
+        '④ 点击连接诊断，确认服务账号与你的 SSH 用户一致。连接成功后让 Agent 使用 gpuq submit 准备任务；准备完成不会自动占卡。\n\n'
+        '⑤ 在任务详情核对资源和版本，点击开始。失败时可复制诊断交给 Agent，修复后提交新版本。\n\n'
+        '在线指南：https://github.com/Ferryyer/gpu-queue/blob/v2.0.2006/docs/EMPLOYEE-SETUP.md',
+      )),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('知道了'))],
+    ),
+  );
+
+  void _policy(QueueSession queue) => showDialog<void>(
+                  context: context,
+                  builder: (context) => ListenableBuilder(
+                    listenable: queue,
+                    builder: (context, _) => AlertDialog(
+                      title: const Text('队列策略与连接状态'),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text('自动监看已授权队列'),
+                            value: queue.auto,
+                            onChanged: queue.setAuto,
+                          ),
+                          const Text('仅监看已授权队列，不授权新任务。关闭后可手动点击开始或调整顺序。'),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('关闭'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+
+  Future<void> _diagnostics(String service, QueueSession queue) async {
+    unawaited(queue.diagnose());
+    await showDialog<void>(context: context, builder: (context) => ListenableBuilder(
+      listenable: queue,
+      builder: (context, _) {
+        final server = ref.read(serverProvider(service));
+        final sshReady = server.client != null && !server.client!.isClosed;
+        final heartbeat = queue.hasSnapshot ? queue.snapshot['heartbeat'] : null;
+        final at = heartbeat is Map ? QueuePresentation.taskTime(heartbeat['at'] ?? heartbeat['updated_at']) : null;
+        final age = at == null ? null : DateTime.now().toUtc().difference(at).inSeconds;
+        final heartbeatFresh = age != null && age >= -5 && age < 120;
+        final schedulerError = heartbeat is Map ? heartbeat['error'] : null;
+        final schedulerReady = heartbeatFresh && schedulerError == null;
+        final owner = queue.health?['owner'];
+        final ownerMatches = owner != null && owner == server.spi.sshOn?.user;
+        return AlertDialog(
+          title: const Text('连接诊断'),
+          content: SizedBox(width: 480, child: SingleChildScrollView(child: Column(
+            mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('1 · SSH 连接：${sshReady ? '已连接' : '未连接'}'),
+              Text('2 · 个人任务服务：${queue.diagnosing ? '检查中…' : queue.health == null ? '未确认' : '已响应'}'),
+              if (owner != null) Text('服务账号：$owner · ${ownerMatches ? '与 SSH 用户一致' : '与 SSH 用户不一致，请核对连接'}'),
+              Text('3 · 调度心跳：${schedulerReady ? '正常' : at == null ? '未收到' : !heartbeatFresh ? '已过期' : '在线，但处理任务时出错'}'),
+              Text('最近同步：${queue.sampledAt?.toLocal().toString().split('.').first ?? '尚未成功同步'}'),
+              const SizedBox(height: 16),
+              Text(!sshReady ? '先连接个人 CPU 服务器；检查网络、SSH 配置和主机指纹。'
+                : queue.health == null ? 'SSH 可用时，任务服务可能尚未安装或未启动。按员工指南检查个人服务，切勿重复提交任务。'
+                : !heartbeatFresh ? '任务网页能响应，但调度器没有新鲜心跳。请在本人 CPU 终端检查 mf-services status。'
+                : !schedulerReady ? '调度器仍在线，但最近处理发生错误。请检查本人飞书授权、平台回执与个人服务日志；不要重复提交任务。'
+                : '连接链路正常。等待 GPU 时以平台回执为准，不会自动重复启动任务。'),
+              if (queue.diagnosticError != null || queue.error != null) ...[
+                const SizedBox(height: 12),
+                SelectableText(queue.diagnosticError ?? queue.error!),
+              ],
+            ],
+          ))),
+          actions: [
+            TextButton(onPressed: _guide, child: const Text('接入指南')),
+            TextButton(onPressed: queue.diagnosing ? null : () => queue.diagnose(), child: const Text('重新检查')),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
+          ],
+        );
+      },
+    ));
+  }
+
   @override
   void dispose() {
     _search.dispose();
@@ -213,7 +313,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     'interrupted',
   ];
   Widget _serverSelector(String service, Map<String, Spi> servers) => SizedBox(
-    width: MediaQuery.sizeOf(context).width < 1000 ? 150 : 204,
+    width: MediaQuery.sizeOf(context).width < 500 ? 120 : MediaQuery.sizeOf(context).width < 1000 ? 150 : 204,
     child: DropdownButtonFormField<String>(
       key: ValueKey(service),
       initialValue: servers[service]?.sshOn != null ? service : null,
@@ -263,15 +363,10 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               const SizedBox(width: 24),
             ],
           ),
-          body: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text(
-                servers.values.any((s) => s.sshOn != null)
-                    ? '选择运行个人任务服务的服务器。'
-                    : '请先在「服务器」添加或导入 SSH 配置。密钥与密码继续使用原有安全存储。',
-              ),
-            ),
+          body: QueueWelcome(
+            hasServers: servers.values.any((s) => s.sshOn != null),
+            onAdd: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ServerEditPage())),
+            onGuide: _guide,
           ),
         );
       },
@@ -284,7 +379,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     return ListenableBuilder(
       listenable: queue,
       builder: (context, _) {
-        final connected = queue.connected && ssh != null && !ssh.isClosed;
+        final connected = queue.hasSnapshot && queue.connected && ssh != null && !ssh.isClosed;
         final sshAvailable = ssh != null && !ssh.isClosed;
         final fresh = queue.resources.any(
           (r) => QueueTarget.fresh(r, DateTime.now(), connected: connected),
@@ -294,23 +389,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               _target(service, task, servers)?.id != widget.serverFilter) {
             return false;
           }
-          if (_filter == 'ready' && task['state'] != 'ready') return false;
-          if (_filter == 'running' &&
-              !['running', 'starting', 'stopping'].contains(task['state'])) {
-            return false;
-          }
-          if (_filter == 'failed' &&
-              ![
-                'failed',
-                'interrupted',
-                'blocked',
-                'execution_unknown',
-              ].contains(task['state'])) {
-            return false;
-          }
-          if (_filter == 'history' && !_ended.contains(task['state'])) {
-            return false;
-          }
+          if (!QueuePresentation.matches(task, _filter)) return false;
           return '${task['name']} ${task['id']} ${task['project']}'
               .toLowerCase()
               .contains(_query.toLowerCase());
@@ -321,7 +400,13 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
           int timestamp(Map<String, dynamic> t) =>
               QueuePresentation.taskSortTime(t)?.millisecondsSinceEpoch ?? 0;
 
-          tasks.sort((a, b) => timestamp(b).compareTo(timestamp(a)));
+          int priority(Map<String, dynamic> t) => QueuePresentation.attentionStates.contains(t['state']) ? 0
+              : t['state'] == 'ready' ? 1 : QueuePresentation.runningStates.contains(t['state']) ? 2
+              : QueuePresentation.waitingStates.contains(t['state']) ? 3 : 4;
+          tasks.sort((a, b) {
+            final group = _sort == 'attention' ? priority(a).compareTo(priority(b)) : 0;
+            return group != 0 ? group : timestamp(b).compareTo(timestamp(a));
+          });
         }
         final task = queue.tasks.where((t) => t['id'] == _selected).firstOrNull;
         return Scaffold(
@@ -371,41 +456,37 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                     : () => queue.refresh(connect: true),
                 icon: const Icon(Icons.refresh),
               ),
+              if (MediaQuery.sizeOf(context).width < 900)
+                PopupMenuButton<String>(
+                  tooltip: '连接与帮助',
+                  onSelected: (value) {
+                    if (value == 'diagnose') _diagnostics(service, queue);
+                    if (value == 'guide') _guide();
+                    if (value == 'policy') _policy(queue);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'diagnose', child: Text('连接诊断')),
+                    PopupMenuItem(value: 'guide', child: Text('员工接入指南')),
+                    PopupMenuItem(value: 'policy', child: Text('队列策略')),
+                  ],
+                )
+              else ...[
+              IconButton(
+                tooltip: '连接诊断',
+                onPressed: () => _diagnostics(service, queue),
+                icon: const Icon(Icons.health_and_safety_outlined),
+              ),
+              IconButton(
+                tooltip: '员工接入指南',
+                onPressed: _guide,
+                icon: const Icon(Icons.help_outline),
+              ),
               IconButton(
                 tooltip: '队列策略与连接状态',
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (context) => ListenableBuilder(
-                    listenable: queue,
-                    builder: (context, _) => AlertDialog(
-                      title: const Text('队列策略与连接状态'),
-                      content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('SSH · ${sshAvailable ? '已连接' : '未连接'}'),
-                          Text('任务服务 · ${connected ? '已连接' : '不可用'}'),
-                          Text('GPU 采样 · ${fresh ? '实时' : '暂无数据'}'),
-                          SwitchListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('自动监看已授权队列'),
-                            value: queue.auto,
-                            onChanged: queue.setAuto,
-                          ),
-                          const Text('仅监看已授权队列，不授权新任务。关闭后可手动点击开始或调整顺序。'),
-                        ],
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('关闭'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                onPressed: () => _policy(queue),
                 icon: const Icon(Icons.tune),
               ),
+              ],
               const SizedBox(width: 12),
             ],
           ),
@@ -429,7 +510,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          '任务服务不可用 · 保留上次快照（非实时） · 上次同步：${queue.sampledAt?.toLocal().toString().split('.').first ?? '未提供'}',
+                          queue.hasSnapshot ? '连接中断 · 显示上次快照（非实时） · ${queue.sampledAt?.toLocal().toString().split('.').first ?? ''}' : '尚未连接个人任务服务 · 请连接服务器或查看接入指南',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ),
@@ -512,8 +593,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                   for (final e in const {
                                     'all': '所有状态',
                                     'ready': '待开始',
+                                    'waiting': '等待资源',
                                     'running': '运行中',
-                                    'failed': '失败',
+                                    'failed': '需要处理',
                                     'history': '已结束',
                                   }.entries)
                                     DropdownMenuItem(
@@ -532,6 +614,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                 value: _sort,
                                 underline: const SizedBox.shrink(),
                                 items: const [
+                                  DropdownMenuItem(value: 'attention', child: Text('待办优先', style: TextStyle(fontSize: 13))),
                                   DropdownMenuItem(
                                     value: 'latest',
                                     child: Text(
@@ -552,19 +635,23 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                               ),
                             ],
                           ),
+                          if (widget.overview) ...[
+                            const SizedBox(height: 12),
+                            QueueOverview(tasks: queue.tasks, filter: _filter, onFilter: (value) => setState(() => _filter = value)),
+                          ],
                           const SizedBox(height: 20),
                           Row(
                             children: [
                               Expanded(
                                 child: Text(
-                                  widget.overview ? '任务总览' : '全部任务',
+                                  widget.overview ? '优先处理' : '全部任务',
                                   style: Theme.of(
                                     context,
                                   ).textTheme.titleMedium,
                                 ),
                               ),
                               Text(
-                                '${queue.tasks.where((t) => t['state'] == 'ready').length} 个待开始 · ${queue.tasks.where((t) => t['state'] == 'failed').length} 个失败',
+                                '${queue.tasks.where((t) => t['state'] == 'ready').length} 个待开始 · ${queue.tasks.where((t) => QueuePresentation.attentionStates.contains(t['state'])).length} 个需处理',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ],
@@ -577,7 +664,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          queue.loading ? '正在加载…' : '暂无匹配任务',
+                                          queue.loading ? '正在加载…' : !queue.hasSnapshot ? '尚未获取任务' : queue.tasks.isEmpty ? '准备你的第一个任务' : '暂无匹配任务',
                                           style: Theme.of(
                                             context,
                                           ).textTheme.headlineSmall,
@@ -589,7 +676,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                               : _query.isNotEmpty ||
                                                     _filter != 'all'
                                               ? '试试其他关键词或状态。'
-                                              : '提交任务后，在这里点击开始。',
+                                              : !queue.hasSnapshot ? '连接成功后将显示个人任务。' : '让 Agent 使用 gpuq submit 准备任务，再由你点击开始。',
                                           style: Theme.of(
                                             context,
                                           ).textTheme.bodySmall,
@@ -846,6 +933,12 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                 '${task['name']}\n任务 ID：${task['id']}\n授权：${task['approved_at'] ?? '等待点击开始'}\n${task['description'] ?? ''}',
                 style: const TextStyle(fontSize: 12),
               ),
+              const SizedBox(height: 12),
+              Text(QueuePresentation.nextAction(task)),
+              TextButton.icon(
+                onPressed: () { Clipboard.setData(ClipboardData(text: QueuePresentation.handoff(task))); _message('已复制任务诊断摘要；不包含日志与文件路径'); },
+                icon: const Icon(Icons.copy_outlined), label: const Text('复制给 Agent 排查'),
+              ),
               const SizedBox(height: 16),
               Text('申请资源需求', style: Theme.of(context).textTheme.titleMedium),
               SelectableText(QueuePresentation.requirements(task)),
@@ -1010,6 +1103,10 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               ),
             ]),
             page('results', [
+              if (target == null) ...[
+                const Text('打开结果文件前，请关联能访问这些文件的个人服务器。文件在共享 HOME 时可选择个人 CPU 服务器。'),
+                TextButton(onPressed: QueueTarget.instance(task) == null ? null : () => _bind(service, task, servers), child: const Text('关联结果服务器')),
+              ],
               const SizedBox(height: 24),
               Text('结果文件', style: Theme.of(context).textTheme.titleLarge),
               if (steps.every((s) => (s['outputs'] as List? ?? []).isEmpty))

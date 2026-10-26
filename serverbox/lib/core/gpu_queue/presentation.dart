@@ -45,7 +45,11 @@ abstract final class QueuePresentation {
     final resources = task['resources'] is Map
         ? task['resources'] as Map
         : const {};
-    return '${_requirement(resources['gpus'], 'GPU')} / ${_requirement(resources['memory_gb'] ?? task['memory'], 'GB')}';
+    final type = resources['type'];
+    final memory = _number(resources['memory_gb'] ?? task['memory']);
+    return '${type is String && type.isNotEmpty ? '$type · ' : ''}'
+        '${_requirement(resources['gpus'], 'GPU')}'
+        '${memory != null && memory > 0 ? ' / ${_decimal(memory)} GB' : ' · 显存未指定'}';
   }
 
   static String version(Map<String, dynamic> task) {
@@ -73,16 +77,63 @@ abstract final class QueuePresentation {
     return DateTime.tryParse(value)?.toUtc();
   }
 
-  static DateTime? taskSortTime(Map<String, dynamic> task) =>
-      taskTime(task['updated_at']) ?? taskTime(task['created_at']);
+  static DateTime? taskSortTime(Map<String, dynamic> task) {
+    final times = [
+      for (final key in ['updated_at', 'created_at', 'approved_at', 'claimed_at', 'stop_requested_at', 'stopped_at'])
+        taskTime(task[key]),
+      for (final step in (task['step_records'] as List? ?? []).whereType<Map>()) ...[
+        taskTime(step['started_at']), taskTime(step['finished_at']),
+      ],
+    ].whereType<DateTime>().toList()..sort();
+    return times.lastOrNull;
+  }
 
   static String taskUpdated(Map<String, dynamic> task) {
-    final at = taskTime(task['updated_at']);
-    if (at == null) return '更新时间未提供';
+    final at = taskTime(task['updated_at']) ?? taskSortTime(task);
+    if (at == null) return '时间未提供';
+    final label = taskTime(task['updated_at']) != null ? '更新'
+        : at == taskTime(task['created_at']) ? '提交' : '活动';
     String two(int value) => value.toString().padLeft(2, '0');
-    return '更新 ${at.year}-${two(at.month)}-${two(at.day)} '
+    return '$label ${at.year}-${two(at.month)}-${two(at.day)} '
         '${two(at.hour)}:${two(at.minute)}:${two(at.second)} UTC';
   }
+
+  static const attentionStates = {'failed', 'interrupted', 'blocked', 'execution_unknown'};
+  static const waitingStates = {'queued', 'waiting_gpu', 'checking_resources', 'dispatching'};
+  static const runningStates = {'running', 'starting', 'stopping'};
+
+  static bool matches(Map<String, dynamic> task, String filter) => switch (filter) {
+    'ready' => task['state'] == 'ready',
+    'waiting' => waitingStates.contains(task['state']),
+    'running' => runningStates.contains(task['state']),
+    'failed' => attentionStates.contains(task['state']),
+    'history' => {'completed', 'stopped', 'cancelled', 'failed', 'interrupted'}.contains(task['state']),
+    _ => true,
+  };
+
+  static String nextAction(Map<String, dynamic> task) => switch (task['state']) {
+    'ready' => '检查资源需求和固定版本后，点击开始。准备完成的任务不会占用 GPU。',
+    'queued' => '已收到启动授权，等待调度。无需重复提交。',
+    'waiting_gpu' => '正在等待满足资源条件，具体原因见任务阶段。请核对申请回执、显存与已有任务；回执不明时不要重复申请。',
+    'checking_resources' => '正在检查已有 GPU 的可用性。查询超时不代表实例已释放。',
+    'dispatching' || 'starting' => '启动授权已交给执行端，正在确认运行状态。请勿重复提交。',
+    'running' => '正在执行。可以查看各步骤日志和已经生成的结果。',
+    'stopping' => '停止请求已记录，等待执行端确认。停止任务不等于释放 GPU。',
+    'completed' => '流程已完成，可查看结果。GPU 是否释放以平台回执为准。',
+    'failed' || 'interrupted' => '查看失败步骤与日志，修复后提交新版本，再手动开始。',
+    'blocked' || 'execution_unknown' => '先核对申请和执行端状态，避免重复申请或重复运行。',
+    'stopped' || 'cancelled' => '这一版已结束；如需再运行，请提交新版本。已有产物保留。',
+    _ => '服务返回了尚未识别的状态，请在连接诊断中核对版本并联系维护者。',
+  };
+
+  /// Deliberately excludes logs, paths, hostnames and credentials.
+  static String handoff(Map<String, dynamic> task) =>
+      '请检查 GPU Queue 任务 ${task['id']}（版本 ${version(task)}）。\n'
+      '状态：${taskStatus(task['state'])}\n'
+      '资源：${compactRequirements(task)}\n'
+      '${taskUpdated(task)}\n'
+      '下一步：${nextAction(task)}\n'
+      '请先只读核查；不要直接申请 GPU、重跑任务或改写启动授权。修复后提交新版本，等待我点击开始。';
 
   static String stepStatus(Object? state) =>
       const {

@@ -33,11 +33,15 @@ class QueueSession extends ChangeNotifier {
   String? error;
   DateTime? sampledAt;
   Map<String, dynamic> snapshot = {};
+  Map<String, dynamic>? health;
+  bool diagnosing = false;
+  String? diagnosticError;
+  bool get hasSnapshot => _snapshotIdentity == identity();
   List<Map<String, dynamic>> get tasks =>
-      (snapshot['tasks'] as List? ?? []).cast<Map<String, dynamic>>();
+      hasSnapshot ? (snapshot['tasks'] as List? ?? []).cast<Map<String, dynamic>>() : [];
   List<Map<String, dynamic>> get resources =>
-      (snapshot['heartbeat']?['resources'] as List? ?? [])
-          .cast<Map<String, dynamic>>();
+      hasSnapshot ? (snapshot['heartbeat']?['resources'] as List? ?? [])
+          .cast<Map<String, dynamic>>() : [];
   int get revision => snapshot['revision'] as int? ?? 0;
   void _notify() {
     if (!_disposed) notifyListeners();
@@ -67,6 +71,7 @@ class QueueSession extends ChangeNotifier {
     try {
       final data = await _request('/api/state', null, connect);
       if (_disposed) return;
+      _validateSnapshot(data);
       snapshot = data;
       _snapshotIdentity = identity();
       connected = true;
@@ -78,6 +83,42 @@ class QueueSession extends ChangeNotifier {
       error = e.toString();
     } finally {
       loading = false;
+      _notify();
+    }
+  }
+
+  static void _validateSnapshot(Map<String, dynamic> data) {
+    final tasks = data['tasks'];
+    final heartbeat = data['heartbeat'];
+    if (tasks is! List || tasks.any((t) => t is! Map<String, dynamic>) ||
+        (heartbeat != null && heartbeat is! Map) ||
+        (data['revision'] != null && data['revision'] is! int)) {
+      throw StateError('任务服务数据格式不兼容，请更新个人任务服务');
+    }
+    final resources = heartbeat is Map ? heartbeat['resources'] : null;
+    if (resources != null && (resources is! List ||
+        resources.any((r) => r is! Map<String, dynamic>))) {
+      throw StateError('GPU 资源数据格式不兼容，请更新个人任务服务');
+    }
+  }
+
+  Future<void> diagnose() async {
+    if (_disposed || diagnosing) return;
+    diagnosing = true;
+    health = null;
+    diagnosticError = null;
+    _notify();
+    try {
+      final data = await _request('/api/health', null, false);
+      if (_disposed) return;
+      if (data['service'] != 'gpuq' || data['owner'] is! String || data['uid'] is! int) {
+        throw StateError('未识别到个人 GPU Queue 服务，请核对服务器');
+      }
+      health = data;
+    } catch (e) {
+      if (!_disposed) diagnosticError = e.toString();
+    } finally {
+      diagnosing = false;
       _notify();
     }
   }
@@ -96,6 +137,7 @@ class QueueSession extends ChangeNotifier {
     try {
       final data = await _request(path, body, false);
       if (_disposed) return;
+      _validateSnapshot(data);
       snapshot = data;
       sampledAt = DateTime.now();
       error = null;

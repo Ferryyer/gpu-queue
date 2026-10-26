@@ -2,6 +2,60 @@ import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/gpu_queue/presentation.dart';
 
+class QueueWelcome extends StatelessWidget {
+  const QueueWelcome({super.key, required this.hasServers, required this.onAdd, required this.onGuide});
+  final bool hasServers;
+  final VoidCallback onAdd, onGuide;
+  @override
+  Widget build(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: QueuePanel(child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.hub_outlined, size: 32),
+            const SizedBox(height: 16),
+            Text('接入你的计算工作台', style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            const Text('使用公司分配给你的个人服务器账号。任务、日志和结果通过自己的 SSH 连接读取。'),
+            const SizedBox(height: 20),
+            Text('1 · ${hasServers ? '已有服务器：在右上角选择运行任务服务的 CPU 服务器' : '添加个人 CPU 服务器的 SSH 连接'}'),
+            const SizedBox(height: 12),
+            const Text('2 · 连接并检查个人任务服务；首次接入按员工指南安装'),
+            const SizedBox(height: 12),
+            const Text('3 · 让 Agent 准备任务，核对需求后由你点击开始'),
+            const SizedBox(height: 20),
+            Wrap(spacing: 12, runSpacing: 8, children: [
+              FilledButton.icon(onPressed: onAdd, icon: const Icon(Icons.add), label: const Text('添加服务器')),
+              OutlinedButton(onPressed: onGuide, child: const Text('员工接入指南')),
+            ]),
+            const SizedBox(height: 16),
+            Text('首次使用需要管理员已开通个人账号，并由本人完成飞书授权。', style: Theme.of(context).textTheme.bodySmall),
+          ]),
+        )),
+      ),
+    ),
+  );
+}
+
+class QueueOverview extends StatelessWidget {
+  const QueueOverview({super.key, required this.tasks, required this.filter, required this.onFilter});
+  final List<Map<String, dynamic>> tasks;
+  final String filter;
+  final ValueChanged<String> onFilter;
+  @override
+  Widget build(BuildContext context) => Wrap(spacing: 8, runSpacing: 8, children: [
+    for (final entry in const {'ready': '待你开始', 'waiting': '等待资源', 'running': '执行中', 'failed': '需要处理'}.entries)
+      ChoiceChip(
+        selected: filter == entry.key,
+        label: Text('${entry.value} ${tasks.where((t) => QueuePresentation.matches(t, entry.key)).length}'),
+        onSelected: (selected) => onFilter(selected ? entry.key : 'all'),
+      ),
+  ]);
+}
+
 class QueuePanel extends StatelessWidget {
   const QueuePanel({super.key, required this.child});
   final Widget child;

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "title": "<YOUR_4090_TASK>",
+  "description": "<TASK_GOAL_AND_EXPECTED_OUTPUTS>",
+  "project": "<ABSOLUTE_PROJECT_PATH_UNDER_PERSONAL_HOME>",
+  "code_files": ["your_script.py"],
+  "inputs": [],
+  "resources": {"gpus": 1, "memory_gb": null, "type": "4090联网", "estimated_hours": 1},
+  "steps": [{"name": "<REPLACE_WITH_ACTUAL_STEP>", "argv": ["<EXISTING_ABSOLUTE_MEMBER_INTERPRETER>", "{code}/your_script.py", "--output", "{outputs}/result.json"], "outputs": ["{outputs}/result.json"]}]
+}

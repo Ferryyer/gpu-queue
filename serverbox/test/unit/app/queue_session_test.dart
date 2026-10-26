@@ -4,6 +4,37 @@ import 'package:server_box/core/gpu_queue/session.dart';
 
 void main() {
   const start = '/api/tasks/GQ-0000000000000001/start';
+  test('diagnosis is read-only and verifies service identity', () async {
+    final calls = <String>[];
+    final session = QueueSession(poll: false, identity: () => 'A', saveAuto: (_) {},
+      request: (path, body, connect) async {
+        expect(body, isNull);
+        expect(connect, isFalse);
+        calls.add(path);
+        return {'service': 'gpuq', 'owner': 'employee', 'uid': 123};
+      });
+    addTearDown(session.dispose);
+    await session.diagnose();
+    expect(session.health?['owner'], 'employee');
+    expect(session.diagnosticError, isNull);
+    expect(calls, ['/api/health']);
+  });
+  test('invalid snapshots are rejected and old identities are hidden', () async {
+    var identity = 'A';
+    var data = <String, dynamic>{'tasks': [{'id': 'A-task'}]};
+    final session = QueueSession(poll: false, identity: () => identity,
+      saveAuto: (_) {}, request: (_, _, _) async => data);
+    addTearDown(session.dispose);
+    await session.refresh();
+    expect(session.tasks.single['id'], 'A-task');
+    identity = 'B';
+    expect(session.tasks, isEmpty);
+    data = {'tasks': 'invalid'};
+    await session.refresh();
+    expect(session.connected, isFalse);
+    expect(session.tasks, isEmpty);
+    expect(session.error, contains('不兼容'));
+  });
   test(
     'mode changes, poll and reconnect never post task authorization',
     () async {

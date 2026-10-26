@@ -118,7 +118,7 @@ class Markflow:
             content = message.get('content', '')
             if not isinstance(content, str) or resource['id'] not in content:
                 continue
-            if not re.search(r'申请[：:\s]+'+re.escape(resource['id']), content):
+            if not re.search(r'申请[：:\s]+'+re.escape(resource['id'])+r'(?![\w-])', content):
                 continue
             # The policy footer also contains "回收"; classify the title only.
             title = content.splitlines()[0].strip()
@@ -134,7 +134,7 @@ class Markflow:
                 resource['ready_notice_consumed'] = True
             elif re.match(r'^GPU.*(已回收|已关闭|已终止)', title):
                 resource['status'] = 'closed'
-            elif re.match(r'^GPU.*(申请失败|启动失败|申请被拒)', title):
+            elif title.startswith('本次GPU申请失败') or re.match(r'^GPU.*(申请失败|启动失败|申请被拒)', title):
                 resource['status'] = 'failed'
 
     def job_folder(self, request_id):
