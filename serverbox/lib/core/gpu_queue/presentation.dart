@@ -37,7 +37,9 @@ abstract final class QueuePresentation {
     final resources = task['resources'] is Map
         ? task['resources'] as Map
         : const {};
-    return '申请 GPU：${_requirement(resources['gpus'], '张 GPU')} · '
+    final type = resources['type'];
+    return '${type is String && type.isNotEmpty ? '资源类型：$type\n' : ''}'
+        '申请 GPU：${_requirement(resources['gpus'], '张 GPU')} · '
         '每卡显存：${_requirement(resources['memory_gb'] ?? task['memory'], 'GB')}';
   }
 

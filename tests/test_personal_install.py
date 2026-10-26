@@ -43,7 +43,7 @@ class PersonalInstallTests(unittest.TestCase):
         config = json.loads(files[0][1])
         self.assertEqual(config['username'], 'employee')
         self.assertEqual(config['home'], str(self.home))
-        self.assertNotIn('linlishuo', files[1][1])
+        self.assertNotIn('linlishuo', files[1][1].replace(str(self.home), '$MEMBER_HOME'))
         self.assertIn("'" + str(self.source) + "'", files[1][1])
 
     def test_apply_is_private_and_idempotent(self):

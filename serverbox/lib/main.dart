@@ -10,7 +10,6 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:logging/logging.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:server_box/app.dart';
 import 'package:server_box/core/chan.dart';
 import 'package:server_box/core/diag.dart';
@@ -44,6 +43,7 @@ import 'package:server_box/src/rust/frb_generated.dart';
 import 'package:server_box/view/page/launch_failed.dart';
 import 'package:server_box/view/page/rescue_app.dart';
 import 'package:server_box/view/page/schema_too_new.dart';
+import 'package:window_manager/window_manager.dart';
 
 Future<void> main() async {
   await _runInZone(() async {

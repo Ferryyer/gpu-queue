@@ -69,7 +69,6 @@ def plan_install(source, home, username, uid):
     config = {'backend': 'local', 'username': username, 'home': str(home),
               'mf_gpu': tools['mf-gpu'], 'lark_cli': tools['lark-cli']}
     launcher = ('#!/bin/sh\nset -eu\numask 077\n'
-                'export HOME=' + shlex.quote(str(home)) + '\n'
                 'cd ' + shlex.quote(str(source)) + '\n'
                 'exec ' + shlex.quote(python) + ' -m gpuqueue.cli "$@"\n')
     bin_path = home/'.local/bin/gpuq'

@@ -987,7 +987,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                   '${task['failureReason']}',
                   style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
-              if (task['phase'] != null) Text('${task['phase']}'),
+              if (task['phase'] != null && !_ended.contains(task['state']))
+                Text('${task['phase']}'),
               const Divider(height: 32),
               SelectableText(
                 'GPU 实例：${QueueTarget.instance(task) ?? '尚未分配'}\n服务器：${target?.name ?? '尚未关联服务器'}\n工作目录：${directory ?? '等待执行端提供'}',
