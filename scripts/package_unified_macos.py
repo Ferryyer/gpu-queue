@@ -28,6 +28,8 @@ def inspect_app(app):
     return {'version': MARKETING, 'build': int(BUILD), 'bundleId': info['CFBundleIdentifier'], 'app': app.name}
 
 def main():
+    from sync_app_version import sync
+    sync(ROOT / 'serverbox', check=True)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--app', type=Path, required=True)
     parser.add_argument('--out', type=Path, default=ROOT/'build/unified-release')
