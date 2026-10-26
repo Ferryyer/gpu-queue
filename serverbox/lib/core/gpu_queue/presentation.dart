@@ -130,6 +130,97 @@ abstract final class QueuePresentation {
         '${two(at.hour)}:${two(at.minute)}:${two(at.second)} ${at.timeZoneName}';
   }
 
+  static String resourceStatus(
+    Map<String, dynamic> resource,
+    DateTime now, {
+    required bool connected,
+  }) {
+    final state = resource['status'];
+    if (state == 'closed') return '已回收';
+    if (state == 'failed') return '申请失败';
+    if (!connected) return '连接中断';
+    if (QueueTarget.fresh(resource, now, connected: connected)) return '实时采样';
+    if (state == 'pending') return '等待 GPU 就绪';
+    final monitor = resource['monitor'];
+    final phase = monitor is Map ? monitor['state'] : null;
+    return const {
+          'retry': '自动恢复中',
+          'waiting': '等待查询回执',
+          'reconciling': '正在核对查询回执',
+          'sampling': '正在采样',
+        }[phase] ??
+        (state == 'ready' ? '正在采样' : '等待有效采样');
+  }
+
+  static List<Map<String, dynamic>> orderedResources(
+    List<Map<String, dynamic>> resources,
+    DateTime now, {
+    required bool connected,
+  }) {
+    final rows = List<Map<String, dynamic>>.of(resources);
+    int rank(Map<String, dynamic> row) =>
+        QueueTarget.fresh(row, now, connected: connected)
+        ? 0
+        : const ['closed', 'failed'].contains(row['status'])
+        ? 2
+        : 1;
+    rows.sort((a, b) {
+      final order = rank(a).compareTo(rank(b));
+      if (order != 0) return order;
+      return (sampleTime(b)?.millisecondsSinceEpoch ?? 0).compareTo(
+        sampleTime(a)?.millisecondsSinceEpoch ?? 0,
+      );
+    });
+    return rows;
+  }
+
+  static String monitorSummary(
+    List<Map<String, dynamic>> resources,
+    DateTime now, {
+    required bool connected,
+  }) {
+    final ids = <String>{};
+    var recovering = 0;
+    for (final row in resources) {
+      if (QueueTarget.fresh(row, now, connected: connected)) {
+        final raw = row['telemetry']?['gpus'];
+        if (raw is List) {
+          for (final gpu in raw.whereType<Map>()) {
+            ids.add(
+              gpu['uuid'] is String
+                  ? gpu['uuid'] as String
+                  : '${row['id']}:${gpu['index']}',
+            );
+          }
+        }
+      } else if (!const ['closed', 'failed'].contains(row['status'])) {
+        recovering++;
+      }
+    }
+    if (!connected) return '连接中断 · 保留最后读数';
+    if (ids.isNotEmpty) {
+      return '${ids.length} 张 GPU 实时监测'
+          '${recovering > 0 ? ' · $recovering 份资源待恢复' : ''}';
+    }
+    if (recovering > 0) return '$recovering 份资源等待有效采样';
+    return resources.isEmpty ? '等待 GPU 接入' : '资源已结束';
+  }
+
+  static List<QueueGpuReading> lastGpus(
+    Map<String, dynamic> resource,
+    DateTime now,
+  ) {
+    final at = sampleTime(resource);
+    if (at == null || now.difference(at).inSeconds < -5) return [];
+    final raw = resource['telemetry']?['gpus'];
+    return raw is List
+        ? [
+            for (final gpu in raw.whereType<Map>())
+              QueueGpuReading(gpu, false, historical: true),
+          ]
+        : [];
+  }
+
   static List<QueueGpuReading> gpus(
     Map<String, dynamic> resource,
     DateTime now, {
@@ -145,11 +236,18 @@ abstract final class QueuePresentation {
 }
 
 class QueueGpuReading {
-  QueueGpuReading(this._gpu, this.fresh);
+  QueueGpuReading(this._gpu, this.fresh, {this.historical = false});
   final Map _gpu;
   final bool fresh;
+  final bool historical;
   num? _metric(String key) =>
-      fresh ? QueuePresentation._number(_gpu[key]) : null;
+      fresh || historical ? QueuePresentation._number(_gpu[key]) : null;
+  String? get uuid => _gpu['uuid'] is String ? _gpu['uuid'] as String : null;
+  double? get utilizationFraction {
+    final value = _metric('utilization');
+    return fresh && value != null && value <= 100 ? value / 100 : null;
+  }
+
   String get title {
     final index = QueuePresentation._number(_gpu['index']);
     final name = _gpu['name'];

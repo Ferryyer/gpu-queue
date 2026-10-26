@@ -1,12 +1,12 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
-typedef QueueRequest =
-    Future<Map<String, dynamic>> Function(
-      String path,
-      Map<String, dynamic>? body,
-      bool connect,
-    );
+typedef QueueRequest = Future<Map<String, dynamic>> Function(
+  String path,
+  Map<String, dynamic>? body,
+  bool connect,
+);
 
 /// Owns polling and explicit actions, independently of the borrowed SSH client.
 /// There is no action queue to replay when transport comes back.
@@ -19,7 +19,10 @@ class QueueSession extends ChangeNotifier {
     bool poll = true,
   }) {
     if (poll) {
-      _timer = Timer.periodic(const Duration(seconds: 5), (_) => refresh());
+      _timer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _notify(); // Age cached samples even while a request is in flight.
+        unawaited(refresh());
+      });
       scheduleMicrotask(refresh);
     }
   }

@@ -77,9 +77,9 @@ void main() {
           connected: connected,
         );
         expect(find.textContaining('上次采样 · 非实时'), findsOneWidget);
-        expect(find.text('利用率 —'), findsNWidgets(2));
-        expect(find.text('利用率 65%'), findsNothing);
-        expect(find.text('温度 61 °C'), findsNothing);
+        expect(find.text('利用率 65%'), findsOneWidget);
+        expect(find.text('温度 61 °C'), findsOneWidget);
+        expect(find.byType(LinearProgressIndicator), findsNothing);
         expect(tester.takeException(), isNull);
       }
     },

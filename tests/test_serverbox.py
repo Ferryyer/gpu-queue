@@ -74,7 +74,8 @@ class ServerBoxTests(unittest.TestCase):
         self.adapter.submit_job = Mock(return_value=SECOND)
         self.adapter.refresh(active=False)
         argv = self.adapter.submit_job.call_args.args[1]
-        self.assertEqual(argv, ['/usr/bin/python3', '-c', PROBE_SCRIPT])
+        self.assertEqual(argv[:2], ['/usr/bin/python3', '-c'])
+        self.assertTrue(argv[2].startswith(PROBE_SCRIPT+'\n# gpuq-probe '))
         self.assertEqual(read_json(self.path)['resources'][0]['status'], 'online')
 
     def test_release_intent_is_not_reported_as_destroyed(self):

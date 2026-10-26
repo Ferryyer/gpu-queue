@@ -22,7 +22,7 @@ def main():
         (harness/'pubspec.yaml').write_text("name: queue_protocol_checks\nenvironment:\n  sdk: '>=3.11.0 <4.0.0'\ndependencies:\n  flutter:\n    sdk: flutter\n"+ui+"dev_dependencies:\n  flutter_test:\n    sdk: flutter\nflutter:\n  uses-material-design: true\n")
         names = ['queue_protocol_test.dart', 'queue_session_test.dart', 'queue_presentation_test.dart', 'mac_update_release_test.dart']
         if args.widgets:
-            names += ['queue_resource_widget_test.dart', 'queue_workspace_widget_test.dart']
+            names += ['queue_resource_widget_test.dart', 'queue_workspace_widget_test.dart', 'queue_monitor_widget_test.dart']
         for name in names:
             source = (ROOT/'serverbox/test/unit/app'/name).read_text()
             (harness/'test'/name).write_text(source)
