@@ -42,9 +42,9 @@ class RequestDiagnosticsTests(unittest.TestCase):
         return dict(sender=dict(id=TRUSTED_SENDER), message_id=message,
                     content=title+'\n申请：'+REQUEST)
 
-    def test_historical_ready_notice_does_not_restart_timed_out_probes(self):
+    def test_historical_ready_notice_does_not_bypass_probe_backoff(self):
         resource = dict(id=REQUEST, status='unknown', ready_message='ready-original',
-                        error='GPU 检查超时', samples=[])
+                        error='GPU 检查超时', samples=[], probe_retry_at=time.time()+300)
         self.adapter.resources = {REQUEST: resource}
         self.adapter.lark = Mock(return_value=dict(messages=[
             self.notice('GPU已启动并通过成员权限与共享盘检查'),

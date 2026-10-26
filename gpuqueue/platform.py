@@ -1,8 +1,6 @@
 """Personal Markflow adapter. No action is called until browser approval exists."""
-import csv
 import datetime as dt
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -24,20 +22,7 @@ def reserve_mb(gpu, parallel=False):
     # margin applies only when admitting another task onto an occupied GPU.
     return max(2048, gpu['total_mb'] * .1) if parallel else 2048
 
-PROBE_SCRIPT = '''import subprocess,json,time,socket,sys
-def query(fields,kind='gpu'):
- p=subprocess.run(['nvidia-smi','--query-'+kind+'='+fields,'--format=csv,noheader,nounits'],capture_output=True,text=True,timeout=20)
- if p.returncode:raise RuntimeError('nvidia-smi query failed')
- return p.stdout.strip()
-try:
- gpus=query('index,uuid,name,memory.total,memory.used,utilization.gpu,temperature.gpu')
- at=time.time()
- apps=query('gpu_uuid,pid','compute-apps')
-except subprocess.TimeoutExpired:
- print('GPUQ_PROBE_TIMEOUT=1',flush=True)
- sys.exit(124)
-print('GPUQ_TELEMETRY='+json.dumps({'gpus':gpus,'apps':apps,'at':at,'host':socket.gethostname()}))
-'''
+from .telemetry import PROBE_SCRIPT, parse_sample
 
 class PlatformError(RuntimeError):
     pass
@@ -151,54 +136,88 @@ class Markflow:
             raise PlatformError('GPU 任务回执不完整，已停止自动重试')
         return value['job']
 
+    def probe_failure(self, resource, message, timed_out=False):
+        failures = resource.get('probe_failures', 0)+1
+        resource.update(status='unknown', error=message, probe_failures=failures,
+                        probe_retry_at=time.time()+min(300, 30*2**min(failures-1, 4)))
+        if timed_out:
+            resource['probe_timeout'] = {'at': now(), 'job': (resource.get('probe') or {}).get('job')}
+
     def refresh_probe(self, resource):
-        if resource['status'] not in ['ready', 'online']:
+        if resource['status'] in ['pending', 'closed', 'failed']:
             return
+        # Retry only known allocations, never ambiguous application receipts.
+        if resource['status'] == 'unknown' and not (resource.get('telemetry') or
+                resource.get('ready_message') or resource.get('ready_notice_consumed') or resource.get('probe') or resource.get('probe_submission')):
+            return
+        submission = resource.get('probe_submission')
+        if submission:
+            for specification in self.job_folder(resource['id']).glob('*.json'):
+                if read_json(specification, {}).get('argv') == submission['argv']:
+                    resource['probe'] = {'job': specification.stem, 'at': submission['at']}
+                    resource.pop('probe_submission', None)
+                    break
+            if resource.get('probe_submission'):
+                return  # Unknown submit outcome: reconcile, never duplicate it.
         probe = resource.get('probe')
         if probe:
             folder = self.job_folder(resource['id']) / probe['job']
             status = read_json(folder/'status.json', {})
             if status.get('state') == 'finished' and status.get('exit_code') == 0:
-                output = (folder/'output.log').read_text(errors='replace')
-                line = next((line for line in output.splitlines() if line.startswith('GPUQ_TELEMETRY=')), None)
-                if not line:
-                    raise PlatformError('GPU 检查已结束但没有有效遥测')
-                payload = json.loads(line.split('=', 1)[1])
-                gpus = []
-                for row in csv.reader(payload['gpus'].splitlines(), skipinitialspace=True):
-                    if len(row) not in [6, 7]:
-                        raise PlatformError('GPU 遥测字段不完整')
-                    temperature = row[6].strip() if len(row) == 7 else 'N/A'
-                    gpus.append({'index': int(row[0]), 'uuid': row[1], 'name': row[2], 'total_mb': float(row[3]), 'used_mb': float(row[4]), 'utilization': float(row[5]), 'temperature_c': None if temperature in ['N/A', '[N/A]', 'Not Supported', '[Not Supported]'] else float(temperature)})
-                apps = [row for row in csv.reader(payload['apps'].splitlines(), skipinitialspace=True) if len(row) == 2]
-                stamp = float(payload.get('at', status.get('at', (folder/'output.log').stat().st_mtime)))
-                if not math.isfinite(stamp) or stamp <= 0 or stamp > time.time()+5:
-                    raise PlatformError('GPU 遥测采样时间无效')
-                resource.update(status='online', telemetry={'gpus': gpus, 'apps': apps, 'at': stamp, 'host': payload.get('host', '')}, probe=None, probe_checked=time.time())
-                resource.setdefault('samples', []).append({'at': stamp, 'utilization': max((g['utilization'] for g in gpus), default=100)})
-                resource['samples'] = [sample for sample in resource['samples'] if stamp-sample['at'] < 420]
+                try:
+                    output = (folder/'output.log').read_text(errors='replace')
+                    line = next((line for line in output.splitlines() if line.startswith('GPUQ_TELEMETRY=')), None)
+                    if not line:
+                        raise ValueError('GPU 检查已结束但没有有效遥测')
+                    payload = json.loads(line.split('=', 1)[1])
+                    telemetry = parse_sample(payload, (folder/'output.log').stat().st_mtime)
+                    if telemetry['at'] <= resource.get('telemetry', {}).get('at', 0):
+                        raise ValueError('GPU 遥测采样时间未前进')
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    self.probe_failure(resource, 'GPU 遥测无效：'+str(error))
+                    resource['probe'] = None
+                    return
+                previous = {g['uuid'] for g in resource.get('telemetry', {}).get('gpus', [])}
+                if previous != {g['uuid'] for g in telemetry['gpus']}:
+                    resource['samples'] = []
+                resource.update(status='online', telemetry=telemetry, probe=None,
+                                probe_checked=time.time(), probe_failures=0)
+                for key in ['error', 'probe_timeout', 'probe_retry_at']:
+                    resource.pop(key, None)
+                utilization = max((g['utilization'] if g['utilization'] is not None else 100
+                                   for g in telemetry['gpus']), default=100)
+                resource.setdefault('samples', []).append({'at': telemetry['at'], 'utilization': utilization})
+                resource['samples'] = [s for s in resource['samples'] if telemetry['at']-s['at'] < 420]
                 return
             if status.get('state') in ['failed', 'finished']:
                 output = folder/'output.log'
                 timed_out = (status.get('exit_code') == 124 and output.is_file() and
                              'GPUQ_PROBE_TIMEOUT=1' in output.read_text(errors='replace').splitlines())
-                resource.update(status='unknown', probe=None,
-                                error='GPU 检查超时；旧实例是否回收尚未确认' if timed_out else 'GPU 只读检查失败，无法确认资源可用')
-                if timed_out:
-                    resource['probe_timeout'] = {'at': now(), 'job': probe['job']}
+                self.probe_failure(resource, 'GPU 检查超时；旧实例是否回收尚未确认' if timed_out
+                                   else 'GPU 只读检查失败，稍后重试', timed_out)
+                resource['probe'] = None
                 return
-            if time.time()-probe['at'] > 100:
-                # Only remove a diagnostic that has not been claimed.
-                specification = self.job_folder(resource['id'])/(probe['job']+'.json')
-                if not status and specification.exists():
-                    specification.unlink()
-                resource.update(status='unknown', probe=None,
-                                probe_timeout={'at': now(), 'job': probe['job']},
-                                error='GPU 检查超时；旧实例是否回收尚未确认')
+            if time.time()-probe['at'] > 100 and resource['status'] != 'unknown':
+                # Keep the receipt: a slow or disconnected worker can complete
+                # it later. Never queue duplicate probes behind an unclaimed one.
+                self.probe_failure(resource, 'GPU 检查超时；旧实例是否回收尚未确认', True)
+            return
+        if time.time() < resource.get('probe_retry_at', 0):
             return
         if time.time()-resource.get('probe_checked', 0) >= 30:
-            job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
+            argv = ['/usr/bin/python3', '-c', PROBE_SCRIPT+'\n# gpuq-probe '+str(uuid.uuid4())]
+            resource['probe_submission'] = {'argv': argv, 'at': time.time()}
+            self.persist()
+            try:
+                job = self.submit_job(resource['id'], argv, self.home)
+            except (PlatformError, OSError, subprocess.SubprocessError) as error:
+                if isinstance(error, OSError):
+                    resource.pop('probe_submission', None)  # Child never started.
+                self.probe_failure(resource, 'GPU 只读检查暂不可用：'+str(error))
+                self.persist()
+                raise
             resource['probe'] = {'job': job, 'at': time.time()}
+            resource.pop('probe_submission', None)
             self.persist()
 
     def refresh(self, active=False):
@@ -211,13 +230,20 @@ class Markflow:
             for task in self.store.tasks():
                 replaceable.update(r['id'] for r in self.replacement_candidates(task))
                 replaceable.update(task['internal'].get('timeout_replacement', {}).get('prior_requests', []))
+            # Collect all outstanding receipts before potentially slow notice I/O.
+            for resource in list(self.resources.values()):
+                if resource.get('probe'):
+                    try:
+                        self.refresh_probe(resource)
+                    except (PlatformError, OSError, subprocess.SubprocessError, ValueError) as error:
+                        errors.append(error)
             for resource in list(self.resources.values()):
                 # A failed notification query must not prevent reading a probe
                 # already completed in shared HOME, or skip other allocations.
                 for refresh in (self.refresh_notice, self.refresh_probe):
                     try:
                         refresh(resource)
-                    except (PlatformError, OSError, subprocess.SubprocessError) as error:
+                    except (PlatformError, OSError, subprocess.SubprocessError, ValueError) as error:
                         if refresh == self.refresh_notice and resource['id'] in replaceable and self.probe_timed_out(resource):
                             # An unreachable historical notice must not veto the
                             # user's timeout policy or block a newer allocation.
@@ -243,7 +269,7 @@ class Markflow:
         required = task['doc']['resources']
         # A known smaller allocation may be insufficient. Unknown or busy usable
         # allocations must be reconciled rather than treated as absent.
-        if any(r['status'] != 'online' or time.time()-r.get('telemetry', {}).get('at', 0)>90 or len([g for g in r.get('telemetry', {}).get('gpus', []) if g['total_mb'] >= memory_mb(required)+reserve_mb(g)]) >= required['gpus'] and r.get('type') == required['type'] for r in unresolved):
+        if any(r['status'] != 'online' or time.time()-r.get('telemetry', {}).get('at', 0)>90 or len([g for g in r.get('telemetry', {}).get('gpus', []) if g.get('total_mb') is not None and g['total_mb'] >= memory_mb(required)+reserve_mb(g)]) >= required['gpus'] and r.get('type') == required['type'] for r in unresolved):
             return None
         if read_json(self.store.root/'tasks'/task['id']/'run/stop.json',{}).get('digest') == task['digest']:
             return None
@@ -305,7 +331,7 @@ class Markflow:
             return None, '默认顺序执行；未满足安全并行条件'
         for resource in self.resources.values():
             telemetry = resource.get('telemetry', {})
-            if resource['status'] != 'online' or time.time()-telemetry.get('at', 0) > 90 or resource.get('type') != required['type']:
+            if resource['status'] != 'online' or time.time()-telemetry.get('at', 0) > 90 or resource.get('type') != required['type'] or telemetry.get('apps_known') is False:
                 continue
             if active:
                 samples = [s for s in resource.get('samples', []) if time.time()-s['at'] < 330]
@@ -321,7 +347,7 @@ class Markflow:
                 managed_pids.update(str(s['pid']) for s in status.get('steps', []) if s.get('state') == 'running' and s.get('pid'))
             occupied = {row[0] for row in telemetry.get('apps', []) if row[1] not in managed_pids}
             required_mb = memory_mb(required)
-            available = [g for g in telemetry.get('gpus', []) if g['uuid'] not in occupied and g['total_mb']-g['used_mb'] >= required_mb+reserve_mb(g, parallel=bool(active))]
+            available = [g for g in telemetry.get('gpus', []) if g.get('total_mb') is not None and g.get('used_mb') is not None and g['uuid'] not in occupied and g['total_mb']-g['used_mb'] >= required_mb+reserve_mb(g, parallel=bool(active))]
             available.sort(key=lambda gpu: gpu['total_mb']-gpu['used_mb'], reverse=True)
             if len(available) >= required['gpus']:
                 return (resource, [g['uuid'] for g in available[:required['gpus']]]), ''

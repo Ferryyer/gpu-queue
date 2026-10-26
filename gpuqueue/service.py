@@ -51,7 +51,7 @@ class Service:
                 changed.append({'id': task['id'], 'digest': task['digest'], 'payload': task['public']})
         resources = []
         for resource in self.platform.resources.values():
-            resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release']})
+            resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'probe_retry_at']})
         response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {'service': 'online', 'error': self.error, 'resources': resources, 'resource_policy': self.store.metadata('resource_policy'), 'updated_at': now()}})
         self.synced.update(fingerprints)
         self.remote_revision = response['revision']
