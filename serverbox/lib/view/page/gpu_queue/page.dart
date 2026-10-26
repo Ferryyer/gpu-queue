@@ -645,54 +645,55 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                                 action:
                                                     !showDetail &&
                                                         bounds.maxWidth > 650
-                                                    ? SizedBox(
-                                                        width: 100,
-                                                        child:
-                                                            current['state'] ==
-                                                                'ready'
-                                                            ? Tooltip(
-                                                                message:
-                                                                    queue.auto
-                                                                    ? '请在队列策略中关闭自动监看后开始'
-                                                                    : '点击才授权当前版本',
-                                                                child: FilledButton(
-                                                                  onPressed:
-                                                                      connected &&
-                                                                          !queue
-                                                                              .acting &&
-                                                                          !queue
-                                                                              .loading &&
-                                                                          !queue
-                                                                              .auto
-                                                                      ? () => _act(
-                                                                          queue,
-                                                                          current,
-                                                                          'start',
-                                                                        )
-                                                                      : null,
-                                                                  child:
-                                                                      const Text(
-                                                                        '开始',
-                                                                      ),
-                                                                ),
-                                                              )
-                                                            : TextButton(
-                                                                onPressed: () =>
-                                                                    _openTask(
-                                                                      current,
-                                                                      service,
-                                                                      queue,
-                                                                      servers,
-                                                                      wide,
+                                                    ? current['state'] ==
+                                                              'ready'
+                                                          ? Tooltip(
+                                                              message:
+                                                                  queue.auto
+                                                                  ? '请在队列策略中关闭自动监看后开始'
+                                                                  : '点击才授权当前版本',
+                                                              child: FilledButton(
+                                                                onPressed:
+                                                                    connected &&
+                                                                        !queue
+                                                                            .acting &&
+                                                                        !queue
+                                                                            .loading &&
+                                                                        !queue
+                                                                            .auto
+                                                                    ? () => _act(
+                                                                        queue,
+                                                                        current,
+                                                                        'start',
+                                                                      )
+                                                                    : null,
+                                                                child:
+                                                                    const Text(
+                                                                      '开始',
+                                                                      maxLines:
+                                                                          1,
+                                                                      softWrap:
+                                                                          false,
                                                                     ),
-                                                                child: Text(
-                                                                  current['state'] ==
-                                                                          'completed'
-                                                                      ? '打开结果'
-                                                                      : '查看日志',
-                                                                ),
                                                               ),
-                                                      )
+                                                            )
+                                                          : TextButton(
+                                                              onPressed: () =>
+                                                                  _openTask(
+                                                                    current,
+                                                                    service,
+                                                                    queue,
+                                                                    servers,
+                                                                    wide,
+                                                                  ),
+                                                              child: Text(
+                                                                current['state'] == 'completed'
+                                                                    ? '打开结果'
+                                                                    : '查看日志',
+                                                                maxLines: 1,
+                                                                softWrap: false,
+                                                              ),
+                                                            )
                                                     : null,
                                                 onTap: () => _openTask(
                                                   current,
@@ -987,9 +988,17 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               ],
               if (names.isEmpty) const Text('暂无步骤日志'),
               if (task['entry_log'] != null)
-                QueueLogView(label: '入口日志', text: '${task['entry_log']}'),
+                QueueLogView(
+                  key: ValueKey('${task['id']}:entry'),
+                  label: '入口日志',
+                  text: '${task['entry_log']}',
+                ),
               if (task['stop_log'] != null)
-                QueueLogView(label: '停止日志', text: '${task['stop_log']}'),
+                QueueLogView(
+                  key: ValueKey('${task['id']}:stop'),
+                  label: '停止日志',
+                  text: '${task['stop_log']}',
+                ),
               if (task['failureReason'] != null) ...[
                 const SizedBox(height: 16),
                 SelectableText(

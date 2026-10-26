@@ -13,6 +13,7 @@ void main() {
     ]) {
       final task = <String, dynamic>{'updated_at': value};
       expect(QueuePresentation.taskUpdated(task), '更新 2026-10-24 12:00:00 UTC');
+      expect(QueuePresentation.compactTaskUpdated(task), '更新 10-24 12:00');
       expect(QueuePresentation.taskSortTime(task), now);
     }
     expect(
@@ -39,6 +40,7 @@ void main() {
         'created_at': '2026-10-24T12:00:00Z',
       };
       expect(QueuePresentation.taskUpdated(task), '更新时间未提供');
+      expect(QueuePresentation.compactTaskUpdated(task), '更新时间未提供');
       expect(QueuePresentation.taskSortTime(task), now);
     }
     expect(QueuePresentation.taskSortTime({}), isNull);

@@ -18,8 +18,13 @@ class QueuePanel extends StatelessWidget {
 }
 
 class QueueStatusBadge extends StatelessWidget {
-  const QueueStatusBadge({super.key, required this.state});
+  const QueueStatusBadge({
+    super.key,
+    required this.state,
+    this.compact = false,
+  });
   final Object? state;
+  final bool compact;
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -35,29 +40,37 @@ class QueueStatusBadge extends StatelessWidget {
         : done
         ? colors.secondary
         : colors.onSurfaceVariant;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          failed
-              ? Icons.error_outline
-              : done
-              ? Icons.check
-              : state == 'running'
-              ? Icons.play_circle_outline
-              : Icons.schedule,
-          size: 14,
-          color: color,
+    return Tooltip(
+      message: QueuePresentation.taskStatus(state),
+      child: Semantics(
+        label: QueuePresentation.taskStatus(state),
+        excludeSemantics: true,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              failed
+                  ? Icons.error_outline
+                  : done
+                  ? Icons.check
+                  : state == 'running'
+                  ? Icons.play_circle_outline
+                  : Icons.schedule,
+              size: 14,
+              color: color,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                compact
+                    ? QueuePresentation.compactTaskStatus(state)
+                    : QueuePresentation.taskStatus(state),
+                style: TextStyle(fontSize: 12, color: color),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            QueuePresentation.taskStatus(state),
-            style: TextStyle(fontSize: 12, color: color),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -94,76 +107,141 @@ class QueueTaskRow extends StatelessWidget {
               bottom: BorderSide(color: colors.outlineVariant),
             ),
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Tooltip(
-                      message: '${task['name']}',
-                      child: Text(
-                        '${task['name']}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                    LayoutBuilder(
-                      builder: (context, bounds) {
-                        final style = Theme.of(context).textTheme.bodySmall;
-                        final updated = QueuePresentation.taskUpdated(task);
-                        final scaler = MediaQuery.textScalerOf(context);
-                        final measure = TextPainter(
-                          text: TextSpan(text: updated, style: style),
-                          textDirection: Directionality.of(context),
-                          textScaler: scaler,
-                        )..layout();
-                        final inline =
-                            bounds.maxWidth >=
-                            measure.width + scaler.scale(80) + 12;
-                        measure.dispose();
-                        final metadata = Tooltip(
-                          message:
-                              '${task['project'] ?? '未提供项目'} · ${QueuePresentation.compactRequirements(task)}',
-                          child: Text(
-                            '${task['project'] ?? '未提供项目'} · ${QueuePresentation.compactRequirements(task)}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: style,
-                          ),
-                        );
-                        final time = Text(updated, style: style);
-                        return inline
-                            ? Row(
-                                children: [
-                                  Expanded(child: metadata),
-                                  const SizedBox(width: 12),
-                                  time,
-                                ],
-                              )
-                            : Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [metadata, time],
-                              );
-                      },
-                    ),
-                  ],
+          child: LayoutBuilder(
+            builder: (context, bounds) {
+              final scaler = MediaQuery.textScalerOf(context);
+              final status = QueuePresentation.compactTaskStatus(task['state']);
+              final statusText = TextPainter(
+                text: TextSpan(
+                  text: status,
+                  style: DefaultTextStyle.of(
+                    context,
+                  ).style.copyWith(fontSize: 12),
                 ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 88,
-                child: QueueStatusBadge(state: task['state']),
-              ),
-              if (action != null) ...[const SizedBox(width: 12), action!],
-            ],
+                textDirection: Directionality.of(context),
+                textScaler: scaler,
+              )..layout();
+              final statusWidth = statusText.width.ceilToDouble() + 22;
+              statusText.dispose();
+              final badge = SizedBox(
+                width: statusWidth,
+                child: QueueStatusBadge(state: task['state'], compact: true),
+              );
+              final name = Tooltip(
+                message: '${task['name']}',
+                child: Text(
+                  '${task['name']}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+              );
+              final metadata = _QueueTaskMetadata(task: task);
+              // Give text and actions room to grow with the system text size.
+              // Narrow rows put the action below the metadata, never over it.
+              final stacked =
+                  bounds.maxWidth <
+                  scaler.scale(200) +
+                      statusWidth +
+                      (action == null ? 12 : scaler.scale(100) + 24);
+              if (stacked) {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    name,
+                    metadata,
+                    const SizedBox(height: 4),
+                    Row(children: [badge, const Spacer(), ?action]),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [name, metadata],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  badge,
+                  if (action != null) ...[const SizedBox(width: 12), action!],
+                ],
+              );
+            },
           ),
         ),
       ),
     );
   }
+}
+
+/// Resource requirements remain readable before project names or timestamps.
+class _QueueTaskMetadata extends StatelessWidget {
+  const _QueueTaskMetadata({required this.task});
+  final Map<String, dynamic> task;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, bounds) {
+      final style = Theme.of(context).textTheme.bodySmall;
+      final project = Tooltip(
+        message: '${task['project'] ?? '未提供项目'}',
+        child: Text(
+          '${task['project'] ?? '未提供项目'}',
+          style: style,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+      final resources = Text(
+        QueuePresentation.compactRequirements(task),
+        style: style,
+      );
+      final time = Tooltip(
+        message: QueuePresentation.taskUpdated(task),
+        child: Semantics(
+          label: QueuePresentation.taskUpdated(task),
+          excludeSemantics: true,
+          child: Text(QueuePresentation.compactTaskUpdated(task), style: style),
+        ),
+      );
+      // Measure the two pieces that must not be ellipsized. Project can use
+      // the remaining space; at narrower widths the row grows vertically.
+      final measure = TextPainter(
+        text: TextSpan(
+          text:
+              '${QueuePresentation.compactRequirements(task)}'
+              '${QueuePresentation.compactTaskUpdated(task)}',
+          style: style,
+        ),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      final inline = bounds.maxWidth >= measure.width + 110;
+      measure.dispose();
+      if (inline) {
+        return Row(
+          children: [
+            Expanded(child: project),
+            const SizedBox(width: 12),
+            resources,
+            const SizedBox(width: 12),
+            time,
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(spacing: 12, runSpacing: 2, children: [resources, time]),
+          project,
+        ],
+      );
+    },
+  );
 }
 
 /// Body and tabs retain their independent scroll positions across polling.
@@ -184,101 +262,156 @@ class QueueDetailPane extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ColoredBox(
     color: Theme.of(context).colorScheme.surfaceContainerLow,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 12, 0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '任务详情',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ),
-              IconButton(
-                tooltip: '关闭详情',
-                onPressed: onClose,
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              QueueStatusBadge(state: task['state']),
-              const SizedBox(height: 8),
-              Text(
-                '${task['name']}',
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${task['project'] ?? ''}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  for (var i = 0; i < 3; i++)
+    child: LayoutBuilder(
+      builder: (context, bounds) {
+        final compactHeader = bounds.maxHeight < 400;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: bounds.maxHeight * .4),
+              child: SingleChildScrollView(
+                key: PageStorageKey('${task['id']}:detail-header'),
+                primary: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                     Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: InkWell(
-                        onTap: () => onTab(i),
-                        child: Semantics(
-                          selected: tab == i,
-                          button: true,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 10,
-                              horizontal: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: tab == i
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.transparent,
-                                  width: 2,
-                                ),
+                      padding: const EdgeInsets.fromLTRB(24, 12, 12, 0),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Tooltip(
+                              message: '${task['name']}',
+                              child: Text(
+                                compactHeader ? '${task['name']}' : '任务详情',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: compactHeader
+                                    ? Theme.of(context).textTheme.bodyMedium
+                                    : Theme.of(context).textTheme.bodySmall,
                               ),
                             ),
-                            child: Text(
-                              const ['概览', '日志', '结果'][i],
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: tab == i
-                                    ? Theme.of(context).colorScheme.onSurface
-                                    : Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
+                          ),
+                          IconButton(
+                            tooltip: '关闭详情',
+                            onPressed: onClose,
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          QueueStatusBadge(state: task['state']),
+                          if (!compactHeader) ...[
+                            const SizedBox(height: 8),
+                            Tooltip(
+                              message: '${task['name']}',
+                              child: Text(
+                                '${task['name']}',
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${task['project'] ?? ''}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    children: [
+                      for (var i = 0; i < 3; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: InkWell(
+                            onTap: () => onTab(i),
+                            child: Semantics(
+                              selected: tab == i,
+                              button: true,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                  horizontal: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      color: tab == i
+                                          ? Theme.of(
+                                              context,
+                                            ).colorScheme.primary
+                                          : Colors.transparent,
+                                      width: 2,
+                                    ),
+                                  ),
+                                ),
+                                child: Text(
+                                  const ['概览', '日志', '结果'][i],
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: tab == i
+                                        ? Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface
+                                        : Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                    ],
+                  ),
+                  const Divider(),
                 ],
               ),
-              const Divider(),
-            ],
-          ),
-        ),
-        Expanded(child: child),
-      ],
+            ),
+            Expanded(child: child),
+          ],
+        );
+      },
     ),
   );
 }
 
-class QueueLogView extends StatelessWidget {
+class QueueLogView extends StatefulWidget {
   const QueueLogView({super.key, required this.label, required this.text});
   final String label, text;
+  @override
+  State<QueueLogView> createState() => _QueueLogViewState();
+}
+
+class _QueueLogViewState extends State<QueueLogView> {
+  final _vertical = ScrollController();
+  final _horizontal = ScrollController();
+
+  @override
+  void dispose() {
+    _vertical.dispose();
+    _horizontal.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => QueuePanel(
     child: Column(
@@ -291,13 +424,14 @@ class QueueLogView extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  label,
+                  widget.label,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ),
               IconButton(
                 tooltip: '复制日志',
-                onPressed: () => Clipboard.setData(ClipboardData(text: text)),
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: widget.text)),
                 icon: const Icon(Icons.copy_outlined),
               ),
             ],
@@ -306,19 +440,40 @@ class QueueLogView extends StatelessWidget {
         const Divider(),
         SizedBox(
           height: 300,
-          child: Scrollbar(
-            child: SingleChildScrollView(
-              key: PageStorageKey('log:$label'),
-              padding: const EdgeInsets.all(16),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SelectableText(
-                  text,
-                  style: const TextStyle(
-                    fontFamily: 'Menlo',
-                    fontFamilyFallback: ['Noto Sans Mono', 'monospace'],
-                    fontSize: 12,
-                    height: 19 / 12,
+          child: ScrollConfiguration(
+            behavior: ScrollConfiguration.of(
+              context,
+            ).copyWith(scrollbars: false),
+            child: Scrollbar(
+              controller: _vertical,
+              child: Scrollbar(
+                controller: _horizontal,
+                scrollbarOrientation: ScrollbarOrientation.bottom,
+                notificationPredicate: (notification) =>
+                    notification.metrics.axis == Axis.horizontal,
+                child: SingleChildScrollView(
+                  key: PageStorageKey(
+                    'log:${widget.key ?? widget.label}:vertical',
+                  ),
+                  controller: _vertical,
+                  primary: false,
+                  padding: const EdgeInsets.all(16),
+                  child: SingleChildScrollView(
+                    key: PageStorageKey(
+                      'log:${widget.key ?? widget.label}:horizontal',
+                    ),
+                    controller: _horizontal,
+                    primary: false,
+                    scrollDirection: Axis.horizontal,
+                    child: SelectableText(
+                      widget.text,
+                      style: const TextStyle(
+                        fontFamily: 'Menlo',
+                        fontFamilyFallback: ['Noto Sans Mono', 'monospace'],
+                        fontSize: 12,
+                        height: 19 / 12,
+                      ),
+                    ),
                   ),
                 ),
               ),
