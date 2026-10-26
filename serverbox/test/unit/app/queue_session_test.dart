@@ -152,4 +152,29 @@ void main() {
       expect(session.error, contains('permission denied'));
     },
   );
+  testWidgets(
+    'cached sample ages while a read is pending without overlapping requests',
+    (tester) async {
+      var calls = 0, notifications = 0;
+      final reply = Completer<Map<String, dynamic>>();
+      final session = QueueSession(
+        identity: () => 'same-host',
+        saveAuto: (_) {},
+        request: (path, body, connect) {
+          calls++;
+          return reply.future;
+        },
+      );
+      session.addListener(() => notifications++);
+      await tester.pump();
+      expect(calls, 1);
+      final before = notifications;
+      await tester.pump(const Duration(seconds: 5));
+      expect(notifications, greaterThan(before));
+      expect(calls, 1);
+      session.dispose();
+      reply.complete({'tasks': []});
+      await tester.pump();
+    },
+  );
 }

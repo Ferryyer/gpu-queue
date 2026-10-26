@@ -20,6 +20,7 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.store = Store(self.home/'queue')
         self.adapter = Markflow(self.store, {'home': str(self.home), 'username': 'linlishuo'})
+        self.adapter.submit_job = Mock(return_value='22222222-2222-4222-8222-222222222222')
         self.service = Service({}, self.store, self.adapter)
         self.control = Control(self.store)
 
@@ -42,9 +43,9 @@ class RequestDiagnosticsTests(unittest.TestCase):
         return dict(sender=dict(id=TRUSTED_SENDER), message_id=message,
                     content=title+'\n申请：'+REQUEST)
 
-    def test_historical_ready_notice_does_not_restart_timed_out_probes(self):
+    def test_historical_ready_notice_does_not_bypass_probe_backoff(self):
         resource = dict(id=REQUEST, status='unknown', ready_message='ready-original',
-                        error='GPU 检查超时', samples=[])
+                        error='GPU 检查超时', samples=[], probe_retry_at=time.time()+300)
         self.adapter.resources = {REQUEST: resource}
         self.adapter.lark = Mock(return_value=dict(messages=[
             self.notice('GPU已启动并通过成员权限与共享盘检查'),
@@ -303,6 +304,17 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.service.cycle()
         self.assertIsNone(self.control.state()['heartbeat']['error'])
         self.assertIn(new_request, self.control.state()['tasks'][0]['phase'])
+
+    def test_failed_old_monitor_retry_preserves_authorized_replacement_policy(self):
+        task = self.task()
+        old = self.enable_replacement()
+        del self.adapter.refresh
+        self.adapter.submit_job = Mock(side_effect=FileNotFoundError('mf-gpu unavailable'))
+        self.adapter.lark = Mock(side_effect=[{'messages': []}, {'questions': []}, {'record_id': 'receipt'}])
+        self.service.cycle()
+        self.assertIsNotNone(self.store.get(task['id'])['internal']['request_uuid'])
+        self.assertTrue(self.adapter.probe_timed_out(old))
+        self.assertIsNone(self.control.state()['heartbeat']['error'])
 
 
 if __name__ == '__main__':

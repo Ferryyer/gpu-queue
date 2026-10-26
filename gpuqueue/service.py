@@ -8,6 +8,7 @@ import shutil
 import time
 from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, read_json, canonical, now
 from .platform import Markflow, PlatformError
+from .telemetry import monitor_status
 
 from .control import Control, QueueChanged
 
@@ -51,7 +52,9 @@ class Service:
                 changed.append({'id': task['id'], 'digest': task['digest'], 'payload': task['public']})
         resources = []
         for resource in self.platform.resources.values():
-            resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release']})
+            record = {key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'probe_retry_at']}
+            record['monitor'] = monitor_status(resource)
+            resources.append(record)
         response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {'service': 'online', 'error': self.error, 'resources': resources, 'resource_policy': self.store.metadata('resource_policy'), 'updated_at': now()}})
         self.synced.update(fingerprints)
         self.remote_revision = response['revision']

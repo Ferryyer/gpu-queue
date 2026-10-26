@@ -132,9 +132,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
 
   void _message(Object text) {
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$text')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$text')));
     }
   }
 
@@ -558,9 +557,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                               Expanded(
                                 child: Text(
                                   widget.overview ? '任务总览' : '全部任务',
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
                                 ),
                               ),
                               Text(
@@ -578,9 +577,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                       children: [
                                         Text(
                                           queue.loading ? '正在加载…' : '暂无匹配任务',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.headlineSmall,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .headlineSmall,
                                         ),
                                         const SizedBox(height: 8),
                                         Text(
@@ -590,9 +589,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                                     _filter != 'all'
                                               ? '试试其他关键词或状态。'
                                               : '提交任务后，在这里点击开始。',
-                                          style: Theme.of(
-                                            context,
-                                          ).textTheme.bodySmall,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
                                         ),
                                       ],
                                     ),
@@ -610,16 +609,16 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                               Expanded(
                                                 child: Text(
                                                   '任务名称 / 项目',
-                                                  style: Theme.of(
-                                                    context,
-                                                  ).textTheme.bodySmall,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodySmall,
                                                 ),
                                               ),
                                               Text(
                                                 '状态',
-                                                style: Theme.of(
-                                                  context,
-                                                ).textTheme.bodySmall,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodySmall,
                                               ),
                                               if (!showDetail &&
                                                   bounds.maxWidth > 650)
@@ -686,8 +685,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                                                       wide,
                                                                     ),
                                                                 child: Text(
-                                                                  current['state'] ==
-                                                                          'completed'
+                                                                  current['state'] == 'completed'
                                                                       ? '打开结果'
                                                                       : '查看日志',
                                                                 ),
@@ -716,33 +714,9 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                           ),
                           const SizedBox(height: 20),
                           QueuePanel(
-                            child: ExpansionTile(
-                              title: const Text(
-                                'GPU',
-                                style: TextStyle(fontSize: 14),
-                              ),
-                              subtitle: Text(
-                                fresh
-                                    ? '实时采样'
-                                    : '暂无数据 · 上次采样：${queue.resources.isEmpty ? '未提供' : QueuePresentation.sampleAbsolute(queue.resources.first)}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                              children: [
-                                SizedBox(
-                                  height: 180,
-                                  child: ListView(
-                                    children: [
-                                      for (final resource in queue.resources)
-                                        QueueResourceView(
-                                          resource: resource,
-                                          connected: connected,
-                                        ),
-                                      if (queue.resources.isEmpty)
-                                        const ListTile(title: Text('暂无数据')),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                            child: QueueMonitorView(
+                              resources: queue.resources,
+                              connected: connected,
                             ),
                           ),
                         ],
