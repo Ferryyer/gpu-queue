@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import time
+from sync_app_version import sync
 
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / 'serverbox'
@@ -107,6 +108,8 @@ def main():
                         help='User-requested direct preview: skip prerequisite checks and tests; compile the app only')
     parser.add_argument('--out', type=Path, default=ROOT / 'build/native-acceptance')
     args = parser.parse_args()
+    # Check even package-only builds: UI and CFBundleVersion must agree.
+    sync(APP, check=True)
     args.out.mkdir(parents=True, exist_ok=True)
     report = {'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'platform': platform.system(), 'architecture': platform.machine(),
@@ -224,7 +227,7 @@ def test_commands(args):
     return [
         ([args.flutter, 'analyze', '--no-pub', '--no-fatal-infos', '--no-fatal-warnings',
           'lib/core/update', 'lib/main.dart', 'packages/fl_lib/lib/src/core/update.dart',
-          'test/unit/app/mac_update_release_test.dart'], APP),
+          'test/unit/app/mac_update_release_test.dart', 'test/unit/app/mac_update_bridge_test.dart'], APP),
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
           '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
@@ -232,6 +235,7 @@ def test_commands(args):
         ([args.flutter, 'test', '--no-pub', 'test/unit/app/queue_protocol_test.dart',
           'test/unit/app/queue_session_test.dart', 'test/unit/app/queue_presentation_test.dart',
           'test/unit/app/queue_resource_widget_test.dart', 'test/unit/app/mac_update_release_test.dart',
+          'test/unit/app/mac_update_bridge_test.dart',
           'test/widget/terminal_reconnect_test.dart'], APP),
     ]
 

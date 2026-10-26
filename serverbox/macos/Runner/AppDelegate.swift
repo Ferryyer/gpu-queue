@@ -152,6 +152,8 @@ private enum GPUQueueUpdate {
   static func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
     let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     switch call.method {
+    case "installedBuild":
+      result(build)
     case "installStatus":
       let state = readState()
       if state?["phase"] as? String == "failed" { installing = false }
@@ -183,9 +185,15 @@ private enum GPUQueueUpdate {
             let dmg = args["dmg"] as? String, let hash = args["sha256"] as? String,
             let nextBuild = args["build"] as? Int,
             hash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil,
-            nextBuild > (Int(build ?? "0") ?? 0),
+            nextBuild > 0,
             let bundleID = Bundle.main.bundleIdentifier else {
-        result(FlutterError(code: "invalid_update", message: "无效的更新信息", details: nil)); return
+        result(FlutterError(code: "invalid_update", message: "更新信息缺少有效的安装包路径、校验和或版本号，请重新检查更新。", details: nil)); return
+      }
+      guard let currentBuild = Int(build ?? ""), currentBuild > 0 else {
+        result(FlutterError(code: "invalid_current_build", message: "无法读取当前应用版本，请重新打开应用后重试。", details: nil)); return
+      }
+      guard nextBuild > currentBuild else {
+        result(FlutterError(code: "already_current", message: "当前应用已是此版本或更新版本，无需重复安装。", details: nil)); return
       }
       installing = true
       let destination = Bundle.main.bundleURL.standardizedFileURL
