@@ -193,11 +193,11 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     final chosen = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: Text('关联实例 $instance'),
+        title: const Text('关联访问服务器'),
         children: [
           const Padding(
             padding: EdgeInsets.all(16),
-            child: Text('请选择此实例实际所属的 SSH 配置。终端、工作目录和产物都将使用该服务器；不会按名称或主机猜测。'),
+            child: Text('请选择能访问该任务目录的个人 SSH 服务器。可选择 GPU 实例，或能访问共享 HOME 的个人 CPU。此关联决定终端和文件访问目标，不代表 GPU 实际所在主机。'),
           ),
           for (final spi in servers.values.where((s) => s.sshOn != null))
             SimpleDialogOption(
@@ -1013,7 +1013,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                               ),
                             ),
                           ),
-                    child: const Text('服务器 / GPU'),
+                    child: const Text('关联服务器监控'),
                   ),
                   OutlinedButton(
                     onPressed: target == null
