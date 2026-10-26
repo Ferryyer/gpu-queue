@@ -23,6 +23,10 @@ abstract final class QueuePresentation {
       }[state] ??
       '状态待核查';
 
+  /// Short list label; badges expose the full status to assistive technology.
+  static String compactTaskStatus(Object? state) =>
+      state == 'execution_unknown' ? '待核查' : taskStatus(state);
+
   static num? _number(Object? value) =>
       value is num && value.isFinite && value >= 0 ? value : null;
   static String _decimal(num value) => value == value.roundToDouble()
@@ -82,6 +86,14 @@ abstract final class QueuePresentation {
     String two(int value) => value.toString().padLeft(2, '0');
     return '更新 ${at.year}-${two(at.month)}-${two(at.day)} '
         '${two(at.hour)}:${two(at.minute)}:${two(at.second)} UTC';
+  }
+
+  /// Minute precision in the list; the full UTC date is available on hover.
+  static String compactTaskUpdated(Map<String, dynamic> task) {
+    final at = taskTime(task['updated_at']);
+    if (at == null) return '更新时间未提供';
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '更新 ${two(at.month)}-${two(at.day)} ${two(at.hour)}:${two(at.minute)}';
   }
 
   static String stepStatus(Object? state) =>

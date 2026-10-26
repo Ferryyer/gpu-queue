@@ -24,7 +24,10 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: gpuQueueTheme(
-          ThemeData(brightness: dark ? Brightness.dark : Brightness.light),
+          ThemeData(
+            platform: TargetPlatform.macOS,
+            brightness: dark ? Brightness.dark : Brightness.light,
+          ),
         ),
         home: MediaQuery(
           data: MediaQueryData(
@@ -66,11 +69,11 @@ void main() {
             ),
             scale: scale,
           );
-          expect(find.text('更新 2026-10-24 12:00:00 UTC'), findsOneWidget);
+          expect(find.text('更新 10-24 12:00'), findsOneWidget);
           expect(find.text('失败'), findsOneWidget);
           final row = tester.getRect(find.byType(QueueTaskRow));
           for (final item in [
-            find.text('更新 2026-10-24 12:00:00 UTC'),
+            find.text('更新 10-24 12:00'),
             find.text('失败'),
             find.byType(FilledButton),
           ]) {
