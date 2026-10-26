@@ -10,6 +10,7 @@ import 'package:hive_ce_flutter/hive_flutter.dart';
 import 'package:logging/logging.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:server_box/app.dart';
 import 'package:server_box/core/chan.dart';
 import 'package:server_box/core/diag.dart';
@@ -542,4 +543,7 @@ Future<void> _initWindow() async {
     position: windowState?.position,
     listener: WindowStateListener(windowStateProp),
   );
+  // The native task workspace includes a sidebar, queue and resource summary.
+  // Keep all actions usable instead of allowing an unreadable 300px desktop.
+  await windowManager.setMinimumSize(const Size(760, 600));
 }
