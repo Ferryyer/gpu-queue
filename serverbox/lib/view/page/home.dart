@@ -426,7 +426,7 @@ class _HomePageState extends ConsumerState<HomePage>
                           settingsOpen: _settingsOpen,
                           onSelect: _onDestinationSelected,
                           onSettings: _openSettings,
-                          onMore: () => unawaited(_showMoreSheet(3)),
+                          onMore: () => unawaited(_showMoreSheet(AppTab.defaultOrder.length)),
                         ),
                       ),
                     ),

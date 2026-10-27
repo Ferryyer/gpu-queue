@@ -228,6 +228,7 @@ def test_commands(args):
         ([args.flutter, 'analyze', '--no-pub', '--no-fatal-infos', '--no-fatal-warnings',
           'lib/core/update', 'lib/main.dart', 'packages/fl_lib/lib/src/core/update.dart',
           'lib/core/gpu_queue', 'lib/view/page/gpu_queue',
+          'lib/view/page/home.dart', 'lib/data/model/app/tab.dart',
           'test/unit/app/mac_update_release_test.dart', 'test/unit/app/mac_update_bridge_test.dart'], APP),
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
@@ -238,7 +239,8 @@ def test_commands(args):
           'test/unit/app/queue_resource_widget_test.dart', 'test/unit/app/mac_update_release_test.dart',
           'test/unit/app/queue_workspace_widget_test.dart',
           'test/unit/app/mac_update_bridge_test.dart',
-          'test/widget/terminal_reconnect_test.dart'], APP),
+          'test/widget/terminal_reconnect_test.dart',
+          'test/unit/app/app_tab_test.dart'], APP),
     ]
 
 

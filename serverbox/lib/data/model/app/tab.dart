@@ -75,7 +75,7 @@ enum AppTab {
   /// arranged is stored and keeps its own tabs (schema step m030 adds
   /// Virtualization where a PVE host was configured); one never arranged is
   /// this list, read at launch, so both are behind "more" there.
-  static const defaultOrder = [overview, tasks, server];
+  static const defaultOrder = [overview, tasks, server, ssh];
 
   /// The tabs not in [enabled], in declaration order — what "more" holds.
   ///

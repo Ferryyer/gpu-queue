@@ -171,9 +171,13 @@ void main() {
       expect(tester.getSize(find.byType(QueueSidebar)).width, 208);
       await tester.tap(find.text('服务器'));
       expect(destination, 2);
+      await tester.tap(find.text('终端'));
+      expect(destination, 3);
       await tester.tap(find.byTooltip('收起侧栏'));
       await tester.pumpAndSettle();
       expect(tester.getSize(find.byType(QueueSidebar)).width, 64);
+      await tester.tap(find.byIcon(Icons.terminal_outlined));
+      expect(destination, 3);
       await tester.tap(find.byIcon(Icons.settings_outlined));
       expect(settings, 1);
       expect(tester.takeException(), isNull);
@@ -183,6 +187,20 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('terminal is selected independently of more tools in a small window', (tester) async {
+    for (final selected in [0, 3, 4]) {
+      await show(tester, Row(children: [
+        QueueSidebar(selected: selected, onSelect: (_) {}, onSettings: () {}, onMore: () {}),
+        const Expanded(child: SizedBox()),
+      ]), size: const Size(760, 600), scale: 1.5);
+      for (final entry in {'总览': 0, '终端': 3, '更多工具': 4}.entries) {
+        final tile = tester.widget<ListTile>(find.ancestor(of: find.text(entry.key), matching: find.byType(ListTile)));
+        expect(tile.selected, selected == entry.value);
+      }
+      expect(tester.takeException(), isNull);
+    }
+  });
 
   testWidgets(
     'right pane tabs, long title, log indentation and clipboard work at 416px',

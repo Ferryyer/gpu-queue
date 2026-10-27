@@ -51,8 +51,9 @@ def main():
     (out / 'installer-report.json').write_text(json.dumps(installer_report, ensure_ascii=False, indent=2) + '\n')
     (out / 'RELEASE-NOTES.md').write_text(
         f'GPU Queue {version} ({build}) · Mac 员工内部版\n\n源码：`{commit}`\n\n'
-        + (ROOT / 'docs/RELEASE-2006.md').read_text(), encoding='utf-8')
+        + (ROOT / f'docs/RELEASE-{build}.md').read_text(), encoding='utf-8')
     (out / 'EMPLOYEE-SETUP.md').write_text((ROOT / 'docs/EMPLOYEE-SETUP.md').read_text(), encoding='utf-8')
+    (out / 'APPLE-NOTARIZATION.md').write_text((ROOT / 'docs/APPLE-NOTARIZATION.md').read_text(), encoding='utf-8')
     # Every published file except the checksum manifest is covered.
     (out / 'SHA256SUMS').write_text(''.join(
         f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n'

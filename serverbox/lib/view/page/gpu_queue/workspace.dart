@@ -497,12 +497,18 @@ class _QueueSidebarState extends State<QueueSidebar> {
                   !widget.settingsOpen && widget.selected == 2,
                   () => widget.onSelect(2),
                 ),
+                item(
+                  '终端',
+                  Icons.terminal_outlined,
+                  !widget.settingsOpen && widget.selected == 3,
+                  () => widget.onSelect(3),
+                ),
                 Tooltip(
-                  message: '终端、文件与其他工具',
+                  message: '文件、分屏工作区与其他工具',
                   child: item(
                     '更多工具',
                     Icons.more_horiz,
-                    !widget.settingsOpen && widget.selected > 2,
+                    !widget.settingsOpen && widget.selected > 3,
                     widget.onMore,
                   ),
                 ),

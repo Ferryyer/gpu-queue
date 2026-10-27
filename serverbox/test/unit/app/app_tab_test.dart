@@ -19,16 +19,18 @@ void main() {
     test('is the bar, and the rest are behind "more"', () {
       // The list *is* the bar now, so it is a subset rather than everything.
       expect(AppTab.defaultOrder, [
+        AppTab.overview,
+        AppTab.tasks,
         AppTab.server,
         AppTab.ssh,
-        AppTab.file,
-        AppTab.agent,
       ]);
       // Snippets are a library rather than a place, and a benchmark is a
       // quarter of an hour started deliberately — neither is wanted a tap away.
       // The rest are out to keep a phone's bar at four.
       expect(AppTab.overflowOf(AppTab.defaultOrder), [
+        AppTab.file,
         AppTab.snippet,
+        AppTab.agent,
         AppTab.benchmark,
         AppTab.remoteDesktop,
         AppTab.virt,
@@ -150,6 +152,8 @@ void main() {
       AppTab.remoteDesktop,
       AppTab.virt,
       AppTab.workspace,
+      AppTab.overview,
+      AppTab.tasks,
     ]);
   });
 
