@@ -17,6 +17,9 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    let feishuRegistrar = flutterViewController.registrar(forPlugin: "InspireFeishuTask")
+    feishuRegistrar.register(FeishuTaskFactory(messenger: feishuRegistrar.messenger),
+                            withId: "work.inspirequeue/feishu")
 
     super.awakeFromNib()
   }

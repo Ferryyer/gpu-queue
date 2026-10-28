@@ -35,6 +35,8 @@ class AppTabAdapter extends TypeAdapter<AppTab> {
         return AppTab.overview;
       case 10:
         return AppTab.tasks;
+      case 11:
+        return AppTab.feishu;
       default:
         return AppTab.server;
     }
@@ -65,6 +67,8 @@ class AppTabAdapter extends TypeAdapter<AppTab> {
         writer.writeByte(9);
       case AppTab.tasks:
         writer.writeByte(10);
+      case AppTab.feishu:
+        writer.writeByte(11);
     }
   }
 

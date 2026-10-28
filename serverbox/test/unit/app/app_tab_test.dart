@@ -23,6 +23,7 @@ void main() {
         AppTab.tasks,
         AppTab.server,
         AppTab.ssh,
+        AppTab.feishu,
       ]);
       // Snippets are a library rather than a place, and a benchmark is a
       // quarter of an hour started deliberately — neither is wanted a tap away.
@@ -154,6 +155,7 @@ void main() {
       AppTab.workspace,
       AppTab.overview,
       AppTab.tasks,
+      AppTab.feishu,
     ]);
   });
 

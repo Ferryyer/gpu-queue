@@ -13,6 +13,7 @@ on:
       - scripts/package_mac_preview.py
       - scripts/test_mac_updater.py
       - scripts/test_queue_dart.py
+      - scripts/feishu-tests/**
       - scripts/sync_app_version.py
       - .github/workflows/employee-release.yml
       - gpuqueue/**
@@ -48,6 +49,8 @@ jobs:
         working-directory: source
         run: |
           mkdir -p "$HOME/scratch"
+          npm ci --prefix scripts/feishu-tests --no-audit --no-fund
+          node --test scripts/feishu-tests/style.test.cjs
           python3 scripts/sync_app_version.py --check
           python3 -m unittest discover -s tests -p 'test_*.py'
           node --test tests/cloud.test.js tests/modes.test.cjs tests/widget.test.cjs tests/widget-update.test.cjs

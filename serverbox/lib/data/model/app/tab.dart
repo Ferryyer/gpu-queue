@@ -34,7 +34,9 @@ enum AppTab {
   @HiveField(9)
   overview,
   @HiveField(10)
-  tasks;
+  tasks,
+  @HiveField(11)
+  feishu;
 
   /// Indices that named a tab which no longer exists, and so are never
   /// resolved as an integer.
@@ -53,29 +55,10 @@ enum AppTab {
   // TODO(migration): drop once no stored tab order can still hold it.
   static const _retiredIndices = {7};
 
-  /// The tabs a fresh install puts in the bar, and the fallback when a stored
-  /// list cannot be read.
-  ///
-  /// **A subset, not every tab.** This list *is* the bar: what is not in it is
-  /// behind "more". Four was the number to start from, because that is where
-  /// `NavigationBar` stops fitting labels on a phone; it is not a cap the code
-  /// enforces, but it is the number kept to.
-  ///
-  /// **Not the declaration order, and it cannot be.** The declaration order is
-  /// the `@HiveField` index and what `_parseAppTabFromElement` resolves an
-  /// `int` against, so moving a case there would silently re-point every
-  /// integer an older record holds at a different tab.
-  ///
-  /// Snippets are out because they are a library rather than a place: one is
-  /// run against a server, from the server's own page, and the tab is where
-  /// they are written and kept. Benchmark is out because a run takes a quarter
-  /// of an hour and is started deliberately.
-  ///
-  /// Virtualization and Workspace are out to keep it to four. A bar the user
-  /// arranged is stored and keeps its own tabs (schema step m030 adds
-  /// Virtualization where a PVE host was configured); one never arranged is
-  /// this list, read at launch, so both are behind "more" there.
-  static const defaultOrder = [overview, tasks, server, ssh];
+  /// Primary destinations in Inspire Queue. The Mac sidebar mirrors this
+  /// order; other tools remain reachable through "more". Keep declaration
+  /// indices stable: older records store positional values, newer ones names.
+  static const defaultOrder = [overview, tasks, server, ssh, feishu];
 
   /// The tabs not in [enabled], in declaration order — what "more" holds.
   ///

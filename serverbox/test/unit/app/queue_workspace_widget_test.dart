@@ -189,12 +189,12 @@ void main() {
   );
 
   testWidgets('terminal is selected independently of more tools in a small window', (tester) async {
-    for (final selected in [0, 3, 4]) {
+    for (final selected in [0, 3, 4, 5]) {
       await show(tester, Row(children: [
         QueueSidebar(selected: selected, onSelect: (_) {}, onSettings: () {}, onMore: () {}),
         const Expanded(child: SizedBox()),
       ]), size: const Size(760, 600), scale: 1.5);
-      for (final entry in {'总览': 0, '终端': 3, '更多工具': 4}.entries) {
+      for (final entry in {'总览': 0, '终端': 3, '飞书任务': 4, '更多工具': 5}.entries) {
         final tile = tester.widget<ListTile>(find.ancestor(of: find.text(entry.key), matching: find.byType(ListTile)));
         expect(tile.selected, selected == entry.value);
       }
