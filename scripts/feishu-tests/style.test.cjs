@@ -79,7 +79,7 @@ test('unknown layouts keep original navigation and login pages remain unchanged'
 });
 
 test('only the browser recommendation is collapsed, including its empty outer shell', () => {
-  const banner = '<section id="browser-banner"><div><span>想要更好的飞书网页版体验？</span><a href="/browsers">试试这些浏览器吧</a></div><button aria-label="关闭"><svg></svg></button></section>';
+  const banner = '<section id="browser-banner"><div><span>想要更好的飞书网页版体验？</span><span>试试这些浏览器吧</span></div><button aria-label="关闭"><svg></svg></button></section>';
   const p = page('/next/task/my-tasks', banner + '<div role="alert">网络中断，请重试</div>' + fixture);
   const login = page('/accounts/login', banner);
   try {

@@ -132,7 +132,7 @@
       for (let depth = 0; banner && depth < 5; depth++, banner = banner.parentElement) {
         const text = banner.textContent.trim();
         if (text.length > 180 || banner.querySelector('#root-todo')) break;
-        if (text.includes('试试这些浏览器吧') && banner.querySelector('a')) {
+        if (text.includes('试试这些浏览器吧')) {
           while (banner.parentElement && banner.parentElement !== document.body &&
                  !banner.parentElement.querySelector('#root-todo') &&
                  banner.parentElement.textContent.trim() === text) banner = banner.parentElement;
