@@ -136,7 +136,7 @@ class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAlive
           return AppKitView(
             viewType: 'work.inspirequeue/feishu',
             layoutDirection: TextDirection.ltr,
-            creationParams: {'script': snapshot.data, 'dark': _dark ?? false},
+            creationParams: {'script': snapshot.data, 'dark': _dark ?? false, 'embedded': widget.embedded},
             creationParamsCodec: const StandardMessageCodec(),
             onPlatformViewCreated: _created,
           );

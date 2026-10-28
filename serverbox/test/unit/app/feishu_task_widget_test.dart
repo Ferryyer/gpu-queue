@@ -22,6 +22,7 @@ void main() {
         home: const Scaffold(body: FeishuTaskPage())));
       await tester.pump(const Duration(milliseconds: 100));
       expect(find.byType(AppKitView), findsOneWidget);
+      expect((tester.widget<AppKitView>(find.byType(AppKitView)).creationParams as Map)['embedded'], isFalse);
       expect(find.text('飞书任务'), findsOneWidget);
       expect(find.byTooltip('在浏览器打开'), findsOneWidget);
       expect(tester.takeException(), isNull);

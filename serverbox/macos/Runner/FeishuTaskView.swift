@@ -15,13 +15,12 @@ final class FeishuTaskFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
-final class FeishuTaskView: WKWebView, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
   static let home = URL(string: "https://uqyv5nolng8.feishu.cn/next/task/my-tasks")!
   private let channel: FlutterMethodChannel
-  // Flutter must position the WKWebView itself. Moving only an outer NSView
-  // leaves WebKit's window-relative input geometry behind during tab changes.
-  private var web: WKWebView { self }
+  private let web: WKWebView
   private let script: String
+  private let embedded: Bool
   private var enabled: Bool
   private var dark: Bool
   private var popupWindows: [NSWindow] = []
@@ -30,15 +29,19 @@ final class FeishuTaskView: WKWebView, WKNavigationDelegate, WKUIDelegate, WKDow
   init(viewId: Int64, messenger: FlutterBinaryMessenger, arguments: Any?) {
     let args = arguments as? [String: Any] ?? [:]
     script = args["script"] as? String ?? ""
+    embedded = args["embedded"] as? Bool ?? false
     dark = args["dark"] as? Bool ?? false
     enabled = UserDefaults.standard.object(forKey: "inspire.feishu.appearance") as? Bool ?? true
     channel = FlutterMethodChannel(name: "work.inspirequeue/feishu/\(viewId)", binaryMessenger: messenger)
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .default()
-    super.init(frame: .zero, configuration: config)
+    web = WKWebView(frame: .zero, configuration: config)
+    super.init(frame: .zero)
     web.navigationDelegate = self
     web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = true
+    web.autoresizingMask = [.width, .height]
+    addSubview(web)
     installScript()
     loadingObservation = web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
       self?.sendState()
@@ -67,6 +70,7 @@ final class FeishuTaskView: WKWebView, WKNavigationDelegate, WKUIDelegate, WKDow
     web.load(URLRequest(url: Self.home))
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+  override func layout() { super.layout(); web.frame = bounds }
   deinit {
     channel.setMethodCallHandler(nil)
     web.stopLoading()
@@ -76,7 +80,7 @@ final class FeishuTaskView: WKWebView, WKNavigationDelegate, WKUIDelegate, WKDow
   private func installScript() {
     let content = web.configuration.userContentController
     content.removeAllUserScripts()
-    let options = "window.__inspireTaskOptions={enabled:\(enabled),dark:\(dark)};\n"
+    let options = "window.__inspireTaskOptions={enabled:\(enabled),dark:\(dark),embedded:\(embedded)};\n"
     content.addUserScript(WKUserScript(source: options + script,
       injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }

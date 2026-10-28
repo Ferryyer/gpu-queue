@@ -39,6 +39,7 @@ void main() {
     ))));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(AppKitView), findsOneWidget);
+    expect((tester.widget<AppKitView>(find.byType(AppKitView)).creationParams as Map)['embedded'], isTrue);
     expect(find.textContaining('首次使用'), findsNothing);
     await tester.ensureVisible(find.byTooltip('打开完整飞书任务页'));
     await tester.tap(find.byTooltip('打开完整飞书任务页'));
