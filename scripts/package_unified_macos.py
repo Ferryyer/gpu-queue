@@ -54,7 +54,9 @@ def main():
     if target.exists():
         raise FileExistsError(target)
     with tempfile.TemporaryDirectory(prefix='gpuq-dmg-', dir=args.out) as folder:
-        stage = Path(folder)
+        work = Path(folder)
+        stage = work/'payload'
+        stage.mkdir()
         subprocess.run(['ditto', str(args.app), str(stage/'Inspire Queue.app')],check=True)
         # Released 2007 installers look for this exact bundle path. ditto
         # dereferences a source-root link into a real app without copying the
@@ -63,7 +65,18 @@ def main():
         legacy.symlink_to('Inspire Queue.app')
         subprocess.run(['chflags', '-h', 'hidden', str(legacy)],check=True)
         (stage/'Applications').symlink_to('/Applications')
-        subprocess.run(['hdiutil','create','-volname','Inspire Queue','-srcfolder',str(stage),'-format','UDZO',str(target)],check=True)
+        writable = work/'writable.dmg'
+        mount = work/'volume'
+        mount.mkdir()
+        subprocess.run(['hdiutil','create','-volname','Inspire Queue','-srcfolder',str(stage),'-format','UDRW',str(writable)],check=True)
+        subprocess.run(['hdiutil','attach','-nobrowse','-mountpoint',str(mount),str(writable)],check=True)
+        try:
+            # hdiutil -srcfolder drops symlink file flags. Set this on the
+            # image filesystem before read-only compression instead.
+            subprocess.run(['chflags','-h','hidden',str(mount/'GPU Queue.app')],check=True)
+        finally:
+            subprocess.run(['hdiutil','detach',str(mount)],check=True)
+        subprocess.run(['hdiutil','convert',str(writable),'-format','UDZO','-o',str(target)],check=True)
     checksum = hashlib.sha256(target.read_bytes()).hexdigest()
     legacy_name = name.replace('Inspire-Queue-', 'GPU-Queue-', 1)
     shutil.copy2(target, args.out/legacy_name)
