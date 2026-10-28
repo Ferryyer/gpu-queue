@@ -139,7 +139,7 @@ function run() {
         $.NSBackingStoreBuffered, false);
     panel.appearance = $.NSAppearance.appearanceNamed($.NSAppearanceNameAqua);
     panel.backgroundColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.96,.95,.93,1);
-    panel.title = 'GPU 任务台'; panel.titlebarAppearsTransparent = true;
+    panel.title = 'Inspire Queue'; panel.titlebarAppearsTransparent = true;
     panel.titleVisibility = $.NSWindowTitleHidden;
     panel.hidesOnDeactivate = false; panel.floatingPanel = false;
     panel.becomesKeyOnlyIfNeeded = true; panel.movableByWindowBackground = true;
@@ -153,7 +153,7 @@ function run() {
     }
     panel.setContentSize($.NSMakeSize(344,340));
     interactionMode = GPUQWidget.interactionMode(readFile(stateDir + '/interaction-mode'));
-    label('GPU 任务台',20,292,220,30,23,true);
+    label('Inspire Queue',20,292,220,30,23,true);
     labels.status = label('○ 未连接',22,267,294,20,13,false);
     labels.note = label('正在检查已有连接…',22,246,298,20,12,false);
     labels.note.textColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.45,.43,.40,1);

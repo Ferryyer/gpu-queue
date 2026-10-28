@@ -75,4 +75,4 @@ fi
 "$launchctl_bin" print "$target" >/dev/null || {
     printf '未能确认自启动已启用，请重试。\n'; exit 1;
 }
-printf '\n已开启开机自启动：登录 Mac 后自动打开 GPU 任务台小面板。\n关闭请双击同一文件夹中的“关闭开机自启动.command”。\n'
+printf '\n已开启开机自启动：登录 Mac 后自动打开 Inspire Queue 小面板。\n关闭请双击同一文件夹中的“关闭开机自启动.command”。\n'

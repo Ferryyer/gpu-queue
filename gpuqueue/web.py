@@ -15,7 +15,7 @@ ASSETS = {'/': ('index.html','text/html; charset=utf-8'), '/index.html': ('index
 SOCKET = Path('/tmp') / f'gpuq-{os.getuid()}' / 'web.sock'
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'GPUQueue'
+    server_version = 'InspireQueue'
     sys_version = ''
     def log_message(self, *args):
         pass

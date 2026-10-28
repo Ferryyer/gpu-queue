@@ -132,7 +132,7 @@ function run() {
     window = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0,0,500,386),$.NSWindowStyleMaskTitled | $.NSWindowStyleMaskClosable,$.NSBackingStoreBuffered,false);
     window.appearance = $.NSAppearance.appearanceNamed($.NSAppearanceNameAqua);
     window.backgroundColor = $.NSColor.colorWithSRGBRedGreenBlueAlpha(.96,.95,.93,1);
-    window.title = 'GPU 任务台 · 软件更新'; window.releasedWhenClosed = false; window.delegate = target;
+    window.title = 'Inspire Queue · 软件更新'; window.releasedWhenClosed = false; window.delegate = target;
     label('软件更新',24,326,450,34,25,true);
     fields.current = label('',26,298,215,24,13,false);
     fields.latest = label('',248,298,226,24,13,false);

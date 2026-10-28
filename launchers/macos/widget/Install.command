@@ -50,7 +50,7 @@ if [ "$mode" = --update ]; then
     [ ! -e "$handoff/ready" ] && [ ! -e "$handoff/continue" ] || { printf '更新会话已经使用，请重新检查更新。\n'; exit 1; }
 fi
 app="$work_dir/$app_name"
-printf '正在安装 GPU 任务台桌面小组件 %s…\n' "$version"
+printf '正在安装 Inspire Queue 桌面小组件 %s…\n' "$version"
 "$compile_bin" -s -l JavaScript -o "$app" "$source_dir/Widget.bundle.js"
 /bin/cp "$source_dir/Open-GPU-Queue.command" "$app/Contents/Resources/Open-GPU-Queue.command"
 /bin/chmod 755 "$app/Contents/Resources/Open-GPU-Queue.command"
@@ -64,6 +64,8 @@ for bundle in "$app" "$helper"; do
     plist="$bundle/Contents/Info.plist"
     if [ "$bundle" = "$app" ]; then bundle_id=work.markflow.gpuqueue.widget.linlishuo; else bundle_id=work.markflow.gpuqueue.widget.linlishuo.updater; fi
     set_plist "$plist" CFBundleIdentifier string "$bundle_id"
+    set_plist "$plist" CFBundleName string "Inspire Queue"
+    set_plist "$plist" CFBundleDisplayName string "Inspire Queue"
     set_plist "$plist" CFBundleShortVersionString string "$version"
     set_plist "$plist" CFBundleVersion string "$version"
     set_plist "$plist" LSUIElement bool true

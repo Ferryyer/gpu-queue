@@ -56,7 +56,7 @@ existing_page() {
     for candidate in "$saved" 8790 8791 8792 8793 8794 8795 8796 8797 8798 8799; do
         [ -n "$candidate" ] || continue
         if ready "$candidate"; then
-            printf '连接已就绪，正在打开 GPU 任务台。\n'
+            printf '连接已就绪，正在打开 Inspire Queue。\n'
             open_page "$candidate"
             return 0
         fi
