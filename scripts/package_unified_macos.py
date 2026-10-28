@@ -56,13 +56,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix='gpuq-dmg-', dir=args.out) as folder:
         stage = Path(folder)
         subprocess.run(['ditto', str(args.app), str(stage/'Inspire Queue.app')],check=True)
-        # Released 2007 installers look for this exact bundle path. A real,
-        # hidden copy keeps their ditto/signature checks valid after unmount.
+        # Released 2007 installers look for this exact bundle path. ditto
+        # dereferences a source-root link into a real app without copying the
+        # link's hidden flag; Finder presents only the new product name.
         legacy = stage/'GPU Queue.app'
-        subprocess.run(['ditto', str(args.app), str(legacy)],check=True)
-        # Finder hides it on the image only; no hidden flag follows an old
-        # installer's copy into Applications.
-        (stage/'.hidden').write_text('GPU Queue.app\n')
+        legacy.symlink_to('Inspire Queue.app')
+        subprocess.run(['chflags', '-h', 'hidden', str(legacy)],check=True)
         (stage/'Applications').symlink_to('/Applications')
         subprocess.run(['hdiutil','create','-volname','Inspire Queue','-srcfolder',str(stage),'-format','UDZO',str(target)],check=True)
     checksum = hashlib.sha256(target.read_bytes()).hexdigest()
