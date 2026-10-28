@@ -13,8 +13,6 @@ typedef _IntroStep = ({Future<bool> Function() applies, IntroPageBuilder build})
 /// and this moves to it.
 const _kFeatureIntroVer = 2;
 
-/// The feature revision the Virtualization page arrived in.
-const _kVirtIntroSince = 2;
 
 final class _IntroPage extends StatelessWidget {
   const _IntroPage(this.pages);
@@ -35,15 +33,13 @@ final class _IntroPage extends StatelessWidget {
   /// A list rather than a map: the order is the list's, and nothing needs a
   /// number to refer to a step by.
   static List<_IntroStep> get _steps => [
-    (applies: _isFirstLaunch, build: _buildAppSettings),
-    (applies: _needsDiagnosticsConsent, build: _buildDiagnostics),
+    (applies: _isFirstLaunch, build: _buildSshSetup),
     // After the questions: these only say what the app can do.
     (applies: () async => _featureUnseen(1), build: _buildRemoteDesktop),
     (
       applies: () async => LocalServer.isSupported && _featureUnseen(1),
       build: _buildLocalServer,
     ),
-    (applies: _virtUnseen, build: _buildVirt),
   ];
 
   /// The steps this launch should show.
@@ -60,40 +56,11 @@ final class _IntroPage extends StatelessWidget {
   /// Nothing has ever completed the intro on this install.
   static Future<bool> _isFirstLaunch() async => _setting.introVer.fetch() == 0;
 
-  /// The user has not seen the current diagnostics arrangement.
-  ///
-  /// Its own counter rather than [SettingStore.introVer], which [onDone] sets
-  /// to the *build number* — so every step below it is permanently "already
-  /// seen" for anyone who has completed an intro, and a newly added one could
-  /// never appear. Keyed on the arrangement instead, which is also what lets a
-  /// change to what is collected ask again.
-  ///
-  /// Not asked at all in a build that cannot upload — one made with an empty
-  /// `SENTRY_DSN`. Every level then behaves identically, so the page would put
-  /// a question whose answer changes nothing, and the settings page already
-  /// hides the same control under the same condition.
-  static Future<bool> _needsDiagnosticsConsent() async {
-    if (!DiagnosticsUpload.availableInBuild) return false;
-    return _setting.diagnosticsConsentVer.fetch() < kDiagnosticsConsentVer;
-  }
-
   /// A feature page introduced in revision [since] that this install has not
   /// been shown. Fresh installs included: the pages describe features, not
   /// changes, and a first launch knows neither.
   static bool _featureUnseen(int since) =>
       _setting.featureIntroVer.fetch() < since;
-
-  static Future<bool> _virtUnseen() async => _featureUnseen(_kVirtIntroSince);
-
-  /// What the Virtualization page adds for someone who had PVE configured.
-  ///
-  /// Read when the page is built, not stored: whether any server has a PVE
-  /// row, and whether the tab is in the bar, are both facts about now — a
-  /// flag written by the migration would go stale the moment either changed.
-  static ({bool pveMoved, bool inBar}) _virtFacts() => (
-    pveMoved: Stores.pve.fetchAll().isNotEmpty,
-    inBar: _setting.homeTabs.fetch().contains(AppTab.virt),
-  );
 
   // — Widget build ——————————————————————————————————————————————————
 
@@ -122,20 +89,8 @@ final class _IntroPage extends StatelessWidget {
       _setting.introVer.putSync(BuildData.build);
       final lastVer = _setting.lastVer;
       if (lastVer.fetch() == 0) lastVer.putSync(BuildData.build);
-      // Written here rather than on the page itself, so that leaving the intro
-      // without reaching the end counts as unanswered and asks again. Only in
-      // a build that shows the page: one without a DSN leaves it out, and its
-      // having been finished must not be read as an answer by a later build
-      // that can upload.
-      if (DiagnosticsUpload.availableInBuild) {
-        _setting.diagnosticsConsentVer.putSync(kDiagnosticsConsentVer);
-      }
       _setting.featureIntroVer.putSync(_kFeatureIntroVer);
     });
-    // Applies whatever was chosen a moment ago. Nothing has been uploaded
-    // before this point — `DiagnosticsUpload.sync` refuses to start until the
-    // consent counter above says the question was put.
-    unawaited(DiagnosticsUpload.sync());
     Navigator.of(ctx).pushReplacement(
       MaterialPageRoute(builder: (_) => _buildHomeWithWindowFrame()),
     );
@@ -185,92 +140,15 @@ final class _IntroPage extends StatelessWidget {
 
   // — Pages —————————————————————————————————————————————————————————
 
-  static Widget _buildAppSettings(BuildContext ctx, double padTop) {
-    final libL10n = ctx.libL10n;
-    final l10n = ctx.l10n;
+  static Widget _buildSshSetup(BuildContext ctx, double padTop) => _introList(
+    children: [
+      ..._head('连接你的服务器', padTop / 2),
+      const ClientBundleSetup(),
+      _prose('也可以稍后在设置 → SSH → 导入服务器配置包中完成。'),
+      UIs.height77,
+    ],
+  );
 
-    return _introList(
-      children: [
-        ..._head(libL10n.init, padTop),
-        ListTile(
-          leading: const Icon(IonIcons.language),
-          title: Text(libL10n.language),
-          onTap: () => _selectLocale(ctx),
-          trailing: Text(
-            ctx.localeNativeName,
-            style: const TextStyle(fontSize: 15, color: Colors.grey),
-          ),
-        ).cardx,
-        ListTile(
-          leading: const Icon(Icons.update),
-          title: Text(libL10n.checkUpdate),
-          subtitle: isAndroid
-              ? Text(l10n.fdroidReleaseTip, style: UIs.textGrey)
-              : null,
-          trailing: StoreSwitch(prop: _setting.autoCheckAppUpdate),
-        ).cardx,
-        ListTile(
-          leading: const Icon(MingCute.delete_2_fill),
-          title: TipText('rm -r', l10n.sftpRmrDirSummary),
-          trailing: StoreSwitch(prop: _setting.sftpRmrDir),
-        ).cardx,
-        ListTile(
-          leading: const Icon(MingCute.chart_line_line, size: _kIconSize),
-          title: TipText(l10n.dockerStatistics, l10n.parseContainerStatsTip),
-          trailing: StoreSwitch(prop: _setting.containerParseStat),
-        ).cardx,
-        ListTile(
-          leading: const Icon(Bootstrap.alphabet),
-          title: TipText(l10n.letterCache, l10n.letterCacheTip),
-          trailing: StoreSwitch(prop: _setting.letterCache),
-        ).cardx,
-        UIs.height77,
-      ],
-    );
-  }
-
-  /// Where diagnostics collection is explained and chosen.
-  ///
-  /// Shown before anything is uploaded. The level starts at `none` on every
-  /// platform, so going past this page without picking one sends nothing;
-  /// picking one that uploads is the user's choice, and [_onDone] is what
-  /// releases it.
-  ///
-  /// A radio list rather than a switch, so each level carries the sentence
-  /// that says what it sends.
-  static Widget _buildDiagnostics(BuildContext ctx, double padTop) {
-    final l10n = ctx.l10n;
-
-    return _introList(
-      children: [
-        ..._head(l10n.crashCollect, padTop),
-        _prose(l10n.crashCollectIntro),
-        // Stored only, so no callback: nothing starts uploading until the
-        // intro is finished, which is what makes leaving it early mean "not
-        // answered". Settings passes one, because there the change is now.
-        const DiagnosticsLevelPicker(),
-        _prose(l10n.crashCollectFooter),
-        // On the page where the question is put, not only in Settings
-        // afterwards. A tile can say what a level sends; where it goes, how
-        // long it is kept and what a report was checked not to contain need
-        // somewhere to be written down, and an answer given without that is
-        // an answer to the summary.
-        ListTile(
-          leading: const Icon(Icons.privacy_tip_outlined, size: _kIconSize),
-          title: Text(l10n.privacyPolicy),
-          trailing: const Icon(Icons.open_in_new, size: 17),
-          onTap: Urls.privacyPolicy.launchUrl,
-        ).cardx,
-        UIs.height77,
-      ],
-    );
-  }
-
-  /// What remote desktop is and how it reaches a machine.
-  ///
-  /// The two things worth knowing before the first try: that nothing has to
-  /// be opened to the network, and where the button is. How the touch
-  /// controls work is the viewer's own guide, reused here.
   static Widget _buildRemoteDesktop(BuildContext ctx, double padTop) {
     final l10n = ctx.l10n;
 
@@ -342,54 +220,6 @@ final class _IntroPage extends StatelessWidget {
     );
   }
 
-  /// The Virtualization tab: libvirt and PVE hosts, over any transport.
-  ///
-  /// For someone who had PVE configured it also says where the old page went
-  /// and where the tab is — the one thing they are otherwise left to find —
-  /// and that an API token can replace the password.
-  static Widget _buildVirt(BuildContext ctx, double padTop) {
-    final l10n = ctx.l10n;
-    final facts = _virtFacts();
-
-    return _introList(
-      children: [
-        ..._head(
-          l10n.virtualization,
-          padTop,
-          mark: Feature.virt.mark(height: BetaTag.heading),
-        ),
-        _prose(l10n.virtIntro),
-        ListTile(
-          leading: const Icon(Icons.view_in_ar_outlined, size: _kIconSize),
-          title: const Text('libvirt · KVM'),
-          subtitle: Text(l10n.virtIntroLibvirt, style: UIs.textGrey),
-        ).cardx,
-        ListTile(
-          leading: const Icon(Icons.swap_horiz, size: _kIconSize),
-          title: const Text('SSH · Monitor'),
-          subtitle: Text(l10n.virtIntroTransports, style: UIs.textGrey),
-        ).cardx,
-        if (facts.pveMoved) ...[
-          ListTile(
-            leading: const Icon(FontAwesome.server_solid, size: _kIconSize),
-            title: const Text('Proxmox VE'),
-            subtitle: Text(
-              '${l10n.virtIntroPveMoved} '
-              '${facts.inBar ? l10n.virtIntroInBar : l10n.virtIntroInMore}',
-              style: UIs.textGrey,
-            ),
-          ).cardx,
-          ListTile(
-            leading: const Icon(Icons.key_outlined, size: _kIconSize),
-            title: Text(l10n.pveAuthToken),
-            subtitle: Text(l10n.virtIntroTokens, style: UIs.textGrey),
-          ).cardx,
-        ],
-        UIs.height77,
-      ],
-    );
-  }
-
   // — Actions ———————————————————————————————————————————————————————
 
   /// Adds this device as a server, unless one already is. False, after
@@ -411,23 +241,7 @@ final class _IntroPage extends StatelessWidget {
     }
   }
 
-  static Future<void> _selectLocale(BuildContext ctx) async {
-    final selected = await ctx.showPickSingleDialog(
-      title: ctx.libL10n.language,
-      items: AppLocalizations.supportedLocales,
-      display: (locale) => locale.nativeName,
-      initial: _setting.locale.fetch().toLocale,
-    );
-    if (selected == null || !ctx.mounted) return;
-
-    _setting.locale.put(selected.code);
-  }
 }
 
-/// Whether this launch's intro shows the Virtualization page.
 @visibleForTesting
-Future<bool> introShowsVirt() => _IntroPage._virtUnseen();
-
-/// What that page adds, as it would be read now.
-@visibleForTesting
-({bool pveMoved, bool inBar}) introVirtFacts() => _IntroPage._virtFacts();
+Future<List<IntroPageBuilder>> introBuilders() => _IntroPage.builders;

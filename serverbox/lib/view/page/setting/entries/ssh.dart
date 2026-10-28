@@ -11,6 +11,21 @@ extension _SSH on _AppSettingsPageState {
   List<SettingsGroup> _buildSSH() {
     return [
       SettingsGroup(libL10n.general, [
+        if (Platform.isMacOS) SettingsRow('导入服务器配置包', () => ListTile(
+          leading: const Icon(Icons.folder_zip_outlined),
+          title: const Text('导入服务器配置包'),
+          subtitle: const Text('拖入 client.zip，自动配置 SSH 连接'),
+          trailing: const Icon(Icons.keyboard_arrow_right),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => Scaffold(
+              appBar: AppBar(title: const Text('导入服务器配置包')),
+              body: const SingleChildScrollView(child: Center(child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: 640),
+                child: Padding(padding: EdgeInsets.all(24), child: ClientBundleSetup()),
+              ))),
+            ),
+          )),
+        )),
         if (isDesktop) _buildSSHConfigImport(),
         _buildLetterCache(),
         _buildSSHWakeLock(),

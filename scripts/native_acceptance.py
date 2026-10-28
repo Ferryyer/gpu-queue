@@ -230,7 +230,9 @@ def test_commands(args):
           'lib/core/gpu_queue', 'lib/view/page/gpu_queue', 'lib/view/page/feishu',
           'lib/core/calendar', 'lib/view/page/overview', 'lib/view/page/home_tab.dart',
           'lib/view/page/home.dart', 'lib/data/model/app/tab.dart',
-          'test/unit/app/mac_update_release_test.dart', 'test/unit/app/mac_update_bridge_test.dart'], APP),
+          'test/unit/app/mac_update_release_test.dart', 'test/unit/app/mac_update_bridge_test.dart',
+          'lib/core/ssh_bundle', 'lib/view/widget/client_bundle_setup.dart',
+          'lib/app.dart', 'lib/intro.dart', 'lib/view/page/setting/entry.dart'], APP),
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
           '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
@@ -242,7 +244,8 @@ def test_commands(args):
           'test/unit/app/local_calendar_test.dart', 'test/unit/app/overview_layout_test.dart',
           'test/unit/app/mac_update_bridge_test.dart',
           'test/widget/terminal_reconnect_test.dart',
-          'test/unit/app/app_tab_test.dart'], APP),
+          'test/unit/app/app_tab_test.dart',
+          'test/unit/ssh/client_bundle_test.dart', 'test/unit/app/virt_intro_test.dart'], APP),
     ]
 
 
