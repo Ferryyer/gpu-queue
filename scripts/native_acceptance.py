@@ -178,7 +178,7 @@ def main():
             print(result['output'][-12000:], file=sys.stderr)
             return 1
     if args.stage == 'build':
-        app = APP / 'build/macos-qa/Build/Products/Release/GPU Queue.app'
+        app = APP / 'build/macos-qa/Build/Products/Release/Inspire Queue.app'
         report['macBuildProduced'] = app.is_dir()
         report['macBuildVerified'] = not args.package_only and app.is_dir()
         report['qaApp'] = str(app)

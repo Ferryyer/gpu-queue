@@ -13,7 +13,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox legt vast wat er tijdens het gebruik gebeurt, zodat problemen kunnen worden opgelost. Kies hoeveel informatie er wordt verstuurd.';
+      'Inspire Queue legt vast wat er tijdens het gebruik gebeurt, zodat problemen kunnen worden opgelost. Kies hoeveel informatie er wordt verstuurd.';
 
   @override
   String get crashCollectNone => 'Niets';
@@ -41,7 +41,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get crashLastRunFailed =>
-      'ServerBox is tijdens de vorige uitvoering onverwacht afgesloten.';
+      'Inspire Queue is tijdens de vorige uitvoering onverwacht afgesloten.';
 
   @override
   String get crashReportTitle => 'Crashrapport';
@@ -897,7 +897,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS staat dit niet toe. De schakelaars staan in Instellingen › ServerBox › Live-activiteiten en Instellingen › Face ID en toegangscode › Live-activiteiten.';
+      'iOS staat dit niet toe. De schakelaars staan in Instellingen › Inspire Queue › Live-activiteiten en Instellingen › Face ID en toegangscode › Live-activiteiten.';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1110,10 +1110,10 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      'Deze share is gemaakt met een nieuwere versie van ServerBox. Werk de app bij om deze te openen.';
+      'Deze share is gemaakt met een nieuwere versie van Inspire Queue. Werk de app bij om deze te openen.';
 
   @override
-  String get shareUnreadable => 'Dit is geen geldige ServerBox-share.';
+  String get shareUnreadable => 'Dit is geen geldige Inspire Queue-share.';
 
   @override
   String get shareVia => 'Delen via';
@@ -1617,7 +1617,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      'Deze server gebruikt een servicebeheerder die ServerBox nog niet ondersteunt. systemd, procd en OpenRC worden ondersteund.';
+      'Deze server gebruikt een servicebeheerder die Inspire Queue nog niet ondersteunt. systemd, procd en OpenRC worden ondersteund.';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1754,11 +1754,11 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'Laat de Agent werken op de machine waarop ServerBox draait. Ook alleen-lezen commando’s worden beoordeeld';
+      'Laat de Agent werken op de machine waarop Inspire Queue draait. Ook alleen-lezen commando’s worden beoordeeld';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Laat de Agent lokaal werken, beperkt tot de Linux-container die ServerBox installeerde';
+      'Laat de Agent lokaal werken, beperkt tot de Linux-container die Inspire Queue installeerde';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -2009,7 +2009,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return 'Ze zijn geschreven door een nieuwere versie van ServerBox (opslag v$stored); deze versie kan tot en met v$supported lezen. Er is niets gewijzigd.';
+    return 'Ze zijn geschreven door een nieuwere versie van Inspire Queue (opslag v$stored); deze versie kan tot en met v$supported lezen. Er is niets gewijzigd.';
   }
 
   @override
@@ -2211,7 +2211,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      'Opdrachten uitvoeren en bestanden lezen of schrijven op je servers, via SSH verbinden met andere hosts en de acties van ServerBox zelf gebruiken.';
+      'Opdrachten uitvoeren en bestanden lezen of schrijven op je servers, via SSH verbinden met andere hosts en de acties van Inspire Queue zelf gebruiken.';
 
   @override
   String get agentTerminalTools => 'Terminal';
@@ -2501,7 +2501,7 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'Voegt het apparaat waarop ServerBox draait toe als server. Status, processen, services, containers, de terminal en bestanden werken zonder SSH of Monitor-agent.';
+      'Voegt het apparaat waarop Inspire Queue draait toe als server. Status, processen, services, containers, de terminal en bestanden werken zonder SSH of Monitor-agent.';
 
   @override
   String get localServerAdd => 'Dit apparaat toevoegen';
@@ -2851,11 +2851,11 @@ class AppLocalizationsNl extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      'Deze Monitor-agent is ouder dan deze versie van ServerBox ondersteunt. Werk de agent op de server bij.';
+      'Deze Monitor-agent is ouder dan deze versie van Inspire Queue ondersteunt. Werk de agent op de server bij.';
 
   @override
   String get monitorClientTooOld =>
-      'Deze Monitor-agent ondersteunt deze versie van ServerBox niet meer. Werk de app bij.';
+      'Deze Monitor-agent ondersteunt deze versie van Inspire Queue niet meer. Werk de app bij.';
 
   @override
   String get alerts => 'Waarschuwingen';
@@ -6016,7 +6016,7 @@ class AppLocalizationsNl extends AppLocalizations {
       'CPU, geheugen, netwerk en schijf, zoals op de serverkaart. Op een telefoon boven de virtuele toetsen.';
 
   @override
-  String get launchFailedTitle => 'ServerBox kon niet starten';
+  String get launchFailedTitle => 'Inspire Queue kon niet starten';
 
   @override
   String get launchFailedBody =>

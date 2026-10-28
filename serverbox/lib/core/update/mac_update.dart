@@ -57,7 +57,7 @@ abstract final class MacAutoUpdate {
     _active = true;
     final progress = ValueNotifier<(String, double?)>(('正在读取更新信息…', null));
     final client = HttpClient()
-      ..userAgent = 'GPU-Queue-Updater'
+      ..userAgent = 'Inspire-Queue-Updater'
       ..connectionTimeout = const Duration(seconds: 30);
     Directory? work;
     var handedOff = false;

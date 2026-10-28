@@ -184,7 +184,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
         'server_id': {
           'type': 'string',
           'description':
-              'The exact ServerBox server ID from the instructions. Use an '
+              'The exact Inspire Queue server ID from the instructions. Use an '
               'empty string when targeting an ad-hoc connection instead.',
         },
         'session_id': {
@@ -239,7 +239,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
         'server_id': {
           'type': 'string',
           'description':
-              'The exact ServerBox server ID from the instructions. Use an '
+              'The exact Inspire Queue server ID from the instructions. Use an '
               'empty string when targeting an ad-hoc connection instead.',
         },
         'session_id': {
@@ -284,7 +284,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
         'server_id': {
           'type': 'string',
           'description':
-              'The exact ServerBox server ID from the instructions. Use an '
+              'The exact Inspire Queue server ID from the instructions. Use an '
               'empty string when targeting an ad-hoc connection instead.',
         },
         'session_id': {
@@ -369,7 +369,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
   AskAiToolDefinition(
     name: 'serverbox',
     description:
-        'Inspect configured servers, manage their existing ServerBox '
+        'Inspect configured servers, manage their existing Inspire Queue '
         'connection state, show one to the user, and keep an ad-hoc '
         'connection as a new one.',
     parameters: {
@@ -397,7 +397,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
             'add_server',
           ],
           'description':
-              'The ServerBox operation to perform. open_server moves the app '
+              'The Inspire Queue operation to perform. open_server moves the app '
               'to that server\'s page so the user can see it; it changes '
               'nothing on the server itself. add_server keeps an ad-hoc '
               'connection as a configured server.',
@@ -429,7 +429,7 @@ const globalAgentToolDefinitions = <AskAiToolDefinition>[
         },
         'description': {
           'type': 'string',
-          'description': 'Why this ServerBox operation is needed.',
+          'description': 'Why this Inspire Queue operation is needed.',
         },
         'safe_to_run': {
           'type': 'boolean',
@@ -463,7 +463,7 @@ String buildGlobalAgentInstructions({
   bool localIsRootfs = false,
 }) {
   final prompt = StringBuffer()
-    ..writeln('You are the application-wide operations Agent in ServerBox.')
+    ..writeln('You are the application-wide operations Agent in Inspire Queue.')
     ..writeln(
       'You work on two kinds of machine, and both can run commands and read or write files: servers the user has configured, listed at the end of these instructions, and any other host you reach yourself with ssh_connect.',
     )
@@ -478,7 +478,7 @@ String buildGlobalAgentInstructions({
       'Every state-changing action requires app review. Never claim a tool ran until its result is provided.',
     )
     ..writeln(
-      'Prefer ServerBox state and read-only inspection before changes. Avoid interactive commands and password prompts.',
+      'Prefer Inspire Queue state and read-only inspection before changes. Avoid interactive commands and password prompts.',
     )
     ..writeln(
       'Set safe_to_run=true only for read-only, idempotent actions. It must be false for writes and connection changes.',
@@ -522,7 +522,7 @@ String buildGlobalAgentInstructions({
   // an answer.
   if (localExec) {
     prompt.writeln(
-      'There is a third machine: the device ServerBox itself is running on. '
+      'There is a third machine: the device Inspire Queue itself is running on. '
       'Name it with server_id "${LocalExec.deviceId}".',
     );
     // Two different machines under one name, and a model told the wrong one
@@ -531,7 +531,7 @@ String buildGlobalAgentInstructions({
     // itself, with everything that implies.
     if (localIsRootfs) {
       prompt.writeln(
-        'On this device that machine is an Alpine Linux container ServerBox '
+        'On this device that machine is an Alpine Linux container Inspire Queue '
         'installed, not the phone: commands run inside it, apk installs into '
         'it, and file paths are resolved inside it. It cannot see the phone\'s '
         'own filesystem, the app\'s data or the user\'s files, and a path '
@@ -592,7 +592,7 @@ class AgentToolExecutionResult {
   factory AgentToolExecutionResult.fromToolMessage(String message) {
     final json = Map<String, dynamic>.from(jsonDecode(message) as Map);
     if (json['server_box_tool_result'] != true) {
-      throw const FormatException('Not a ServerBox Agent tool result');
+      throw const FormatException('Not a Inspire Queue Agent tool result');
     }
     final durationMs = json['duration_ms'];
     return AgentToolExecutionResult(
@@ -867,7 +867,7 @@ class GlobalAgentToolService {
     if (!Stores.setting.agentLocalExec.fetch()) {
       throw StateError(
         'Running commands on this device is turned off. The user can enable '
-        'it in ServerBox settings; do not ask again in this conversation if '
+        'it in Inspire Queue settings; do not ask again in this conversation if '
         'they decline.',
       );
     }
@@ -1693,7 +1693,7 @@ class GlobalAgentToolService {
         return AgentToolExecutionResult(
           toolName: proposal.toolName,
           serverId: state.spi.id,
-          summary: 'Read the current ServerBox status for ${state.spi.name}.',
+          summary: 'Read the current Inspire Queue status for ${state.spi.name}.',
           succeeded: true,
           duration: watch.elapsed,
           data: _statusJson(state),

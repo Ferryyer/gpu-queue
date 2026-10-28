@@ -117,7 +117,9 @@ do {
   try fm.createDirectory(at: volume, withIntermediateDirectories: true)
   mount = volume
   try command("/usr/bin/hdiutil", ["attach", dmg.path, "-readonly", "-nobrowse", "-mountpoint", volume.path])
-  let candidate = volume.appendingPathComponent("GPU Queue.app")
+  let brandedCandidate = volume.appendingPathComponent("Inspire Queue.app")
+  let candidate = fm.fileExists(atPath: brandedCandidate.path)
+    ? brandedCandidate : volume.appendingPathComponent("GPU Queue.app")
   let info = try bundleInfo(candidate)
   guard info["CFBundleIdentifier"] as? String == bundleID,
         info["CFBundleVersion"] as? String == build,
@@ -136,13 +138,13 @@ do {
   #endif
   try command("/usr/bin/lipo", [candidate.appendingPathComponent("Contents/MacOS/\(executable)").path,
                               "-verify_arch", architecture])
-  let staged = parent.appendingPathComponent(".GPUQueue-staged-\(id).app")
+  let staged = parent.appendingPathComponent(".InspireQueue-staged-\(id).app")
   stage = staged
   try command("/usr/bin/ditto", [candidate.path, staged.path])
   try command("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path])
   try command("/usr/bin/hdiutil", ["detach", "-force", volume.path])
   mount = nil
-  let backup = parent.appendingPathComponent("GPU Queue.previous-\(currentBuild)-\(id).app")
+  let backup = parent.appendingPathComponent("Inspire Queue.previous-\(currentBuild)-\(id).app")
   state["backup"] = backup.path
   guard !fm.fileExists(atPath: work.appendingPathComponent("cancel").path) else { try fail("更新已取消，旧应用未改动。") }
   try status("ready")
@@ -183,7 +185,7 @@ do {
       guard app.isTerminated else { try fail("新版无法退出；备份保留在 \(backup.path)，请手动恢复。") }
     }
     if installed {
-      try fm.moveItem(at: destination, to: parent.appendingPathComponent("GPU Queue.failed-\(id).app"))
+      try fm.moveItem(at: destination, to: parent.appendingPathComponent("Inspire Queue.failed-\(id).app"))
     }
     try fm.moveItem(at: backup, to: destination)
     try status("rolled_back", error.localizedDescription)

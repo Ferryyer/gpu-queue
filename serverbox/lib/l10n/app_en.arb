@@ -4,7 +4,7 @@
   "@crashCollect": {
     "description": "User-facing label or message for crash collect."
   },
-  "crashCollectIntro": "ServerBox records what happens while it runs so problems can be fixed. Choose how much information to send.",
+  "crashCollectIntro": "Inspire Queue records what happens while it runs so problems can be fixed. Choose how much information to send.",
   "@crashCollectIntro": {
     "description": "Introductory text for the crash collect screen or section."
   },
@@ -36,7 +36,7 @@
   "@privacyPolicy": {
     "description": "User-facing label or message for privacy policy."
   },
-  "crashLastRunFailed": "ServerBox exited unexpectedly during its last run.",
+  "crashLastRunFailed": "Inspire Queue exited unexpectedly during its last run.",
   "@crashLastRunFailed": {
     "description": "Error message shown when crash last run failed."
   },
@@ -1132,7 +1132,7 @@
   "@liveActivityTip": {
     "description": "Help text for the live activity setting or action."
   },
-  "liveActivitySystemDisabled": "iOS is not allowing one. The switches are at Settings › ServerBox › Live Activities and Settings › Face ID & Passcode › Live Activities.",
+  "liveActivitySystemDisabled": "iOS is not allowing one. The switches are at Settings › Inspire Queue › Live Activities and Settings › Face ID & Passcode › Live Activities.",
   "@liveActivitySystemDisabled": {
     "description": "User-facing label or message for live activity system disabled."
   },
@@ -1409,11 +1409,11 @@
   "@shareTooBigForQr": {
     "description": "User-facing label or message for share too big for qr."
   },
-  "shareTooNew": "This share was created with a newer version of ServerBox. Update the app to open it.",
+  "shareTooNew": "This share was created with a newer version of Inspire Queue. Update the app to open it.",
   "@shareTooNew": {
     "description": "User-facing label or message for share too new."
   },
-  "shareUnreadable": "This is not a valid ServerBox share.",
+  "shareUnreadable": "This is not a valid Inspire Queue share.",
   "@shareUnreadable": {
     "description": "User-facing label or message for share unreadable."
   },
@@ -2024,7 +2024,7 @@
   "@serviceManagerUnsupported": {
     "description": "User-facing label or message for service manager unsupported."
   },
-  "serviceManagerUnsupportedTip": "This server uses a service manager that ServerBox does not support yet. Supported managers: systemd, procd, and OpenRC.",
+  "serviceManagerUnsupportedTip": "This server uses a service manager that Inspire Queue does not support yet. Supported managers: systemd, procd, and OpenRC.",
   "@serviceManagerUnsupportedTip": {
     "description": "Help text for the service manager unsupported setting or action."
   },
@@ -2200,11 +2200,11 @@
   "@agentLocalExec": {
     "description": "User-facing label or message for agent local exec."
   },
-  "agentLocalExecTip": "Lets the Agent work on the machine running ServerBox. Even read-only commands are reviewed",
+  "agentLocalExecTip": "Lets the Agent work on the machine running Inspire Queue. Even read-only commands are reviewed",
   "@agentLocalExecTip": {
     "description": "Help text for the agent local exec setting or action."
   },
-  "agentLocalExecRootfsTip": "Lets the Agent work locally, confined to the Linux container ServerBox installed",
+  "agentLocalExecRootfsTip": "Lets the Agent work locally, confined to the Linux container Inspire Queue installed",
   "@agentLocalExecRootfsTip": {
     "description": "Help text for the agent local exec rootfs setting or action."
   },
@@ -2535,7 +2535,7 @@
   "@schemaTooNewTitle": {
     "description": "Title shown for the schema too new dialog or section."
   },
-  "schemaTooNewBody": "It was written by a newer version of ServerBox (storage v{stored}). This version reads up to v{supported}; nothing has been changed.",
+  "schemaTooNewBody": "It was written by a newer version of Inspire Queue (storage v{stored}). This version reads up to v{supported}; nothing has been changed.",
   "schemaTooNewReinstall": "Reinstall the newer version to open all your data again.",
   "@schemaTooNewReinstall": {
     "description": "User-facing label or message for schema too new reinstall."
@@ -2795,7 +2795,7 @@
   "@agentServerTools": {
     "description": "Agent: agentServerTools."
   },
-  "agentServerToolsTip": "Run commands and read or write files on your servers, connect to other hosts over SSH, and use ServerBox's own actions.",
+  "agentServerToolsTip": "Run commands and read or write files on your servers, connect to other hosts over SSH, and use Inspire Queue's own actions.",
   "@agentServerToolsTip": {
     "description": "Agent: agentServerToolsTip."
   },
@@ -3219,7 +3219,7 @@
   "@remoteDesktopIntroProfiles": {
     "description": "User-facing label or message for remote desktop intro profiles."
   },
-  "localServerIntro": "Add the device running ServerBox as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.",
+  "localServerIntro": "Add the device running Inspire Queue as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.",
   "@localServerIntro": {
     "description": "Introductory text for the local server screen or section."
   },
@@ -3693,11 +3693,11 @@
   "@monitorNoRemoteAccess": {
     "description": "User-facing label or message for monitor no remote access."
   },
-  "monitorAgentTooOld": "This Monitor agent is older than this version of ServerBox supports. Update the agent on the server.",
+  "monitorAgentTooOld": "This Monitor agent is older than this version of Inspire Queue supports. Update the agent on the server.",
   "@monitorAgentTooOld": {
     "description": "Shown when the Monitor agent speaks an older protocol than this app reads."
   },
-  "monitorClientTooOld": "This Monitor agent no longer supports this version of ServerBox. Update the app.",
+  "monitorClientTooOld": "This Monitor agent no longer supports this version of Inspire Queue. Update the app.",
   "@monitorClientTooOld": {
     "description": "Shown when the Monitor agent no longer answers this app's protocol (HTTP 426)."
   },
@@ -7774,7 +7774,7 @@
   "@termMetricsBarTip": {
     "description": "Explains the terminal readings bar setting."
   },
-  "launchFailedTitle": "ServerBox could not start",
+  "launchFailedTitle": "Inspire Queue could not start",
   "@launchFailedTitle": {
     "description": "Title of the screen shown when the app fails during startup."
   },

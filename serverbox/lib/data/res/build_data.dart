@@ -2,6 +2,6 @@
 // ignore_for_file: prefer_single_quotes
 
 abstract class BuildData {
-  static const String name = "GPU Queue";
-  static const int build = 2007;
+  static const String name = "Inspire Queue";
+  static const int build = 2008;
 }

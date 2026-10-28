@@ -43,7 +43,7 @@ TrayLineState trayStateOf(ServerConn conn) => switch (conn) {
 /// English defaults keep older native runners and small model tests useful.
 class TrayMenuLabels {
   const TrayMenuLabels({
-    this.open = 'Open ServerBox',
+    this.open = 'Open Inspire Queue',
     this.servers = 'Servers',
     this.empty = 'Empty',
     this.settings = 'Settings',

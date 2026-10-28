@@ -1,6 +1,6 @@
 # Apple 公证发布准备
 
-当前状态：尚未开通 Apple Developer Program；本机没有有效的代码签名身份，仓库没有配置发布密钥。2.0.2007 的内部包不是已公证包。
+当前状态：尚未开通 Apple Developer Program；本机没有有效的代码签名身份，仓库没有配置发布密钥。2.0.2008 的内部包不是已公证包。
 
 ## 账号持有人需要完成
 
@@ -10,8 +10,8 @@
 
 ## 后续发布验收
 
-- 使用完整 Xcode 的发布机器或受保护的 CI，保留当前 GPU Queue 的 bundle ID、数据目录和凭据兼容配置。
-- 为 GPU Queue 准备独立的 Developer ID 签名配置。上游 ServerBox 的 iCloud entitlement 属于上游开发团队，不可直接复用；当前 `ReleaseDmg.entitlements` 也不能直接作为本产品的生产签名配置。
+- 使用完整 Xcode 的发布机器或受保护的 CI，保留当前 Inspire Queue 的 bundle ID、数据目录和凭据兼容配置。
+- 为 Inspire Queue 准备独立的 Developer ID 签名配置。上游 ServerBox 的 iCloud entitlement 属于上游开发团队，不可直接复用；当前 `ReleaseDmg.entitlements` 也不能直接作为本产品的生产签名配置。
 - 由内向外签署所有 Mach-O 库、框架、辅助更新器和应用；启用 hardened runtime 与安全时间戳，验证体系结构和签名。不能用 `codesign --deep --sign -` 代替 Developer ID 签名。
 - 向 Apple 提交应用压缩包，等待 `notarytool` 明确返回 `Accepted`；将票据装订到应用，再制作并签署 DMG。提交 DMG，确认 Accepted，装订并验证 DMG 票据。
 - 在启用 Gatekeeper 的 Mac 上检查签名、`spctl` 评估及票据；从真实下载包安装，验证首次打开、SSH、SFTP、钥匙串访问与应用内升级/回滚。

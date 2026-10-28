@@ -112,7 +112,7 @@ class QueueSession extends ChangeNotifier {
       final data = await _request('/api/health', null, false);
       if (_disposed) return;
       if (data['service'] != 'gpuq' || data['owner'] is! String || data['uid'] is! int) {
-        throw StateError('未识别到个人 GPU Queue 服务，请核对服务器');
+        throw StateError('未识别到个人 Inspire Queue 服务，请核对服务器');
       }
       health = data;
     } catch (e) {

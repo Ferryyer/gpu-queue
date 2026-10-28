@@ -4,7 +4,7 @@
          rather than translated into each: a brand name that varies by locale
          is a different app to its users, and lint counts a missing one as an
          error. -->
-    <string name="app_name" translatable="false">ServerBox</string>
+    <string name="app_name" translatable="false">Inspire Queue</string>
 
     <!--
         Widget strings live here rather than in the app's ARB files: they are
@@ -29,7 +29,7 @@
         until one exists — and it has to be added in the app, since reaching an
         agent needs a login the widget has nowhere to keep.
     -->
-    <string name="widget_configure_empty">No server with a monitor agent yet.\nAdd one in ServerBox, then come back.</string>
+    <string name="widget_configure_empty">No server with a monitor agent yet.\nAdd one in Inspire Queue, then come back.</string>
 
 
     <string name="widget_metric_cpu">CPU</string>
@@ -38,7 +38,7 @@
     <string name="widget_metric_network">Network</string>
 
     <string name="widget_err_not_configured">Tap to pick a server</string>
-    <string name="widget_err_no_token">No credential — open ServerBox</string>
+    <string name="widget_err_no_token">No credential — open Inspire Queue</string>
     <string name="widget_err_insecure">HTTPS required</string>
     <string name="widget_err_network">Network error</string>
     <string name="widget_err_timeout">Timed out</string>

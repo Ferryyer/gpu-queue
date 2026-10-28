@@ -13,7 +13,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox records what happens while it runs so problems can be fixed. Choose how much information to send.';
+      'Inspire Queue records what happens while it runs so problems can be fixed. Choose how much information to send.';
 
   @override
   String get crashCollectNone => 'Nothing';
@@ -41,7 +41,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get crashLastRunFailed =>
-      'ServerBox exited unexpectedly during its last run.';
+      'Inspire Queue exited unexpectedly during its last run.';
 
   @override
   String get crashReportTitle => 'Crash report';
@@ -889,7 +889,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS is not allowing one. The switches are at Settings › ServerBox › Live Activities and Settings › Face ID & Passcode › Live Activities.';
+      'iOS is not allowing one. The switches are at Settings › Inspire Queue › Live Activities and Settings › Face ID & Passcode › Live Activities.';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1101,10 +1101,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      'This share was created with a newer version of ServerBox. Update the app to open it.';
+      'This share was created with a newer version of Inspire Queue. Update the app to open it.';
 
   @override
-  String get shareUnreadable => 'This is not a valid ServerBox share.';
+  String get shareUnreadable => 'This is not a valid Inspire Queue share.';
 
   @override
   String get shareVia => 'Share via';
@@ -1601,7 +1601,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      'This server uses a service manager that ServerBox does not support yet. Supported managers: systemd, procd, and OpenRC.';
+      'This server uses a service manager that Inspire Queue does not support yet. Supported managers: systemd, procd, and OpenRC.';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1737,11 +1737,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'Lets the Agent work on the machine running ServerBox. Even read-only commands are reviewed';
+      'Lets the Agent work on the machine running Inspire Queue. Even read-only commands are reviewed';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Lets the Agent work locally, confined to the Linux container ServerBox installed';
+      'Lets the Agent work locally, confined to the Linux container Inspire Queue installed';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -1991,7 +1991,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return 'It was written by a newer version of ServerBox (storage v$stored). This version reads up to v$supported; nothing has been changed.';
+    return 'It was written by a newer version of Inspire Queue (storage v$stored). This version reads up to v$supported; nothing has been changed.';
   }
 
   @override
@@ -2193,7 +2193,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      'Run commands and read or write files on your servers, connect to other hosts over SSH, and use ServerBox\'s own actions.';
+      'Run commands and read or write files on your servers, connect to other hosts over SSH, and use Inspire Queue\'s own actions.';
 
   @override
   String get agentTerminalTools => 'Terminal';
@@ -2488,7 +2488,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'Add the device running ServerBox as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.';
+      'Add the device running Inspire Queue as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.';
 
   @override
   String get localServerAdd => 'Add this device';
@@ -2829,11 +2829,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      'This Monitor agent is older than this version of ServerBox supports. Update the agent on the server.';
+      'This Monitor agent is older than this version of Inspire Queue supports. Update the agent on the server.';
 
   @override
   String get monitorClientTooOld =>
-      'This Monitor agent no longer supports this version of ServerBox. Update the app.';
+      'This Monitor agent no longer supports this version of Inspire Queue. Update the app.';
 
   @override
   String get alerts => 'Alerts';
@@ -5968,7 +5968,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'CPU, memory, network and disk, as the server card shows them. Above the virtual keys on a phone.';
 
   @override
-  String get launchFailedTitle => 'ServerBox could not start';
+  String get launchFailedTitle => 'Inspire Queue could not start';
 
   @override
   String get launchFailedBody =>

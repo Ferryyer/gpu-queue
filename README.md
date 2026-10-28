@@ -1,4 +1,6 @@
-# GPU Queue
+# Inspire Queue
+
+原名 GPU Queue。当前应用、网页和发行包统一使用 Inspire Queue；旧版更新地址、数据目录与仓库地址保留兼容。
 
 个人 GPU 任务台：网页、CPU 调度服务、ServerBox 原生统一工作台与兼容旧版的 macOS 小组件。
 
@@ -9,7 +11,7 @@
 `serverbox/` 为带 GPU 桥接、账号线程卡片和 Mac 自动重连的完整原生客户端源码。
 原生客户端提供总览、任务、服务器、终端与设置，任务详情在应用内打开关联服务器的 SSH 终端和 SFTP 目录。复用已有安全连接配置；Edit/Auto 与重连不会批准任务。网页同步修复焦点、断线读数与任务入口布局。
 
-当前统一桌面版 **2.0.2007 / build 2007**：[Release 与安装包](https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2007)。终端入口已固定到左侧，总览仍是默认首页。当前包为 ad-hoc 签名内部版，**未完成 Apple 公证**；开发者账号与验收要求见 [Apple 公证准备](docs/APPLE-NOTARIZATION.md)。
+当前统一桌面版 **2.0.2008 / build 2008**：[Release 与安装包](https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2008)。终端入口已固定到左侧，总览仍是默认首页。当前包为 ad-hoc 签名内部版，**未完成 Apple 公证**；开发者账号与验收要求见 [Apple 公证准备](docs/APPLE-NOTARIZATION.md)。
 关于页捐赠与产品推广已移除；源码中未发现内购或功能订阅锁。
 
 详见 [融合范围与验证](docs/SERVER-MONITOR.md) 和 [原生构建说明](serverbox/README.gpu-console.md)。

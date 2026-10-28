@@ -1,7 +1,7 @@
 name: server_box
 description: server status & toolbox app.
 publish_to: "none"
-version: 2.0.2007+2007
+version: 2.0.2008+2008
 
 environment:
   sdk: ">=3.11.0"
@@ -259,4 +259,4 @@ flutter_native_splash:
 # line, so the name it publishes assets under cannot drift from the name the
 # build gave them.
 fl_build:
-  appName: GPU Queue
+  appName: Inspire Queue

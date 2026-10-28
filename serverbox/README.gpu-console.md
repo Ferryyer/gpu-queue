@@ -33,10 +33,10 @@ git -C third_party/ish-arm64 checkout --detach 5dfc962fe5e03fe5bc6b869b8744312eb
 git -C third_party/ish-arm64 submodule update --init --recursive
 ```
 
-## GPU Queue 融合
+## Inspire Queue 融合
 
 个人任务台代码位于仓库根目录，`serverbox/` 保留原生 SSH、SFTP、进程查看、账号线程卡片、GPU 桥接和 Mac 隧道重连。
-MF-12 将 GPU Queue 任务页原生接入应用：总览、任务、服务器、设置，任务详情可进入已明确关联服务器的 SSH 终端与 SFTP 工作目录。用户仅维护服务器列表中的 SSH 配置，应用通过现有会话访问远端私有任务 socket，不再要求单独建立 8790 网页转发。
+MF-12 将 Inspire Queue 任务页原生接入应用：总览、任务、服务器、设置，任务详情可进入已明确关联服务器的 SSH 终端与 SFTP 工作目录。用户仅维护服务器列表中的 SSH 配置，应用通过现有会话访问远端私有任务 socket，不再要求单独建立 8790 网页转发。
 
 首次使用在任务页选择任务服务所在服务器并点击连接。GPU 实例与实际服务器需要显式关联；没有可靠关联时按钮禁用。任务服务故障、SSH 故障和采样过期分别显示。完整流程、安装更新命令与尚未完成的 Mac 验收见 [统一工作台说明](../docs/UNIFIED-WORKSPACE.md)。
 

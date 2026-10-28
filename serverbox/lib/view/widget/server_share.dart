@@ -100,7 +100,7 @@ abstract final class ServerShareUi {
               QrView(
                 data: text,
                 tip: spi.name,
-                tip2: '${libL10n.server} ~ ServerBox',
+                tip2: '${libL10n.server} ~ Inspire Queue',
                 // The other device is in the room and reads this off a
                 // screen, so nothing is going to scuff the symbol. What
                 // decides whether it can be read is how many camera pixels

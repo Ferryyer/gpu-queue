@@ -134,7 +134,7 @@ abstract class AppLocalizations {
   /// Introductory text for the crash collect screen or section.
   ///
   /// In en, this message translates to:
-  /// **'ServerBox records what happens while it runs so problems can be fixed. Choose how much information to send.'**
+  /// **'Inspire Queue records what happens while it runs so problems can be fixed. Choose how much information to send.'**
   String get crashCollectIntro;
 
   /// Empty-state message for crash collect none.
@@ -182,7 +182,7 @@ abstract class AppLocalizations {
   /// Error message shown when crash last run failed.
   ///
   /// In en, this message translates to:
-  /// **'ServerBox exited unexpectedly during its last run.'**
+  /// **'Inspire Queue exited unexpectedly during its last run.'**
   String get crashLastRunFailed;
 
   /// Title shown for the crash report dialog or section.
@@ -1676,7 +1676,7 @@ abstract class AppLocalizations {
   /// User-facing label or message for live activity system disabled.
   ///
   /// In en, this message translates to:
-  /// **'iOS is not allowing one. The switches are at Settings › ServerBox › Live Activities and Settings › Face ID & Passcode › Live Activities.'**
+  /// **'iOS is not allowing one. The switches are at Settings › Inspire Queue › Live Activities and Settings › Face ID & Passcode › Live Activities.'**
   String get liveActivitySystemDisabled;
 
   /// Shown when a ProxyCommand is used on a phone with no Linux system installed to run it in.
@@ -2029,13 +2029,13 @@ abstract class AppLocalizations {
   /// User-facing label or message for share too new.
   ///
   /// In en, this message translates to:
-  /// **'This share was created with a newer version of ServerBox. Update the app to open it.'**
+  /// **'This share was created with a newer version of Inspire Queue. Update the app to open it.'**
   String get shareTooNew;
 
   /// User-facing label or message for share unreadable.
   ///
   /// In en, this message translates to:
-  /// **'This is not a valid ServerBox share.'**
+  /// **'This is not a valid Inspire Queue share.'**
   String get shareUnreadable;
 
   /// User-facing label or message for share via.
@@ -2845,7 +2845,7 @@ abstract class AppLocalizations {
   /// Help text for the service manager unsupported setting or action.
   ///
   /// In en, this message translates to:
-  /// **'This server uses a service manager that ServerBox does not support yet. Supported managers: systemd, procd, and OpenRC.'**
+  /// **'This server uses a service manager that Inspire Queue does not support yet. Supported managers: systemd, procd, and OpenRC.'**
   String get serviceManagerUnsupportedTip;
 
   /// Formatted user-facing message for service manager; runtime values are supplied by placeholders.
@@ -3049,13 +3049,13 @@ abstract class AppLocalizations {
   /// Help text for the agent local exec setting or action.
   ///
   /// In en, this message translates to:
-  /// **'Lets the Agent work on the machine running ServerBox. Even read-only commands are reviewed'**
+  /// **'Lets the Agent work on the machine running Inspire Queue. Even read-only commands are reviewed'**
   String get agentLocalExecTip;
 
   /// Help text for the agent local exec rootfs setting or action.
   ///
   /// In en, this message translates to:
-  /// **'Lets the Agent work locally, confined to the Linux container ServerBox installed'**
+  /// **'Lets the Agent work locally, confined to the Linux container Inspire Queue installed'**
   String get agentLocalExecRootfsTip;
 
   /// User-facing label or message for mac DMG imported partly.
@@ -3475,7 +3475,7 @@ abstract class AppLocalizations {
   /// Explanatory message shown in the schema too new dialog or notice.
   ///
   /// In en, this message translates to:
-  /// **'It was written by a newer version of ServerBox (storage v{stored}). This version reads up to v{supported}; nothing has been changed.'**
+  /// **'It was written by a newer version of Inspire Queue (storage v{stored}). This version reads up to v{supported}; nothing has been changed.'**
   String schemaTooNewBody(int stored, int supported);
 
   /// User-facing label or message for schema too new reinstall.
@@ -3835,7 +3835,7 @@ abstract class AppLocalizations {
   /// Agent: agentServerToolsTip.
   ///
   /// In en, this message translates to:
-  /// **'Run commands and read or write files on your servers, connect to other hosts over SSH, and use ServerBox\'s own actions.'**
+  /// **'Run commands and read or write files on your servers, connect to other hosts over SSH, and use Inspire Queue\'s own actions.'**
   String get agentServerToolsTip;
 
   /// Agent: agentTerminalTools.
@@ -4285,7 +4285,7 @@ abstract class AppLocalizations {
   /// Introductory text for the local server screen or section.
   ///
   /// In en, this message translates to:
-  /// **'Add the device running ServerBox as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.'**
+  /// **'Add the device running Inspire Queue as a server. Status, processes, services, containers, the terminal and files all work without SSH or a Monitor agent.'**
   String get localServerIntro;
 
   /// User-facing label or message for local server add.
@@ -4873,13 +4873,13 @@ abstract class AppLocalizations {
   /// Shown when the Monitor agent speaks an older protocol than this app reads.
   ///
   /// In en, this message translates to:
-  /// **'This Monitor agent is older than this version of ServerBox supports. Update the agent on the server.'**
+  /// **'This Monitor agent is older than this version of Inspire Queue supports. Update the agent on the server.'**
   String get monitorAgentTooOld;
 
   /// Shown when the Monitor agent no longer answers this app's protocol (HTTP 426).
   ///
   /// In en, this message translates to:
-  /// **'This Monitor agent no longer supports this version of ServerBox. Update the app.'**
+  /// **'This Monitor agent no longer supports this version of Inspire Queue. Update the app.'**
   String get monitorClientTooOld;
 
   /// User-facing label or message for alerts.
@@ -10218,7 +10218,7 @@ abstract class AppLocalizations {
   /// Title of the screen shown when the app fails during startup.
   ///
   /// In en, this message translates to:
-  /// **'ServerBox could not start'**
+  /// **'Inspire Queue could not start'**
   String get launchFailedTitle;
 
   /// Asks the user to report a startup failure.

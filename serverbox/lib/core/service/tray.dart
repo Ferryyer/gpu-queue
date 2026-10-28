@@ -251,7 +251,7 @@ class TrayService with WindowListener, WidgetsBindingObserver {
       lines: lines,
       config: settings,
       labels: TrayMenuLabels(
-        open: '${libL10n.open} GPU Queue$taskSummary',
+        open: '${libL10n.open} Inspire Queue$taskSummary',
         servers: libL10n.servers,
         empty: libL10n.empty,
         settings: libL10n.setting,

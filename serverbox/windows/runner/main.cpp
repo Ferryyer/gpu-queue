@@ -12,7 +12,7 @@ namespace {
 constexpr wchar_t kSingleInstanceMutex[] =
     L"Local\\tech.lolli.toolbox.ServerBox.SingleInstance";
 constexpr wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
-constexpr wchar_t kWindowTitle[] = L"ServerBox";
+constexpr wchar_t kWindowTitle[] = L"Inspire Queue";
 constexpr DWORD kExistingWindowWaitTimeoutMs = 5000;
 constexpr DWORD kExistingWindowPollIntervalMs = 50;
 

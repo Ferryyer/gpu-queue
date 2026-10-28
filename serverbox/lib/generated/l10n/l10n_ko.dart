@@ -13,7 +13,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox는 문제를 해결할 수 있도록 실행 중 발생한 일을 기록합니다. 전송할 정보의 양을 선택할 수 있습니다.';
+      'Inspire Queue는 문제를 해결할 수 있도록 실행 중 발생한 일을 기록합니다. 전송할 정보의 양을 선택할 수 있습니다.';
 
   @override
   String get crashCollectNone => '전송 안 함';
@@ -39,7 +39,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get privacyPolicy => '개인정보 처리방침';
 
   @override
-  String get crashLastRunFailed => 'ServerBox가 마지막 실행 중 예기치 않게 종료되었습니다.';
+  String get crashLastRunFailed => 'Inspire Queue가 마지막 실행 중 예기치 않게 종료되었습니다.';
 
   @override
   String get crashReportTitle => '충돌 보고서';
@@ -854,7 +854,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS에서 허용하지 않습니다. 스위치는 설정 › ServerBox › 실시간 활동과 설정 › Face ID 및 암호 › 실시간 활동에 있습니다.';
+      'iOS에서 허용하지 않습니다. 스위치는 설정 › Inspire Queue › 실시간 활동과 설정 › Face ID 및 암호 › 실시간 활동에 있습니다.';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1052,10 +1052,10 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      '이 공유는 더 최신 버전의 ServerBox에서 생성되었습니다. 앱을 업데이트한 후 열어 주세요.';
+      '이 공유는 더 최신 버전의 Inspire Queue에서 생성되었습니다. 앱을 업데이트한 후 열어 주세요.';
 
   @override
-  String get shareUnreadable => '유효한 ServerBox 공유 데이터가 아닙니다.';
+  String get shareUnreadable => '유효한 Inspire Queue 공유 데이터가 아닙니다.';
 
   @override
   String get shareVia => '공유 방법';
@@ -1519,7 +1519,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      '이 서버의 서비스 관리자는 아직 ServerBox에서 지원되지 않습니다. systemd, procd 및 OpenRC를 지원합니다.';
+      '이 서버의 서비스 관리자는 아직 Inspire Queue에서 지원되지 않습니다. systemd, procd 및 OpenRC를 지원합니다.';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1641,11 +1641,11 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'ServerBox가 실행 중인 이 기기에서 Agent가 작업하게 합니다. 읽기 전용 명령도 검토가 필요합니다';
+      'Inspire Queue가 실행 중인 이 기기에서 Agent가 작업하게 합니다. 읽기 전용 명령도 검토가 필요합니다';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Agent를 로컬에서 동작하게 하며, 범위는 ServerBox가 설치한 Linux 컨테이너 안으로 제한됩니다';
+      'Agent를 로컬에서 동작하게 하며, 범위는 Inspire Queue가 설치한 Linux 컨테이너 안으로 제한됩니다';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -1887,7 +1887,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return '더 최신 버전의 ServerBox에서 작성된 데이터입니다(저장 형식 v$stored). 이 버전은 v$supported까지 읽을 수 있습니다. 데이터는 변경되지 않았습니다.';
+    return '더 최신 버전의 Inspire Queue에서 작성된 데이터입니다(저장 형식 v$stored). 이 버전은 v$supported까지 읽을 수 있습니다. 데이터는 변경되지 않았습니다.';
   }
 
   @override
@@ -2082,7 +2082,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      '서버에서 명령을 실행하고 파일을 읽고 쓰며, SSH로 다른 호스트에 연결하고 ServerBox 자체 기능을 사용합니다.';
+      '서버에서 명령을 실행하고 파일을 읽고 쓰며, SSH로 다른 호스트에 연결하고 Inspire Queue 자체 기능을 사용합니다.';
 
   @override
   String get agentTerminalTools => '터미널';
@@ -2356,7 +2356,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'ServerBox를 실행 중인 기기를 서버로 추가합니다. 상태, 프로세스, 서비스, 컨테이너, 터미널, 파일을 SSH나 Monitor 에이전트 없이 사용할 수 있습니다.';
+      'Inspire Queue를 실행 중인 기기를 서버로 추가합니다. 상태, 프로세스, 서비스, 컨테이너, 터미널, 파일을 SSH나 Monitor 에이전트 없이 사용할 수 있습니다.';
 
   @override
   String get localServerAdd => '이 기기 추가';
@@ -2688,11 +2688,11 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      '이 Monitor agent는 현재 ServerBox 버전이 지원하는 것보다 오래되었습니다. 서버에서 agent를 업데이트하세요.';
+      '이 Monitor agent는 현재 Inspire Queue 버전이 지원하는 것보다 오래되었습니다. 서버에서 agent를 업데이트하세요.';
 
   @override
   String get monitorClientTooOld =>
-      '이 Monitor agent는 더 이상 현재 ServerBox 버전을 지원하지 않습니다. 앱을 업데이트하세요.';
+      '이 Monitor agent는 더 이상 현재 Inspire Queue 버전을 지원하지 않습니다. 앱을 업데이트하세요.';
 
   @override
   String get alerts => '알림';
@@ -5695,7 +5695,7 @@ class AppLocalizationsKo extends AppLocalizations {
       'CPU, 메모리, 네트워크, 디스크를 서버 카드와 같은 형식으로 표시합니다. 휴대폰에서는 가상 키 위에 표시됩니다.';
 
   @override
-  String get launchFailedTitle => 'ServerBox를 시작할 수 없습니다';
+  String get launchFailedTitle => 'Inspire Queue를 시작할 수 없습니다';
 
   @override
   String get launchFailedBody => '아래 오류를 복사해 로그 파일과 함께 GitHub 이슈로 알려 주세요.';

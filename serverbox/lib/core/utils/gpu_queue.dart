@@ -1,4 +1,4 @@
-/// GPU Queue is reached through the owner's existing loopback SSH forward.
+/// Inspire Queue is reached through the owner's existing loopback SSH forward.
 /// This link only opens the task page; it cannot grant execution approval.
 abstract final class GpuQueue {
   static const address = String.fromEnvironment(

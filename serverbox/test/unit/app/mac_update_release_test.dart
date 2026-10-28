@@ -12,6 +12,15 @@ void main() {
     expect(value.bytes, 54000000);
     expect(MacUpdateRelease.apiFor(url, 2004).toString(), 'https://api.github.com/repos/Ferryyer/gpu-queue/releases/tags/v2.0.2004');
   });
+  test('accepts the new product asset with the same immutable checks', () {
+    final branded = url.replaceFirst('GPU-Queue-', 'Inspire-Queue-');
+    final data = release()..['assets'] = [{...asset, 'browser_download_url': branded}];
+    final value = MacUpdateRelease.parse(jsonEncode(data), branded, 2004);
+    expect(value.url.toString(), branded);
+    expect(value.sha256, 'a' * 64);
+    expect(() => MacUpdateRelease.apiFor(branded.replaceFirst('/v2.0.2004/', '/v2.0.2005/'), 2004), throwsFormatException);
+    expect(() => MacUpdateRelease.apiFor(branded.replaceFirst('Inspire-Queue-', 'InspireQueue-'), 2004), throwsFormatException);
+  });
   test('rejects foreign, unversioned, or inconsistent asset URLs', () {
     for (final invalid in [url.replaceFirst('https:', 'http:'), url.replaceFirst('github.com', 'evil.example'),
       url.replaceFirst('Ferryyer', 'another'), '$url?raw=1', '$url#x',

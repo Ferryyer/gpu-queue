@@ -20,7 +20,7 @@ def build_data(app):
     return ('// Generated from pubspec.yaml by scripts/sync_app_version.py.\n'
             '// ignore_for_file: prefer_single_quotes\n\n'
             'abstract class BuildData {\n'
-            '  static const String name = "GPU Queue";\n'
+            '  static const String name = "Inspire Queue";\n'
             f'  static const int build = {build};\n'
             '}\n')
 

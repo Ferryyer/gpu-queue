@@ -1,4 +1,4 @@
-# 员工首次接入 GPU Queue
+# 员工首次接入 Inspire Queue
 
 首批客户端支持 Apple Silicon Mac、macOS 13 及以上。Windows 后续提供。每位员工使用自己的 Linux 账号、SSH 配置和飞书授权；不要复制同事的客户端数据库、私钥、飞书会话或任务库。
 
@@ -17,7 +17,7 @@
 
 ```sh
 mkdir -p ~/code
-git clone --branch v2.0.2006 --depth 1 https://github.com/Ferryyer/gpu-queue.git ~/code/gpu-queue
+git clone --branch v2.0.2008 --depth 1 https://github.com/Ferryyer/gpu-queue.git ~/code/gpu-queue
 cd ~/code/gpu-queue
 ```
 

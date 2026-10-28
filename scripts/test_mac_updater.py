@@ -76,14 +76,14 @@ def main():
         fixture = root/'Fixture'
         run('swiftc', '-swift-version', '5', str(source), '-o', str(fixture))
 
-        for scenario in ('success', 'checksum_mismatch', 'wrong_bundle', 'quit_timeout', 'rollback', 'cancelled'):
+        for scenario in ('success', 'legacy_payload', 'checksum_mismatch', 'wrong_bundle', 'quit_timeout', 'rollback', 'cancelled'):
             case = root/scenario
             case.mkdir()
             work = case/'work'
             work.mkdir()
             status = case/'state/status.json'
             receipt = case/'receipt.json'
-            destination = case/'GPU Queue.app'
+            destination = case/'Inspire Queue.app'
             bundle_id = 'work.gpuqueue.updater.fixture.' + uuid.uuid4().hex
             pids = set()
             child = None
@@ -97,7 +97,7 @@ def main():
                     (contents/'Info.plist').write_bytes(plistlib.dumps({
                         'CFBundleExecutable': 'Fixture', 'CFBundleIdentifier': identifier,
                         'CFBundleVersion': str(build), 'CFBundleShortVersionString': f'2.0.{build}',
-                        'CFBundleName': 'GPU Queue Fixture', 'CFBundlePackageType': 'APPL',
+                        'CFBundleName': 'Inspire Queue Fixture', 'CFBundlePackageType': 'APPL',
                         'LSUIElement': True, 'FixtureAck': ack, 'FixtureStatus': str(status),
                         'FixtureReceipt': str(receipt),
                     }))
@@ -105,7 +105,8 @@ def main():
 
                 make_app(destination, 100, False)
                 payload = case/'payload'
-                make_app(payload/'GPU Queue.app', 101, scenario != 'rollback',
+                payload_name = 'GPU Queue.app' if scenario == 'legacy_payload' else 'Inspire Queue.app'
+                make_app(payload/payload_name, 101, scenario != 'rollback',
                          bundle_id if scenario != 'wrong_bundle' else 'work.gpuqueue.wrong')
                 dmg = work/'update.dmg'
                 run('hdiutil', 'create', '-srcfolder', str(payload), '-format', 'UDZO', str(dmg))
@@ -126,15 +127,15 @@ def main():
                 planfile = work/'plan.json'
                 planfile.write_text(json.dumps(plan))
                 child = subprocess.Popen([str(helper), str(planfile)], stdout=log, stderr=log)
-                if scenario in ('success', 'rollback', 'quit_timeout'):
+                if scenario in ('success', 'legacy_payload', 'rollback', 'quit_timeout'):
                     wait_for(lambda: read(status).get('phase') in ('ready', 'failed'))
                     assert read(status)['phase'] == 'ready', read(status)
-                if scenario in ('success', 'rollback'):
+                if scenario in ('success', 'legacy_payload', 'rollback'):
                     os.kill(old['pid'], signal.SIGTERM)
                 code = child.wait(timeout=55)
                 state = read(status)
                 installed = plistlib.loads((destination/'Contents/Info.plist').read_bytes())
-                if scenario == 'success':
+                if scenario in ('success', 'legacy_payload'):
                     assert code == 0 and state['phase'] == 'complete', state
                     assert installed['CFBundleVersion'] == '101'
                     assert Path(state['backup']).is_dir()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect or install a disabled GPU Queue service for the current Linux user."""
+"""Inspect or install a disabled Inspire Queue service for the current Linux user."""
 import argparse
 import json
 import os

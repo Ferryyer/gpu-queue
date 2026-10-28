@@ -9,6 +9,7 @@ import plistlib
 import re
 import subprocess
 import tempfile
+import shutil
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSION = re.search(r'^version: (.+)$', (ROOT/'serverbox/pubspec.yaml').read_text(), re.M).group(1)
@@ -48,18 +49,28 @@ def main():
     arch = platform.machine()
     if arch not in ['arm64', 'x86_64']:
         raise ValueError('Unsupported macOS architecture')
-    name = f'GPU-Queue-macos-{arch}-{BUILD}{"-unsigned" if args.allow_unsigned else ""}.dmg'
+    name = f'Inspire-Queue-macos-{arch}-{BUILD}{"-unsigned" if args.allow_unsigned else ""}.dmg'
     target = args.out/name
     if target.exists():
         raise FileExistsError(target)
     with tempfile.TemporaryDirectory(prefix='gpuq-dmg-', dir=args.out) as folder:
         stage = Path(folder)
-        subprocess.run(['ditto', str(args.app), str(stage/'GPU Queue.app')],check=True)
+        subprocess.run(['ditto', str(args.app), str(stage/'Inspire Queue.app')],check=True)
+        # Released 2007 installers look for this exact bundle path. A real,
+        # hidden copy keeps their ditto/signature checks valid after unmount.
+        legacy = stage/'GPU Queue.app'
+        subprocess.run(['ditto', str(args.app), str(legacy)],check=True)
+        # Finder hides it on the image only; no hidden flag follows an old
+        # installer's copy into Applications.
+        (stage/'.hidden').write_text('GPU Queue.app\n')
         (stage/'Applications').symlink_to('/Applications')
-        subprocess.run(['hdiutil','create','-volname','GPU Queue','-srcfolder',str(stage),'-format','UDZO',str(target)],check=True)
+        subprocess.run(['hdiutil','create','-volname','Inspire Queue','-srcfolder',str(stage),'-format','UDZO',str(target)],check=True)
     checksum = hashlib.sha256(target.read_bytes()).hexdigest()
-    (args.out/'SHA256SUMS').write_text(f'{checksum}  {name}\n')
-    metadata.update(artifact=name, sha256=checksum, signedAndAssessed=not args.allow_unsigned, releaseTag=f'v{MARKETING}')
+    legacy_name = name.replace('Inspire-Queue-', 'GPU-Queue-', 1)
+    shutil.copy2(target, args.out/legacy_name)
+    (args.out/'SHA256SUMS').write_text(f'{checksum}  {name}\n{checksum}  {legacy_name}\n')
+    metadata.update(productName='Inspire Queue', artifact=name, legacyArtifact=legacy_name,
+                    sha256=checksum, signedAndAssessed=not args.allow_unsigned, releaseTag=f'v{MARKETING}')
     (args.out/'unified-release.json').write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps(metadata,ensure_ascii=False))
 

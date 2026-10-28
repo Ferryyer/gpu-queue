@@ -13,7 +13,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox mencatat apa yang terjadi saat berjalan agar masalah dapat diperbaiki. Pilih jumlah informasi yang dikirim.';
+      'Inspire Queue mencatat apa yang terjadi saat berjalan agar masalah dapat diperbaiki. Pilih jumlah informasi yang dikirim.';
 
   @override
   String get crashCollectNone => 'Tidak ada';
@@ -41,7 +41,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get crashLastRunFailed =>
-      'ServerBox berhenti secara tak terduga saat terakhir dijalankan.';
+      'Inspire Queue berhenti secara tak terduga saat terakhir dijalankan.';
 
   @override
   String get crashReportTitle => 'Laporan kerusakan';
@@ -895,7 +895,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS tidak mengizinkannya. Sakelarnya ada di Pengaturan › ServerBox › Aktivitas Live dan Pengaturan › Face ID & Kode Sandi › Aktivitas Live.';
+      'iOS tidak mengizinkannya. Sakelarnya ada di Pengaturan › Inspire Queue › Aktivitas Live dan Pengaturan › Face ID & Kode Sandi › Aktivitas Live.';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1111,10 +1111,10 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      'Data ini dibuat dengan versi ServerBox yang lebih baru. Perbarui aplikasi untuk membukanya.';
+      'Data ini dibuat dengan versi Inspire Queue yang lebih baru. Perbarui aplikasi untuk membukanya.';
 
   @override
-  String get shareUnreadable => 'Ini bukan data ServerBox yang valid.';
+  String get shareUnreadable => 'Ini bukan data Inspire Queue yang valid.';
 
   @override
   String get shareVia => 'Bagikan melalui';
@@ -1606,7 +1606,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      'Server ini menggunakan pengelola layanan yang belum didukung ServerBox. Pengelola yang didukung: systemd, procd, dan OpenRC.';
+      'Server ini menggunakan pengelola layanan yang belum didukung Inspire Queue. Pengelola yang didukung: systemd, procd, dan OpenRC.';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1743,11 +1743,11 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'Membiarkan Agent bekerja di mesin yang menjalankan ServerBox. Perintah hanya-baca pun ditinjau';
+      'Membiarkan Agent bekerja di mesin yang menjalankan Inspire Queue. Perintah hanya-baca pun ditinjau';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Membiarkan Agent bekerja lokal, terbatas pada kontainer Linux yang dipasang ServerBox';
+      'Membiarkan Agent bekerja lokal, terbatas pada kontainer Linux yang dipasang Inspire Queue';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -1998,7 +1998,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return 'Data ini ditulis oleh versi ServerBox yang lebih baru (penyimpanan v$stored); versi ini hanya dapat membaca hingga v$supported. Tidak ada yang diubah.';
+    return 'Data ini ditulis oleh versi Inspire Queue yang lebih baru (penyimpanan v$stored); versi ini hanya dapat membaca hingga v$supported. Tidak ada yang diubah.';
   }
 
   @override
@@ -2200,7 +2200,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      'Menjalankan perintah serta membaca atau menulis berkas di server Anda, terhubung ke host lain lewat SSH, dan memakai tindakan ServerBox sendiri.';
+      'Menjalankan perintah serta membaca atau menulis berkas di server Anda, terhubung ke host lain lewat SSH, dan memakai tindakan Inspire Queue sendiri.';
 
   @override
   String get agentTerminalTools => 'Terminal';
@@ -2484,7 +2484,7 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'Tambahkan perangkat yang menjalankan ServerBox sebagai server. Status, proses, layanan, kontainer, terminal, dan berkas berfungsi tanpa SSH atau agen Monitor.';
+      'Tambahkan perangkat yang menjalankan Inspire Queue sebagai server. Status, proses, layanan, kontainer, terminal, dan berkas berfungsi tanpa SSH atau agen Monitor.';
 
   @override
   String get localServerAdd => 'Tambahkan perangkat ini';
@@ -2827,11 +2827,11 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      'Agen Monitor ini lebih lama dari yang didukung versi ServerBox ini. Perbarui agen di server.';
+      'Agen Monitor ini lebih lama dari yang didukung versi Inspire Queue ini. Perbarui agen di server.';
 
   @override
   String get monitorClientTooOld =>
-      'Agen Monitor ini tidak lagi mendukung versi ServerBox ini. Perbarui aplikasi.';
+      'Agen Monitor ini tidak lagi mendukung versi Inspire Queue ini. Perbarui aplikasi.';
 
   @override
   String get alerts => 'Peringatan';
@@ -5961,7 +5961,7 @@ class AppLocalizationsId extends AppLocalizations {
       'CPU, memori, jaringan, dan disk, seperti pada kartu server. Di ponsel, di atas tombol virtual.';
 
   @override
-  String get launchFailedTitle => 'ServerBox tidak dapat dimulai';
+  String get launchFailedTitle => 'Inspire Queue tidak dapat dimulai';
 
   @override
   String get launchFailedBody =>

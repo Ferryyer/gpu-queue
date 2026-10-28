@@ -13,7 +13,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox записує те, що відбувається під час роботи, щоб можна було виправляти проблеми. Виберіть, скільки даних надсилати.';
+      'Inspire Queue записує те, що відбувається під час роботи, щоб можна було виправляти проблеми. Виберіть, скільки даних надсилати.';
 
   @override
   String get crashCollectNone => 'Нічого';
@@ -41,7 +41,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get crashLastRunFailed =>
-      'ServerBox несподівано завершив роботу під час останнього запуску.';
+      'Inspire Queue несподівано завершив роботу під час останнього запуску.';
 
   @override
   String get crashReportTitle => 'Звіт про збій';
@@ -897,7 +897,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS не дозволяє. Перемикачі розташовані в розділах Налаштування › ServerBox › Активності в реальному часі та Налаштування › Face ID і код-пароль › Активності в реальному часі.';
+      'iOS не дозволяє. Перемикачі розташовані в розділах Налаштування › Inspire Queue › Активності в реальному часі та Налаштування › Face ID і код-пароль › Активності в реальному часі.';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1111,11 +1111,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      'Ці дані створено в новішій версії ServerBox. Оновіть застосунок, щоб відкрити їх.';
+      'Ці дані створено в новішій версії Inspire Queue. Оновіть застосунок, щоб відкрити їх.';
 
   @override
   String get shareUnreadable =>
-      'Це неприпустимі дані спільного доступу ServerBox.';
+      'Це неприпустимі дані спільного доступу Inspire Queue.';
 
   @override
   String get shareVia => 'Спосіб надсилання';
@@ -1619,7 +1619,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      'Цей сервер використовує менеджер служб, який ServerBox ще не підтримує. Підтримуються systemd, procd та OpenRC.';
+      'Цей сервер використовує менеджер служб, який Inspire Queue ще не підтримує. Підтримуються systemd, procd та OpenRC.';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1757,11 +1757,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'Дозволяє агенту працювати на машині, де запущено ServerBox. Навіть команди лише для читання перевіряються';
+      'Дозволяє агенту працювати на машині, де запущено Inspire Queue. Навіть команди лише для читання перевіряються';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Дозволяє агенту працювати локально, у межах контейнера Linux, встановленого ServerBox';
+      'Дозволяє агенту працювати локально, у межах контейнера Linux, встановленого Inspire Queue';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -2010,7 +2010,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return 'Їх записала новіша версія ServerBox (версія сховища v$stored); ця версія читає дані до v$supported. Дані не змінювалися.';
+    return 'Їх записала новіша версія Inspire Queue (версія сховища v$stored); ця версія читає дані до v$supported. Дані не змінювалися.';
   }
 
   @override
@@ -2212,7 +2212,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      'Виконувати команди й читати або записувати файли на ваших серверах, підключатися до інших хостів через SSH і використовувати дії самого ServerBox.';
+      'Виконувати команди й читати або записувати файли на ваших серверах, підключатися до інших хостів через SSH і використовувати дії самого Inspire Queue.';
 
   @override
   String get agentTerminalTools => 'Термінал';
@@ -2496,7 +2496,7 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'Додає пристрій, на якому працює ServerBox, як сервер. Стан, процеси, служби, контейнери, термінал і файли працюють без SSH і агента Monitor.';
+      'Додає пристрій, на якому працює Inspire Queue, як сервер. Стан, процеси, служби, контейнери, термінал і файли працюють без SSH і агента Monitor.';
 
   @override
   String get localServerAdd => 'Додати цей пристрій';
@@ -2841,11 +2841,11 @@ class AppLocalizationsUk extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      'Цей агент Monitor старіший, ніж підтримує ця версія ServerBox. Оновіть агент на сервері.';
+      'Цей агент Monitor старіший, ніж підтримує ця версія Inspire Queue. Оновіть агент на сервері.';
 
   @override
   String get monitorClientTooOld =>
-      'Цей агент Monitor більше не підтримує цю версію ServerBox. Оновіть застосунок.';
+      'Цей агент Monitor більше не підтримує цю версію Inspire Queue. Оновіть застосунок.';
 
   @override
   String get alerts => 'Сповіщення';
@@ -6006,7 +6006,7 @@ class AppLocalizationsUk extends AppLocalizations {
       'CPU, пам\'ять, мережа та диск — як на картці сервера. На телефоні над віртуальними клавішами.';
 
   @override
-  String get launchFailedTitle => 'ServerBox не вдалося запустити';
+  String get launchFailedTitle => 'Inspire Queue не вдалося запустити';
 
   @override
   String get launchFailedBody =>

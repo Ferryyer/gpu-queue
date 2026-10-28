@@ -55,7 +55,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         '③ 让 Agent 阅读发布包中的 EMPLOYEE-SETUP.md，在本人 HOME 安装个人服务，完成本人飞书授权。已有服务无需重复安装。\n\n'
         '④ 点击连接诊断，确认服务账号与你的 SSH 用户一致。连接成功后让 Agent 使用 gpuq submit 准备任务；准备完成不会自动占卡。\n\n'
         '⑤ 在任务详情核对资源和版本，点击开始。失败时可复制诊断交给 Agent，修复后提交新版本。\n\n'
-        '在线指南：https://github.com/Ferryyer/gpu-queue/blob/v2.0.2007/docs/EMPLOYEE-SETUP.md',
+        '在线指南：https://github.com/Ferryyer/gpu-queue/blob/v2.0.2008/docs/EMPLOYEE-SETUP.md',
       )),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('知道了'))],
     ),

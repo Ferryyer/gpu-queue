@@ -13,7 +13,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox は問題を修正できるよう、実行中に起きたことを記録します。送信する情報量を選べます。';
+      'Inspire Queue は問題を修正できるよう、実行中に起きたことを記録します。送信する情報量を選べます。';
 
   @override
   String get crashCollectNone => '送信しない';
@@ -39,7 +39,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get privacyPolicy => 'プライバシーポリシー';
 
   @override
-  String get crashLastRunFailed => 'ServerBox は前回の実行中に予期せず終了しました。';
+  String get crashLastRunFailed => 'Inspire Queue は前回の実行中に予期せず終了しました。';
 
   @override
   String get crashReportTitle => 'クラッシュレポート';
@@ -853,7 +853,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS が許可していません。スイッチは「設定 › ServerBox › ライブアクティビティ」と「設定 › Face ID とパスコード › ライブアクティビティ」にあります。';
+      'iOS が許可していません。スイッチは「設定 › Inspire Queue › ライブアクティビティ」と「設定 › Face ID とパスコード › ライブアクティビティ」にあります。';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1050,10 +1050,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get shareTooNew =>
-      'この共有データは新しいバージョンの ServerBox で作成されています。アプリを更新してから開いてください。';
+      'この共有データは新しいバージョンの Inspire Queue で作成されています。アプリを更新してから開いてください。';
 
   @override
-  String get shareUnreadable => '有効な ServerBox の共有データではありません。';
+  String get shareUnreadable => '有効な Inspire Queue の共有データではありません。';
 
   @override
   String get shareVia => '共有方法';
@@ -1636,11 +1636,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get agentLocalExecTip =>
-      'ServerBox が動いているこの端末上で Agent に作業させます。読み取り専用のコマンドも確認が必要です';
+      'Inspire Queue が動いているこの端末上で Agent に作業させます。読み取り専用のコマンドも確認が必要です';
 
   @override
   String get agentLocalExecRootfsTip =>
-      'Agent をローカルで動かします。範囲は ServerBox が入れた Linux コンテナ内に限られます';
+      'Agent をローカルで動かします。範囲は Inspire Queue が入れた Linux コンテナ内に限られます';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -1882,7 +1882,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return 'このデータは新しいバージョンの ServerBox で作成されました（保存形式 v$stored）。このバージョンで読み込めるのは v$supported までです。データは変更されていません。';
+    return 'このデータは新しいバージョンの Inspire Queue で作成されました（保存形式 v$stored）。このバージョンで読み込めるのは v$supported までです。データは変更されていません。';
   }
 
   @override
@@ -2077,7 +2077,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      'サーバーでコマンドを実行し、ファイルを読み書きし、SSH で他のホストに接続し、ServerBox 自体の操作を使います。';
+      'サーバーでコマンドを実行し、ファイルを読み書きし、SSH で他のホストに接続し、Inspire Queue 自体の操作を使います。';
 
   @override
   String get agentTerminalTools => 'ターミナル';
@@ -2351,7 +2351,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      'ServerBox を実行しているデバイスをサーバーとして追加します。ステータス、プロセス、サービス、コンテナ、ターミナル、ファイルは SSH や Monitor エージェントなしで使えます。';
+      'Inspire Queue を実行しているデバイスをサーバーとして追加します。ステータス、プロセス、サービス、コンテナ、ターミナル、ファイルは SSH や Monitor エージェントなしで使えます。';
 
   @override
   String get localServerAdd => 'このデバイスを追加';
@@ -2684,11 +2684,11 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      'この Monitor agent は、このバージョンの ServerBox がサポートするより古いバージョンです。サーバー上の agent を更新してください。';
+      'この Monitor agent は、このバージョンの Inspire Queue がサポートするより古いバージョンです。サーバー上の agent を更新してください。';
 
   @override
   String get monitorClientTooOld =>
-      'この Monitor agent は、このバージョンの ServerBox をサポートしていません。アプリを更新してください。';
+      'この Monitor agent は、このバージョンの Inspire Queue をサポートしていません。アプリを更新してください。';
 
   @override
   String get alerts => 'アラート';
@@ -5695,7 +5695,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'CPU、メモリ、ネットワーク、ディスクをサーバーカードと同じ形式で表示します。スマートフォンでは仮想キーの上に表示されます。';
 
   @override
-  String get launchFailedTitle => 'ServerBox を起動できませんでした';
+  String get launchFailedTitle => 'Inspire Queue を起動できませんでした';
 
   @override
   String get launchFailedBody =>

@@ -1,4 +1,4 @@
-// Read-only monitoring built on GPU Queue telemetry; no ServerBox client required.
+// Read-only monitoring built on Inspire Queue telemetry; no ServerBox client required.
 export function resourceView(resource, now=Date.now()/1000, connected=true){
  const telemetry=resource.telemetry||{}, at=Number(telemetry.at);
  const fresh=connected&&resource.status==='online'&&Number.isFinite(at)&&at>0&&now-at>=-5&&now-at<90;

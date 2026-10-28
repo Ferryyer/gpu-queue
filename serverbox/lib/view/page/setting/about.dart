@@ -50,7 +50,7 @@ final class _AppAboutPageState extends State<_AppAboutPage>
                 ),
                 Btn.elevated(
                   icon: const Icon(Icons.view_list_outlined),
-                  text: 'GPU Queue',
+                  text: 'Inspire Queue',
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const GpuQueuePage())),
                 ),
               ].joinWith(UIs.width13),
@@ -68,10 +68,10 @@ final class _AppAboutPageState extends State<_AppAboutPage>
           SimpleMarkdown(
             data:
                 '''
-#### GPU Queue
+#### Inspire Queue
 [Source](https://github.com/Ferryyer/gpu-queue) · [Upstream ServerBox](https://github.com/lollipopkit/flutter_server_box)
 
-Open GPU Queue through your existing local SSH forward. Tasks start only after you approve them on the task page.
+Open Inspire Queue through your existing local SSH forward. Tasks start only after you approve them on the task page.
 
 ${l10n.madeWithLove('[lollipopkit](${Urls.myGithub})')}
 

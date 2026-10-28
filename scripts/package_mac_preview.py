@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise RuntimeError('This package requires a real Apple Silicon Mac build')
-    app = ROOT / 'serverbox/build/macos-qa/Build/Products/Release/GPU Queue.app'
+    app = ROOT / 'serverbox/build/macos-qa/Build/Products/Release/Inspire Queue.app'
     report = json.loads((ROOT / 'build/native-acceptance/report.json').read_text())
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     arch = platform.machine()
@@ -25,7 +25,7 @@ def main():
     installer_report = json.loads((ROOT / 'build/mac-updater-tests/report.json').read_text())
     scenarios = {item['scenario'] for item in installer_report.get('scenarios', []) if item.get('passed')}
     if not installer_report.get('native') or scenarios != {
-            'success', 'checksum_mismatch', 'wrong_bundle', 'quit_timeout', 'rollback', 'cancelled'}:
+            'success', 'legacy_payload', 'checksum_mismatch', 'wrong_bundle', 'quit_timeout', 'rollback', 'cancelled'}:
         raise RuntimeError('Release requires all real macOS installer scenarios to pass')
     helpers = app / 'Contents/Helpers'
     helpers.mkdir(parents=True, exist_ok=True)
@@ -50,7 +50,7 @@ def main():
     (out / 'native-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     (out / 'installer-report.json').write_text(json.dumps(installer_report, ensure_ascii=False, indent=2) + '\n')
     (out / 'RELEASE-NOTES.md').write_text(
-        f'GPU Queue {version} ({build}) · Mac 员工内部版\n\n源码：`{commit}`\n\n'
+        f'Inspire Queue {version} ({build}) · Mac 员工内部版\n\n源码：`{commit}`\n\n'
         + (ROOT / f'docs/RELEASE-{build}.md').read_text(), encoding='utf-8')
     (out / 'EMPLOYEE-SETUP.md').write_text((ROOT / 'docs/EMPLOYEE-SETUP.md').read_text(), encoding='utf-8')
     (out / 'APPLE-NOTARIZATION.md').write_text((ROOT / 'docs/APPLE-NOTARIZATION.md').read_text(), encoding='utf-8')

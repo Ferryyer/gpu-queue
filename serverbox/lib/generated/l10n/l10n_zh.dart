@@ -13,7 +13,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get crashCollectIntro =>
-      'ServerBox 会记录运行过程中发生的情况，以便修复问题。你可以选择要发送多少信息。';
+      'Inspire Queue 会记录运行过程中发生的情况，以便修复问题。你可以选择要发送多少信息。';
 
   @override
   String get crashCollectNone => '不发送';
@@ -39,7 +39,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get privacyPolicy => '隐私政策';
 
   @override
-  String get crashLastRunFailed => 'ServerBox 上次运行时异常退出。';
+  String get crashLastRunFailed => 'Inspire Queue 上次运行时异常退出。';
 
   @override
   String get crashReportTitle => '崩溃报告';
@@ -838,7 +838,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS 未允许显示。开关位于「设置 › ServerBox › 实时活动」和「设置 › 面容 ID 与密码 › 实时活动」。';
+      'iOS 未允许显示。开关位于「设置 › Inspire Queue › 实时活动」和「设置 › 面容 ID 与密码 › 实时活动」。';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -1032,10 +1032,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shareTooBigForQr => '内容过大，无法生成二维码，请改用文件分享。';
 
   @override
-  String get shareTooNew => '此分享由较新版本的 ServerBox 创建，请升级应用后再打开。';
+  String get shareTooNew => '此分享由较新版本的 Inspire Queue 创建，请升级应用后再打开。';
 
   @override
-  String get shareUnreadable => '这不是有效的 ServerBox 分享内容。';
+  String get shareUnreadable => '这不是有效的 Inspire Queue 分享内容。';
 
   @override
   String get shareVia => '分享方式';
@@ -1484,7 +1484,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      '此服务器使用的服务管理器暂未受 ServerBox 支持。目前支持 systemd、procd 和 OpenRC。';
+      '此服务器使用的服务管理器暂未受 Inspire Queue 支持。目前支持 systemd、procd 和 OpenRC。';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -1603,11 +1603,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentLocalExec => '在本机执行命令';
 
   @override
-  String get agentLocalExecTip => '允许 Agent 在运行 ServerBox 的这台机器上工作。只读的命令也需要审核';
+  String get agentLocalExecTip =>
+      '允许 Agent 在运行 Inspire Queue 的这台机器上工作。只读的命令也需要审核';
 
   @override
   String get agentLocalExecRootfsTip =>
-      '让 Agent 在本机运行，但只能操作 ServerBox 安装的 Linux 容器。';
+      '让 Agent 在本机运行，但只能操作 Inspire Queue 安装的 Linux 容器。';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -1844,7 +1845,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return '这些数据由更新版本的 ServerBox 写入（存储版本 v$stored）。当前版本最高支持 v$supported，数据未被改动。';
+    return '这些数据由更新版本的 Inspire Queue 写入（存储版本 v$stored）。当前版本最高支持 v$supported，数据未被改动。';
   }
 
   @override
@@ -2038,7 +2039,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentServerToolsTip =>
-      '在服务器上执行命令、读写文件，通过 SSH 连接其他主机，并使用 ServerBox 自身的操作。';
+      '在服务器上执行命令、读写文件，通过 SSH 连接其他主机，并使用 Inspire Queue 自身的操作。';
 
   @override
   String get agentTerminalTools => '终端';
@@ -2308,7 +2309,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get localServerIntro =>
-      '将运行 ServerBox 的设备添加为服务器。状态、进程、服务、容器、终端和文件都无需 SSH 或 Monitor agent。';
+      '将运行 Inspire Queue 的设备添加为服务器。状态、进程、服务、容器、终端和文件都无需 SSH 或 Monitor agent。';
 
   @override
   String get localServerAdd => '添加本机';
@@ -2638,11 +2639,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get monitorAgentTooOld =>
-      '此 Monitor agent 版本过旧，当前版本的 ServerBox 已不再支持。请在服务器上更新 agent。';
+      '此 Monitor agent 版本过旧，当前版本的 Inspire Queue 已不再支持。请在服务器上更新 agent。';
 
   @override
   String get monitorClientTooOld =>
-      '此 Monitor agent 已不再支持当前版本的 ServerBox。请更新 App。';
+      '此 Monitor agent 已不再支持当前版本的 Inspire Queue。请更新 App。';
 
   @override
   String get alerts => '告警';
@@ -5594,7 +5595,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get termMetricsBarTip => 'CPU、内存、网络、磁盘，与服务器卡片一致；手机上位于虚拟按键上方。';
 
   @override
-  String get launchFailedTitle => 'ServerBox 无法启动';
+  String get launchFailedTitle => 'Inspire Queue 无法启动';
 
   @override
   String get launchFailedBody => '请复制下方的错误信息，连同日志文件一起在 GitHub issue 中反馈。';
@@ -5620,7 +5621,8 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get crashCollect => '診斷資料';
 
   @override
-  String get crashCollectIntro => 'ServerBox 會記錄執行期間發生的情況，以便修正問題。你可以選擇要傳送多少資料。';
+  String get crashCollectIntro =>
+      'Inspire Queue 會記錄執行期間發生的情況，以便修正問題。你可以選擇要傳送多少資料。';
 
   @override
   String get crashCollectNone => '不傳送';
@@ -5646,7 +5648,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get privacyPolicy => '隱私權政策';
 
   @override
-  String get crashLastRunFailed => 'ServerBox 上次執行時異常結束。';
+  String get crashLastRunFailed => 'Inspire Queue 上次執行時異常結束。';
 
   @override
   String get crashReportTitle => '當機報告';
@@ -6445,7 +6447,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get liveActivitySystemDisabled =>
-      'iOS 未允許顯示。開關位於「設定 › ServerBox › 即時動態」和「設定 › 面容 ID 與密碼 › 即時動態」。';
+      'iOS 未允許顯示。開關位於「設定 › Inspire Queue › 即時動態」和「設定 › 面容 ID 與密碼 › 即時動態」。';
 
   @override
   String get proxyCommandNeedsLinux =>
@@ -6639,10 +6641,10 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get shareTooBigForQr => '內容過大，無法產生 QR Code，請改用檔案分享。';
 
   @override
-  String get shareTooNew => '此分享由較新版本的 ServerBox 建立，請更新 App 後再開啟。';
+  String get shareTooNew => '此分享由較新版本的 Inspire Queue 建立，請更新 App 後再開啟。';
 
   @override
-  String get shareUnreadable => '這不是有效的 ServerBox 分享內容。';
+  String get shareUnreadable => '這不是有效的 Inspire Queue 分享內容。';
 
   @override
   String get shareVia => '分享方式';
@@ -7091,7 +7093,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get serviceManagerUnsupportedTip =>
-      '此伺服器使用的服務管理器尚未受 ServerBox 支援。目前支援 systemd、procd 和 OpenRC。';
+      '此伺服器使用的服務管理器尚未受 Inspire Queue 支援。目前支援 systemd、procd 和 OpenRC。';
 
   @override
   String serviceManagerFmt(String manager) {
@@ -7210,11 +7212,12 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get agentLocalExec => '在本機執行命令';
 
   @override
-  String get agentLocalExecTip => '允許 Agent 在執行 ServerBox 的這台機器上工作。唯讀的命令也需要審核';
+  String get agentLocalExecTip =>
+      '允許 Agent 在執行 Inspire Queue 的這台機器上工作。唯讀的命令也需要審核';
 
   @override
   String get agentLocalExecRootfsTip =>
-      '讓 Agent 在本機執行，但只能操作 ServerBox 安裝的 Linux 容器。';
+      '讓 Agent 在本機執行，但只能操作 Inspire Queue 安裝的 Linux 容器。';
 
   @override
   String macDmgImportedPartly(String path) {
@@ -7450,7 +7453,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String schemaTooNewBody(int stored, int supported) {
-    return '這些資料由較新版本的 ServerBox 寫入（儲存版本 v$stored）。目前版本最高支援 v$supported，資料未被更動。';
+    return '這些資料由較新版本的 Inspire Queue 寫入（儲存版本 v$stored）。目前版本最高支援 v$supported，資料未被更動。';
   }
 
   @override
@@ -7644,7 +7647,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get agentServerToolsTip =>
-      '在伺服器上執行指令、讀寫檔案，透過 SSH 連線其他主機，並使用 ServerBox 本身的操作。';
+      '在伺服器上執行指令、讀寫檔案，透過 SSH 連線其他主機，並使用 Inspire Queue 本身的操作。';
 
   @override
   String get agentTerminalTools => '終端';
@@ -7914,7 +7917,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get localServerIntro =>
-      '將執行 ServerBox 的裝置新增為伺服器。狀態、程序、服務、容器、終端機和檔案都無需 SSH 或 Monitor agent。';
+      '將執行 Inspire Queue 的裝置新增為伺服器。狀態、程序、服務、容器、終端機和檔案都無需 SSH 或 Monitor agent。';
 
   @override
   String get localServerAdd => '新增本機';
@@ -8244,11 +8247,11 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get monitorAgentTooOld =>
-      '此 Monitor agent 版本過舊，目前版本的 ServerBox 已不再支援。請在伺服器上更新 agent。';
+      '此 Monitor agent 版本過舊，目前版本的 Inspire Queue 已不再支援。請在伺服器上更新 agent。';
 
   @override
   String get monitorClientTooOld =>
-      '此 Monitor agent 已不再支援目前版本的 ServerBox。請更新 App。';
+      '此 Monitor agent 已不再支援目前版本的 Inspire Queue。請更新 App。';
 
   @override
   String get alerts => '警示';
@@ -11206,7 +11209,7 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get termMetricsBarTip => 'CPU、記憶體、網路、磁碟，與伺服器卡片一致；手機上位於虛擬按鍵上方。';
 
   @override
-  String get launchFailedTitle => 'ServerBox 無法啟動';
+  String get launchFailedTitle => 'Inspire Queue 無法啟動';
 
   @override
   String get launchFailedBody => '請複製下方的錯誤訊息，連同日誌檔一起在 GitHub issue 中回報。';

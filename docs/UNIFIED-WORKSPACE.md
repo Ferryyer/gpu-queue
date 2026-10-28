@@ -11,7 +11,7 @@
 3. 任务页原生展示列表、筛选、详情、队列排序、步骤日志、结果、检查与事件。手机点击任务进入独立详情路由；返回保留列表上下文。桌面列表与详情并排，完整监控默认折叠。
 4. 执行端同步任务的 `execution.instance_id`、`job_id`、`workspace`、`host`。旧任务服务只有 `request_uuid` 时仍可关联实例，但没有可靠工作目录时文件按钮禁用。
 5. 在任务详情显式关联该实例实际所属的已有 SSH 配置。应用不按主机名、任务名或当前选中服务器猜测目标。关联按「任务服务 ID + 实例 ID」隔离，并校验两端 SSH 的地址、用户、端口、跳板与代理配置摘要；修改连接目标后需要重新关联。
-6. 「服务器 / GPU」「SSH 终端」「工作目录 / SFTP」都在当前应用的导航栈打开。返回回到原任务；服务器详情的 GPU Queue 操作反向列出已明确关联该服务器的任务。结果文件也使用该关联服务器。
+6. 「服务器 / GPU」「SSH 终端」「工作目录 / SFTP」都在当前应用的导航栈打开。返回回到原任务；服务器详情的 Inspire Queue 操作反向列出已明确关联该服务器的任务。结果文件也使用该关联服务器。
 
 任务目录来自执行端，路径仅用于打开对应服务器；终端 `cd` 使用单引号转义，任务内容不能形成 shell 参数。不同实例即使同名也不会自动复用关联。
 
@@ -43,7 +43,7 @@ flutter build macos --release \
   --dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false \
   --dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100
 cd ..
-python3 scripts/package_unified_macos.py --app 'serverbox/build/macos/Build/Products/Release/GPU Queue.app'
+python3 scripts/package_unified_macos.py --app 'serverbox/build/macos/Build/Products/Release/Inspire Queue.app'
 ```
 
 打包器先核验 Info.plist 版本、bundle ID 和可执行文件。正式候选要求 `codesign --verify --deep --strict` 与 `spctl --assess` 成功，再生成 DMG、`SHA256SUMS`、`unified-release.json`。没有真实 Mac app 时不能产出所谓正式包；`--inspect-only` 只检查元数据，`--allow-unsigned` 明确生成不进入更新选择的 QA 包。

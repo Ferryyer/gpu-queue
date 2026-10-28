@@ -107,7 +107,7 @@ final class TrayIcon: NSObject, NSMenuDelegate {
 
         menu.removeAllItems()
 
-        menu.addItem(command(label("open", fallback: "Open ServerBox"), "open"))
+        menu.addItem(command(label("open", fallback: "Open Inspire Queue"), "open"))
         menu.addItem(.separator())
 
         let header = NSMenuItem(title: label("servers", fallback: "Servers"), action: nil, keyEquivalent: "")

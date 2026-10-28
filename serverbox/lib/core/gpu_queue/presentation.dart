@@ -130,7 +130,7 @@ abstract final class QueuePresentation {
 
   /// Deliberately excludes logs, paths, hostnames and credentials.
   static String handoff(Map<String, dynamic> task) =>
-      '请检查 GPU Queue 任务 ${task['id']}（版本 ${version(task)}）。\n'
+      '请检查 Inspire Queue 任务 ${task['id']}（版本 ${version(task)}）。\n'
       '状态：${taskStatus(task['state'])}\n'
       '资源：${compactRequirements(task)}\n'
       '${taskUpdated(task)}\n'

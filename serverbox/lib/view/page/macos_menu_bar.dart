@@ -22,7 +22,7 @@ class MacOSMenuBarManager {
     final homeTabs = Stores.setting.homeTabs.fetch();
     return [
       PlatformMenu(
-        label: 'Server Box',
+        label: 'Inspire Queue',
         menus: [
           PlatformMenuItem(
             label: libL10n.about,

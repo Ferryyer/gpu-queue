@@ -12,7 +12,7 @@ class MacUpdateRelease {
 
   static Uri apiFor(String raw, int build) {
     final uri = Uri.parse(raw);
-    final match = RegExp(r'^/Ferryyer/gpu-queue/releases/download/(v(2\.0\.(\d+)))/GPU-Queue-macos-(arm64|x86_64)-(\d+)-unsigned\.dmg$').firstMatch(uri.path);
+    final match = RegExp(r'^/Ferryyer/gpu-queue/releases/download/(v(2\.0\.(\d+)))/(?:Inspire-Queue|GPU-Queue)-macos-(arm64|x86_64)-(\d+)-unsigned\.dmg$').firstMatch(uri.path);
     if (raw != 'https://github.com${uri.path}' || uri.scheme != 'https' || uri.host != 'github.com' || uri.hasPort ||
         uri.userInfo.isNotEmpty || uri.hasQuery || uri.hasFragment || match == null ||
         int.parse(match.group(3)!) != build || int.parse(match.group(5)!) != build) {

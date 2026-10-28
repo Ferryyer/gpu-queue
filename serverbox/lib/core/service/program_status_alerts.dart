@@ -89,7 +89,7 @@ abstract final class ProgramStatusAlerts {
           ),
           linux: LinuxInitializationSettings(defaultActionName: libL10n.open),
           windows: const WindowsInitializationSettings(
-            appName: 'ServerBox',
+            appName: 'Inspire Queue',
             appUserModelId: 'Lollipopkit.ServerBox',
             guid: '5f3c4d6e-0b8a-4c51-9a2e-7d1f6b0c8e93',
           ),

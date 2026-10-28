@@ -225,7 +225,7 @@ class ForegroundService : Service() {
         val earliestStartTime = sessions.minOfOrNull { it.startWhen } ?: System.currentTimeMillis()
 
         val title = when (count) {
-            0 -> "Server Box"
+            0 -> "Inspire Queue"
             1 -> sessions.first().title
             else -> "SSH sessions: $count active"
         }

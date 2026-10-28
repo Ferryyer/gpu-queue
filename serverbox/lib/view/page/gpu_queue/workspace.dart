@@ -452,11 +452,15 @@ class _QueueSidebarState extends State<QueueSidebar> {
               children: [
                 if (!_collapsed)
                   Expanded(
-                    child: Text(
-                      'GPU Queue',
-                      style: const TextStyle(
-                        fontFamily: 'Georgia',
-                        fontSize: 22,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Inspire Queue',
+                        style: const TextStyle(
+                          fontFamily: 'Georgia',
+                          fontSize: 22,
+                        ),
                       ),
                     ),
                   ),
