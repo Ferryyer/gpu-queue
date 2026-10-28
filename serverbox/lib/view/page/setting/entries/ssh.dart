@@ -19,9 +19,9 @@ extension _SSH on _AppSettingsPageState {
           onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
             builder: (_) => Scaffold(
               appBar: AppBar(title: const Text('导入服务器配置包')),
-              body: const SingleChildScrollView(child: Center(child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 640),
-                child: Padding(padding: EdgeInsets.all(24), child: ClientBundleSetup()),
+              body: SingleChildScrollView(child: Center(child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: const Padding(padding: EdgeInsets.all(24), child: ClientBundleSetup()),
               ))),
             ),
           )),
