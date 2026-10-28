@@ -33,17 +33,10 @@ SSH、任务服务和 GPU 采样分别显示状态。任务服务失败不改变
 
 原生应用更新源改为 `Ferryyer/gpu-queue` Releases，不能回退安装上游 ServerBox/App Store 二进制。候选版本为 `2.0.2000+2000`，匹配现有更新器的发布标签为 `v2.0.2000`。统一包名 `GPU-Queue-macos-<arm64|x86_64>-2000.dmg`，`-unsigned` 仅供 QA，更新器不选取。
 
-完整构建前依照 `serverbox/README.gpu-console.md` 准备指定提交的 IronRDP、Flutter、Xcode、Rust。保留当前用户实际使用的数据/钥匙串定义；下面沿用源码快照已有的 H100 配置，不能换定义后声称保留了原配置：
+完整构建前依照 `serverbox/README.gpu-console.md` 准备指定提交的 IronRDP、Flutter、Xcode、Rust。保留当前用户实际使用的数据/钥匙串定义；构建脚本会沿用既有客户端的存储兼容配置，不能换定义后声称保留了原配置：
 
 ```sh
-cd serverbox
-flutter pub get --enforce-lockfile
-flutter build macos --release \
-  --dart-define=SERVERBOX_DATA_NAME=ServerBoxH100 \
-  --dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false \
-  --dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100
-cd ..
-python3 scripts/package_unified_macos.py --app 'serverbox/build/macos/Build/Products/Release/Inspire Queue.app'
+python3 scripts/native_acceptance.py --stage build
 ```
 
 打包器先核验 Info.plist 版本、bundle ID 和可执行文件。正式候选要求 `codesign --verify --deep --strict` 与 `spctl --assess` 成功，再生成 DMG、`SHA256SUMS`、`unified-release.json`。没有真实 Mac app 时不能产出所谓正式包；`--inspect-only` 只检查元数据，`--allow-unsigned` 明确生成不进入更新选择的 QA 包。

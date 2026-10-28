@@ -4,7 +4,7 @@
 
 包含：
 
-- H100 负载、显存、温度的采集与原生 GPU 卡片适配。
+- GPU 负载、显存、温度的采集与原生卡片适配。
 - GPU 控制台资源注册表对接，申请新实例后更新数据来源，确认销毁后停止显示旧数据。
 - 独立的“账号线程占用”卡片，显示当前账号的线程总数与程序分组。
 - Mac 休眠、唤醒和网络恢复后的专用 SSH 隧道检查与重连。
@@ -52,17 +52,14 @@ MF-12 将 Inspire Queue 任务页原生接入应用：总览、任务、服务�
 
 已安装的本地客户端使用 Flutter 3.47.5、ServerBox 1.0.1816。
 完整 macOS 构建需要 Xcode、Rust 以及上游要求的原生构建环境。
-准备依赖后，从本目录执行：
+准备依赖后，从仓库根目录执行：
 
 ```sh
-flutter pub get --enforce-lockfile
-flutter build macos --release \
-  --dart-define=SERVERBOX_DATA_NAME=ServerBoxH100 \
-  --dart-define=FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false \
-  --dart-define=FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100
+# 从仓库根目录执行，沿用既有数据和凭据兼容配置。
+python3 scripts/native_acceptance.py --stage build
 ```
 
-这些选项隔离应用数据和登录钥匙串服务；如需与原客户端并存，还应在自己的
+构建脚本沿用既有的应用数据和登录钥匙串兼容配置；如需与原客户端并存，还应在自己的
 macOS 构建配置中设置独立的 bundle identifier。发布签名按自己的开发者账号配置。
 这些源码没有附带原 Mac 的签名身份、私钥、客户端数据库或连接配置。
 

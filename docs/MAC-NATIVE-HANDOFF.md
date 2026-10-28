@@ -49,9 +49,9 @@ python3 scripts/native_acceptance.py --stage build
 
 QA 构建先 `flutter build macos --config-only --release` 写配置，再以本机架构运行 Xcode build，命令行禁用签名（`CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM=`），避免使用源码中上游开发者团队。没有修改项目团队身份或 bundle ID。候选 app 位置：
 
-`serverbox/build/macos-qa/Build/Products/Release/GPU Queue.app`
+`serverbox/build/macos-qa/Build/Products/Release/Inspire Queue.app`
 
-保留源码现有的 `SERVERBOX_DATA_NAME=ServerBoxH100`、`FL_LIB_MACOS_DATA_PROTECTION_KEYCHAIN=false`、`FL_LIB_MACOS_SECURE_ACCOUNT=local.ferry.serverbox.h100`。不要改 bundle ID 或钥匙串定义后宣称旧配置保留。首次验收在专门的 macOS 测试用户执行，保留已有安装与钥匙串；完成隔离验收后再在原用户下验证兼容性。
+沿用原生构建脚本中的既有数据目录和钥匙串兼容配置。不要改 bundle ID 或钥匙串定义后宣称旧配置保留。首次验收在专门的 macOS 测试用户执行，保留已有安装与钥匙串；完成隔离验收后再在原用户下验证兼容性。
 
 成功与否以对应源码提交的 Mac Actions 报告/日志为准。Mac 上打开 QA app 前用 `lipo -archs` 检查 `Contents/MacOS` 与框架架构，并查看 Info.plist 的 `2.0.2001 / 2001`。本地 QA app 没有 Developer ID 签名，不能当作稳定自动更新候选。
 

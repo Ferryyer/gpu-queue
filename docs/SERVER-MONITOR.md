@@ -1,6 +1,6 @@
-## GPU Queue 与 ServerBox 融合
+## Inspire Queue 与 ServerBox 融合
 
-基线为 GPU Queue `main` 的 `77255d9`；导入 `codex/serverbox-h100` 的 `05c7015e29a58e3046be72871afadee12701fcda` 中完整 `serverbox/`，保留其源码、依赖、来源清单和 AGPL-3.0 许可证。
+基线为 Inspire Queue `main` 的 `77255d9`；导入来源提交 `05c7015e29a58e3046be72871afadee12701fcda` 中完整 `serverbox/`，保留其源码、依赖、来源清单和 AGPL-3.0 许可证。
 
 网页沿用暖纸色、衬线标题和陶土色按钮，实现逐实例生命周期与逐卡利用率/显存/温度、90 秒过期判断、当前页面最近 30 分钟趋势、JSON 导出。GiB 由 MiB / 1024 换算。趋势按实际采样时间去重，不把网页轮询当新采样。关闭、未知、过期或明显未来时间的实时指标均隐藏。
 
