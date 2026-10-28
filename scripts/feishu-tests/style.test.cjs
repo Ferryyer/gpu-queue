@@ -82,6 +82,7 @@ test('only the browser recommendation is collapsed, including its empty outer sh
   const banner = '<section id="browser-banner"><div><span>想要更好的飞书网页版体验？</span><span>试试这些浏览器吧</span></div><button aria-label="关闭"><svg></svg></button></section>';
   const p = page('/next/task/my-tasks', banner + '<div role="alert">网络中断，请重试</div>' + fixture);
   const login = page('/accounts/login', banner);
+  const early = page('/next/task/my-tasks', '<div id="root-web-framework-application"><section class="appLayout">' + banner + '</section></div>');
   try {
     assert(p.document.querySelector('#browser-banner').hasAttribute('data-inspire-browser-tip'));
     assert(!p.document.querySelector('[role=alert]').hasAttribute('data-inspire-browser-tip'));
@@ -95,7 +96,10 @@ test('only the browser recommendation is collapsed, including its empty outer sh
     p.document.body.insertAdjacentHTML('afterbegin', banner); p.tick();
     assert(p.document.querySelector('#browser-banner').hasAttribute('data-inspire-browser-tip'));
     assert(!login.document.querySelector('#browser-banner').hasAttribute('data-inspire-browser-tip'));
+    assert(!early.document.querySelector('.appLayout').hasAttribute('data-inspire-browser-tip'));
+    assert(!early.document.querySelector('#root-web-framework-application').hasAttribute('data-inspire-browser-tip'));
+    assert(early.document.querySelector('#browser-banner').hasAttribute('data-inspire-browser-tip'));
     p.window.history.pushState({}, '', '/next/messenger'); p.tick();
     assert(!p.document.documentElement.hasAttribute('data-inspire-task-page'));
-  } finally { p.close(); login.close(); }
+  } finally { p.close(); login.close(); early.close(); }
 });

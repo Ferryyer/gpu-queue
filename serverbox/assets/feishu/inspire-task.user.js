@@ -114,6 +114,7 @@
   function closeNav() { open = false; sync(); }
   function hideBrowserSuggestion() {
     if (!document.body) return;
+    const shell = 'body, main, [id^="root"], .appLayout, .messagesLayout, .appLayout-content, .larklet-extension, .larklet-extension-component';
     // Only the product's browser recommendation, never task text or other alerts.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
       acceptNode(node) {
@@ -131,9 +132,10 @@
       let banner = node;
       for (let depth = 0; banner && depth < 5; depth++, banner = banner.parentElement) {
         const text = banner.textContent.trim();
-        if (text.length > 180 || banner.querySelector('#root-todo')) break;
+        if (text.length > 180 || banner.matches(shell) || banner.querySelector('#root-todo')) break;
         if (text.includes('试试这些浏览器吧')) {
           while (banner.parentElement && banner.parentElement !== document.body &&
+                 !banner.parentElement.matches(shell) &&
                  !banner.parentElement.querySelector('#root-todo') &&
                  banner.parentElement.textContent.trim() === text) banner = banner.parentElement;
           banner.setAttribute('data-inspire-browser-tip', '');
