@@ -81,6 +81,7 @@ class _ClientBundleSetupState extends ConsumerState<ClientBundleSetup> {
         s.ssh?.port == int.parse(bundle.cpu['port']!) && s.ssh?.user == bundle.username);
       if (duplicates.isNotEmpty) throw const FormatException('这个账号的服务器已经存在，请到“服务器”中打开；原连接未修改。');
       installed = await InstalledSshBundle.create(bundle, key, Directory('${Paths.doc}/ssh-client-bundles'));
+      final proxy = await installed.resolveGateway(bundle, key);
       id = ShortId.generate();
       final hostKey = bundle.hostKeys['markflow-member-cpu']!;
       final known = Map<String, String>.from(Stores.setting.sshKnownHostFingerprints.fetch());
@@ -89,7 +90,7 @@ class _ClientBundleSetupState extends ConsumerState<ClientBundleSetup> {
       Stores.setting.sshKnownHostFingerprints.putSync(known);
       final server = Spi(id: id, name: '${bundle.username} · CPU', ssh: SshCredential(
         ip: bundle.cpu['hostname']!, port: int.parse(bundle.cpu['port']!), user: bundle.username,
-        keyPath: key, proxyCommand: SshClientBundle.gatewayCommand(installed.configPath),
+        keyPath: key, proxyCommand: proxy,
       ));
       if (!mounted) { throw const FormatException('导入已取消，请重新打开配置页'); }
       await ref.read(serversProvider.notifier).addServer(server);

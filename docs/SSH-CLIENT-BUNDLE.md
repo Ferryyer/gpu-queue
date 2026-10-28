@@ -8,7 +8,7 @@ Mac 首次打开 Inspire Queue 时，选择或拖入管理员发放的 `client.z
 
 ## 支持的包格式
 
-支持 ZIP 根目录或 `client/` 下的四个文件：`config.template`、`username.txt`、`member.pub`、`known_hosts`。模板为 `markflow-gateway` 和 `markflow-cpu` 两个 Host，使用 `@KEY@`、`@KNOWN@`、`@CONFIG@`、`@USER@` 占位符，CPU 通过 `ssh -F "@CONFIG@" -T markflow-gateway` 连接。主机别名分别为 `markflow-member-gateway`、`markflow-member-cpu`，严格校验主机密钥。
+支持 ZIP 根目录或 `client/` 下的四个文件：`config.template`、`username.txt`、`member.pub`、`known_hosts`。模板为 `markflow-gateway` 和 `markflow-cpu` 两个 Host，使用 `@KEY@`、`@KNOWN@`、`@CONFIG@`、`@USER@` 占位符，CPU 通过 `ssh -F "@CONFIG@" -T markflow-gateway` 连接。保存前会只读检测网关的 SSH 握手：优先使用模板的强制网关，旧网关没有返回 SSH 握手时，再尝试固定的公司网关入口。两条路径都保持严格主机密钥校验；两者都失败则不保存连接。主机别名分别为 `markflow-member-gateway`、`markflow-member-cpu`，严格校验主机密钥。
 
 应用不会执行包内的 Python、PowerShell 或其他脚本，也不会覆盖 `~/.ssh/config`。生成的配置与 known_hosts 放在应用文档目录下的独立目录中，目录权限 0700、文件权限 0600；不复制私钥。只接受已支持的模板指令、两项主机指纹和匹配公钥的私钥。包大小、条目数、解压大小、路径与校验和均有验证。
 

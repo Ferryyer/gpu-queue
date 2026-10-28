@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:server_box/core/ssh_bundle/bundle.dart';
@@ -27,6 +29,41 @@ class InstalledSshBundle {
     } catch (_) {
       await directory.delete(recursive: true);
       rethrow;
+    }
+  }
+
+  /// Check only the SSH greeting, without authenticating to the CPU or
+  /// running a CPU command. Forced gateways are tried first; the fixed legacy
+  /// entry is used only when the original template does not produce SSH.
+  Future<String> resolveGateway(SshClientBundle bundle, String keyPath) async {
+    for (final explicit in [false, true]) {
+      if (!await _hasSshGreeting(bundle, explicit)) continue;
+      await File(configPath).writeAsString(bundle.config(key: keyPath,
+        known: '${directory.path}/known_hosts', config: configPath,
+        explicitGateway: explicit), flush: true);
+      return bundle.command(configPath, explicitGateway: explicit);
+    }
+    throw const FormatException('无法接通网关。请检查网络；加密私钥请先在 Mac 钥匙串或 ssh-agent 中解锁，然后重试。');
+  }
+
+  Future<bool> _hasSshGreeting(SshClientBundle bundle, bool explicit) async {
+    final process = await Process.start('/usr/bin/ssh', ['-F', configPath, '-T',
+      'markflow-gateway', if (explicit) ...bundle.gatewayEntry()]);
+    final stderr = process.stderr.drain<void>();
+    var received = '';
+    try {
+      await process.stdout.transform(utf8.decoder).firstWhere((chunk) {
+        received += chunk;
+        if (received.length > 8192) throw const FormatException('网关响应无效');
+        return RegExp(r'(^|\n)SSH-2\.0-').hasMatch(received);
+      }).timeout(const Duration(seconds: 8));
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      process.kill(ProcessSignal.sigkill);
+      await process.exitCode;
+      await stderr;
     }
   }
 

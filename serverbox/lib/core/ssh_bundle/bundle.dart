@@ -184,7 +184,7 @@ class SshClientBundle {
     return null;
   }
 
-  String config({required String key, required String known, required String config}) {
+  String config({required String key, required String known, required String config, bool explicitGateway = false}) {
     String quote(String value) {
       if (value.contains(RegExp(r'[\r\n\x00]'))) throw const FormatException('配置路径含非法字符');
       return '"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%')}"';
@@ -193,10 +193,22 @@ class SshClientBundle {
       'Host $alias\n  HostName ${values['hostname']}\n  Port ${values['port']}\n  User $user\n'
       '  HostKeyAlias ${values['hostkeyalias']}\n  IdentityFile ${quote(key)}\n'
       '  IdentitiesOnly yes\n  UserKnownHostsFile ${quote(known)}\n  StrictHostKeyChecking yes\n'
-      '  ForwardAgent no\n  RequestTTY no\n  ServerAliveInterval 30\n';
+      '  ForwardAgent no\n  RequestTTY no\n  BatchMode yes\n  ConnectTimeout 10\n  ServerAliveInterval 30\n';
     return '${host('markflow-gateway', gateway, gateway['user']!)}\n'
-      '${host('markflow-cpu', cpu, username)}  ProxyCommand ${gatewayCommand(config)}\n';
+      '${host('markflow-cpu', cpu, username)}  ProxyCommand ${command(config, explicitGateway: explicitGateway)}\n';
   }
+
+  /// Older company gateways require this fixed entry point. Bundle text is
+  /// never treated as an arbitrary command; both account names were validated.
+  List<String> gatewayEntry() {
+    final home = '/home/${gateway['user']}';
+    final root = '$home/markflow-members-gateway';
+    return ['$home/.local/share/markflow-inspire/venv/bin/python', '-I', '-B',
+      '$root/gateway.py', '--root', root, 'entry', '--username', username];
+  }
+
+  String command(String config, {bool explicitGateway = false}) =>
+    '${gatewayCommand(config)}${explicitGateway ? ' ${gatewayEntry().map(shellQuote).join(' ')}' : ''}';
 
   static String gatewayCommand(String config) => '/usr/bin/ssh -F ${shellQuote(config.replaceAll('%', '%%'))} -T markflow-gateway';
   static String shellQuote(String value) => "'${value.replaceAll("'", "'\\''")}'";

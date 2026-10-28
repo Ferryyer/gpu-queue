@@ -106,6 +106,17 @@ void main() {
     expect(config, isNot(contains('@USER@')));
     expect(() => SshClientBundle.parse(zip()).config(key: '/tmp/\nbad', known: '/tmp/k', config: '/tmp/c'), throwsFormatException);
   });
+  test('legacy gateway entry uses validated accounts and never copied bundle commands', () {
+    final bundle = SshClientBundle.parse(zip());
+    final command = bundle.command('/tmp/config', explicitGateway: true);
+    expect(command, contains("'/home/gatewayuser/markflow-members-gateway/gateway.py'"));
+    expect(command, contains("'entry' '--username' 'testuser'"));
+    expect(bundle.command('/tmp/config'), isNot(contains('gateway.py')));
+    final config = bundle.config(key: '/tmp/key', known: '/tmp/known', config: '/tmp/config', explicitGateway: true);
+    expect(config, contains('BatchMode yes'));
+    expect(config, contains('ConnectTimeout 10'));
+    expect(config, contains('gateway.py'));
+  });
   test('finds a matching key without following symlinks or reading large files', () async {
     final directory = await Directory.systemTemp.createTemp('bundle-match-');
     addTearDown(() => directory.delete(recursive: true));
