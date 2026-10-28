@@ -249,7 +249,7 @@ bool TrayIcon::AddIcon() {
   icon_data_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   icon_data_.uCallbackMessage = kCallbackMessage;
   icon_data_.hIcon = icon_;
-  wcscpy_s(icon_data_.szTip, L"ServerBox");
+  wcscpy_s(icon_data_.szTip, L"Inspire Queue");
   if (!Shell_NotifyIconW(NIM_ADD, &icon_data_)) return false;
 
   icon_added_ = true;
@@ -325,7 +325,7 @@ void TrayIcon::Update(const flutter::EncodableMap& payload) {
     std::wstring label = Widen(GetString(*labels, key));
     return label.empty() ? std::wstring(fallback) : label;
   };
-  const std::wstring open_label = label_or("open", L"Open ServerBox");
+  const std::wstring open_label = label_or("open", L"Open Inspire Queue");
   const std::wstring servers_label = label_or("servers", L"Servers");
   const std::wstring empty_label = label_or("empty", L"Empty");
   const std::wstring settings_label = label_or("settings", L"Settings");

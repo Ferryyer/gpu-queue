@@ -149,7 +149,7 @@ void Update(FlValue* payload) {
         "serverbox", "app_icon", APP_INDICATOR_CATEGORY_APPLICATION_STATUS,
         icon_dir);
     app_indicator_set_status(g_indicator, APP_INDICATOR_STATUS_ACTIVE);
-    app_indicator_set_title(g_indicator, "ServerBox");
+    app_indicator_set_title(g_indicator, "Inspire Queue");
   }
 
   // Rebuilt whole: dbusmenu has no notion of editing one item, and the Dart
@@ -161,7 +161,7 @@ void Update(FlValue* payload) {
 
   gtk_menu_shell_append(
       GTK_MENU_SHELL(g_menu),
-      MakeCommand(LookupStringOr(labels, "open", "Open ServerBox"), "open"));
+      MakeCommand(LookupStringOr(labels, "open", "Open Inspire Queue"), "open"));
   gtk_menu_shell_append(GTK_MENU_SHELL(g_menu), gtk_separator_menu_item_new());
 
   GtkWidget* header = gtk_menu_item_new_with_label(
