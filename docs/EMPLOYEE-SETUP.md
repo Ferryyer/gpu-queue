@@ -17,7 +17,7 @@
 
 ```sh
 mkdir -p ~/code
-git clone --branch v2.0.2008 --depth 1 https://github.com/Ferryyer/gpu-queue.git ~/code/gpu-queue
+git clone --branch v2.0.2012 --depth 1 https://github.com/Ferryyer/gpu-queue.git ~/code/gpu-queue
 cd ~/code/gpu-queue
 ```
 

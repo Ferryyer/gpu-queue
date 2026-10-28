@@ -16,13 +16,11 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel> {
   CalendarReading? _reading;
   String? _error;
   bool _loading = false;
-  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     unawaited(_refresh());
-    _timer = Timer.periodic(const Duration(minutes: 1), (_) => _refresh());
   }
 
   Future<void> _refresh() async {
@@ -45,9 +43,6 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel> {
       if (mounted) setState(() => _loading = false);
     }
   }
-
-  @override
-  void dispose() { _timer?.cancel(); super.dispose(); }
 
   void _expand({bool notes = false}) {
     final reading = _reading;

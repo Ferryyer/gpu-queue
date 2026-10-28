@@ -73,7 +73,7 @@ final class _AppAboutPageState extends State<_AppAboutPage>
 
 Open Inspire Queue through your existing local SSH forward. Tasks start only after you approve them on the task page.
 
-${l10n.madeWithLove('[lollipopkit](${Urls.myGithub})')}
+${l10n.madeWithLove('[Ferryyer](https://github.com/Ferryyer)')}
 
 #### Map data
 IP geolocation by [DB-IP](https://db-ip.com), used under
@@ -85,10 +85,7 @@ in the public domain. Named as a source, not as an endorsement — the project
 asks that none be implied.
 
 #### Contributors
-${GithubIds.contributors.map((e) => e.prsMarkdownLink).join(' ')}
-
-#### Participants
-${GithubIds.participants.map((e) => e.issuesMarkdownLink).join(' ')}
+[Ferryyer](https://github.com/Ferryyer)
 ''',
           ).paddingAll(13).cardx,
         ],

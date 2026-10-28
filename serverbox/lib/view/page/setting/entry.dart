@@ -36,7 +36,6 @@ import 'package:server_box/data/provider/app/keybindings.dart';
 import 'package:server_box/data/provider/server/all.dart';
 import 'package:server_box/data/res/build_data.dart';
 import 'package:server_box/data/res/default.dart';
-import 'package:server_box/data/res/github_id.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/data/res/terminal.dart';
 import 'package:server_box/data/res/url.dart';
