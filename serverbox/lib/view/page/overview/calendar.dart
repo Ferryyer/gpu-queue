@@ -81,10 +81,6 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel> {
         Expanded(child: Text('单向历', style: Theme.of(context).textTheme.titleLarge)),
         IconButton(tooltip: '刷新桌面日历', onPressed: _loading ? null : _refresh, icon: const Icon(Icons.refresh, size: 20)),
       ])),
-      Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(
-        reading == null ? '每天一页，留一点阅读时间' : reading.updatedToday(DateTime.now())
-          ? '今日文件已更新 · 日期以图面为准' : '上次更新 ${CalendarReading.day(reading.modified)} · 等待今日文件',
-        style: Theme.of(context).textTheme.bodySmall)),
       if (_error != null) Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: Theme.of(context).textTheme.bodySmall)),
       const SizedBox(height: 8),
       Expanded(child: reading == null
