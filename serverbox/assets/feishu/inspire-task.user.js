@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Inspire Queue · 飞书任务
 // @namespace    local.feishu.task
-// @version      2.0.1
+// @version      2.0.2
 // @description  隐藏全局导航，暖白与陶土色主题，小窗口可展开任务导航。
 // @match        https://uqyv5nolng8.feishu.cn/*
 // @grant        GM_getValue
@@ -83,6 +83,10 @@
     }
     html[${attribute}] [data-inspire-task-layout] { position: relative !important; }
     html[${attribute}] [data-inspire-task-nav] { background: var(--iq-nav) !important; }
+    html[${attribute}] [data-inspire-task-nav] a:hover { background: var(--iq-hover) !important; }
+    html[${attribute}] [data-inspire-task-nav] a[aria-current="page"] {
+      background: var(--iq-selected) !important; color: var(--iq-accent) !important;
+    }
     html[${attribute}] [data-inspire-task-main] { min-width: 0 !important; flex: 1 1 0 !important; }
     html[${attribute}] #root-todo button { border-radius: 7px; }
     html[${attribute}] #root-todo a:focus-visible,
