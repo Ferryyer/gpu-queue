@@ -1,8 +1,10 @@
-# GPU Queue
+# Inspire Queue
+
+原名 GPU Queue。应用与网页统一更名，原有任务、SSH 配置和更新地址继续兼容。
 
 ## 统一桌面应用
 
-[下载最新 GPU Queue Mac 版本](https://github.com/Ferryyer/gpu-queue/releases/latest) · [完整发布记录与校验和](https://github.com/Ferryyer/gpu-queue/releases)
+[下载最新 Inspire Queue Mac 版本](https://github.com/Ferryyer/gpu-queue/releases/latest) · [完整发布记录与校验和](https://github.com/Ferryyer/gpu-queue/releases)
 
 适用 Apple Silicon、macOS 13+。在 Release 页面下载 DMG 和 SHA256SUMS，退出旧版后拖入 Applications。统一应用采用手动覆盖安装；旧桌面小组件的 ZIP 下载和更新入口继续保留。客户端安装不会替换服务器调度服务，版本源码以相应 Release 标签为准。
 
