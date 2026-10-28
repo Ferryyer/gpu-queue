@@ -8,7 +8,9 @@ import 'package:url_launcher/url_launcher.dart';
 const feishuTaskUrl = 'https://uqyv5nolng8.feishu.cn/next/task/my-tasks';
 
 class FeishuTaskPage extends StatefulWidget {
-  const FeishuTaskPage({super.key});
+  const FeishuTaskPage({super.key, this.embedded = false, this.onExpand});
+  final bool embedded;
+  final VoidCallback? onExpand;
   @override
   State<FeishuTaskPage> createState() => _FeishuTaskPageState();
 }
@@ -19,6 +21,12 @@ class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAlive
   bool _loading = true, _back = false, _styled = true, _hint = true;
   bool? _dark;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _hint = !widget.embedded;
+  }
 
   @override
   bool get wantKeepAlive => true;
@@ -86,11 +94,13 @@ class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAlive
           Expanded(child: Text('飞书任务', maxLines: 1, overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.titleLarge)),
           if (supported) ...[
-            IconButton(tooltip: '后退', onPressed: _back ? () => _command('back') : null,
+            if (!widget.embedded) IconButton(tooltip: '后退', onPressed: _back ? () => _command('back') : null,
               icon: const Icon(Icons.arrow_back)),
             IconButton(tooltip: '刷新', onPressed: () => _command('reload'), icon: const Icon(Icons.refresh)),
           ],
           IconButton(tooltip: '在浏览器打开', onPressed: _openBrowser, icon: const Icon(Icons.open_in_new)),
+          if (widget.onExpand != null) IconButton(tooltip: '打开完整飞书任务页',
+            onPressed: widget.onExpand, icon: const Icon(Icons.open_in_full)),
           if (supported) PopupMenuButton<String>(
             tooltip: '页面选项',
             onSelected: (value) {

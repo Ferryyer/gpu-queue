@@ -3,5 +3,5 @@
 
 abstract class BuildData {
   static const String name = "Inspire Queue";
-  static const int build = 2009;
+  static const int build = 2010;
 }

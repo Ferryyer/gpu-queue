@@ -10,6 +10,7 @@ import 'package:server_box/view/page/agent/agent.dart';
 import 'package:server_box/view/page/benchmark/tab.dart';
 import 'package:server_box/view/page/feishu/page.dart';
 import 'package:server_box/view/page/gpu_queue/page.dart';
+import 'package:server_box/view/page/overview/page.dart';
 import 'package:server_box/view/page/remote_desktop/tab.dart';
 import 'package:server_box/view/page/server/tab/tab.dart';
 import 'package:server_box/view/page/snippet/list.dart';
@@ -24,7 +25,7 @@ import 'package:server_box/view/widget/nav_rail.dart';
 extension AppTabViewX on AppTab {
   Widget get page {
     return switch (this) {
-      AppTab.overview => const GpuQueuePage(overview: true),
+      AppTab.overview => const WorkOverviewPage(),
       AppTab.tasks => const GpuQueuePage(),
       AppTab.feishu => const FeishuTaskPage(),
       AppTab.server => const ServerPage(),
