@@ -15,10 +15,12 @@ final class FeishuTaskFactory: NSObject, FlutterPlatformViewFactory {
   }
 }
 
-final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+final class FeishuTaskView: WKWebView, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
   static let home = URL(string: "https://uqyv5nolng8.feishu.cn/next/task/my-tasks")!
   private let channel: FlutterMethodChannel
-  private let web: WKWebView
+  // Flutter must position the WKWebView itself. Moving only an outer NSView
+  // leaves WebKit's window-relative input geometry behind during tab changes.
+  private var web: WKWebView { self }
   private let script: String
   private var enabled: Bool
   private var dark: Bool
@@ -33,13 +35,10 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     channel = FlutterMethodChannel(name: "work.inspirequeue/feishu/\(viewId)", binaryMessenger: messenger)
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .default()
-    web = WKWebView(frame: .zero, configuration: config)
-    super.init(frame: .zero)
+    super.init(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = true
-    web.autoresizingMask = [.width, .height]
-    addSubview(web)
     installScript()
     loadingObservation = web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
       self?.sendState()
@@ -68,7 +67,6 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     web.load(URLRequest(url: Self.home))
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-  override func layout() { super.layout(); web.frame = bounds }
   deinit {
     channel.setMethodCallHandler(nil)
     web.stopLoading()
