@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Inspire Queue · 飞书任务
 // @namespace    local.feishu.task
-// @version      2.0.2
+// @version      2.0.3
 // @description  隐藏全局导航，暖白与陶土色主题，小窗口可展开任务导航。
 // @match        https://uqyv5nolng8.feishu.cn/*
 // @grant        GM_getValue
@@ -92,6 +92,7 @@
     html[${attribute}] #root-todo a:focus-visible,
     html[${attribute}] #root-todo button:focus-visible { outline: 2px solid var(--iq-accent); outline-offset: 2px; }
     #inspire-task-nav-toggle { display: none; }
+    html[data-inspire-task-page] [data-inspire-browser-tip] { display: none !important; }
     @media (max-width: 760px) {
       html[${attribute}][data-inspire-nav-ready] #root-todo { padding-top: 44px !important; }
       html[${attribute}][data-inspire-nav-ready] #inspire-task-nav-toggle {
@@ -111,6 +112,37 @@
   `;
 
   function closeNav() { open = false; sync(); }
+  function hideBrowserSuggestion() {
+    if (!document.body) return;
+    // Only the product's browser recommendation, never task text or other alerts.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(node) {
+        if (node.matches('#root-todo, .appNavbar, script, style, [data-inspire-browser-tip]')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    let node;
+    while ((node = walker.nextNode())) {
+      const ownText = [...node.childNodes].filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent).join('');
+      if (!ownText.includes('想要更好的飞书网页版体验')) continue;
+      let banner = node;
+      for (let depth = 0; banner && depth < 5; depth++, banner = banner.parentElement) {
+        const text = banner.textContent.trim();
+        if (text.length > 180 || banner.querySelector('#root-todo')) break;
+        if (text.includes('试试这些浏览器吧') && banner.querySelector('a')) {
+          while (banner.parentElement && banner.parentElement !== document.body &&
+                 !banner.parentElement.querySelector('#root-todo') &&
+                 banner.parentElement.textContent.trim() === text) banner = banner.parentElement;
+          banner.setAttribute('data-inspire-browser-tip', '');
+          window.dispatchEvent(new Event('resize'));
+          break;
+        }
+      }
+    }
+  }
   function locateNavigation(root) {
     if (nav && root.contains(nav) && button && root.contains(button)) return;
     // Route links identify the navigation without depending on hashed CSS.
@@ -146,7 +178,10 @@
     const html = document.documentElement;
     if (!html) return;
     if (!style.isConnected) html.append(style);
-    const active = enabled && /^\/next\/task(?:\/|$)/.test(location.pathname);
+    const taskPage = /^\/next\/task(?:\/|$)/.test(location.pathname);
+    const active = enabled && taskPage;
+    html.toggleAttribute('data-inspire-task-page', taskPage);
+    if (taskPage) hideBrowserSuggestion();
     const wasActive = html.hasAttribute(attribute);
     html.toggleAttribute(attribute, active);
     html.toggleAttribute('data-inspire-dark', active && dark);

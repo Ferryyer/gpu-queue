@@ -5,6 +5,8 @@ import 'package:server_box/core/gpu_queue/protocol.dart';
 void main() {
   test('only existing queue API paths are sent over SSH', () {
     expect(QueueProtocol.command('/api/state'), contains('python3 -c'));
+    expect(QueueProtocol.command('/api/tasks/cleanup', {'ids': [], 'revision': 0}), contains('python3 -c'));
+    expect(QueueProtocol.command('/api/tasks/GQ-0000000000000001/delete', {'digest': 'a'}), contains('python3 -c'));
     for (final path in [
       '/api/worker/claim',
       '/api/tasks/GQ-0000000000000001/start; rm',

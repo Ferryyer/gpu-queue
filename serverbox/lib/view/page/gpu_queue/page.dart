@@ -14,6 +14,7 @@ import 'package:server_box/data/provider/server/single.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/data/ssh/terminal_source.dart';
 import 'package:server_box/view/page/gpu_queue/resource.dart';
+import 'package:server_box/view/page/gpu_queue/swipe_delete.dart';
 import 'package:server_box/view/page/gpu_queue/workspace.dart';
 import 'package:server_box/view/page/server/detail/view.dart';
 import 'package:server_box/view/page/server/edit/edit.dart';
@@ -37,6 +38,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
   String? _selected;
   String _query = '', _filter = 'all', _sort = 'latest';
   int _detailTab = 0;
+  bool _deleting = false;
   final _search = TextEditingController();
   final _listScroll = ScrollController();
   @override
@@ -297,6 +299,59 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     }
   }
 
+  Future<void> _deleteRecord(QueueSession queue, Map<String, dynamic> task) async {
+    if (_deleting) return;
+    setState(() => _deleting = true);
+    try {
+      await queue.action('/api/tasks/${task['id']}/delete', {'digest': task['digest']});
+      if (mounted && _selected == task['id']) setState(() => _selected = null);
+      _message('已删除任务记录，文件与产物保留');
+    } catch (error) {
+      _message(error);
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
+  Future<void> _cleanup(QueueSession queue) async {
+    final candidates = queue.tasks.where((t) => const ['completed', 'cancelled'].contains(t['state'])).toList();
+    if (candidates.isEmpty || _deleting) return;
+    final ids = candidates.map((t) => t['id'] as String).toList();
+    final identity = queue.identity();
+    var revision = queue.revision;
+    final completed = candidates.where((t) => t['state'] == 'completed').length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('清理 ${ids.length} 个 GPU 任务？'),
+        content: Text('当前任务服务中的 $completed 个已完成任务和 ${ids.length - completed} 个已取消任务将从列表移除，不受搜索筛选影响。\n\n工作目录、日志与产物保留。正在运行和等待中的任务不受影响。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context, rootNavigator: true).pop(false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.of(context, rootNavigator: true).pop(true), child: const Text('确认清理')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _deleting) return;
+    setState(() => _deleting = true);
+    var deleted = 0;
+    try {
+      // Keep each request within the private service's 16 KiB body limit.
+      for (var offset = 0; offset < ids.length; offset += 250) {
+        if (queue.identity() != identity) throw StateError('服务器配置已变化，请重新确认');
+        final batch = ids.skip(offset).take(250).toList();
+        await queue.action('/api/tasks/cleanup', {'ids': batch, 'revision': revision});
+        deleted += batch.length;
+        revision = queue.revision;
+        if (mounted && batch.contains(_selected)) setState(() => _selected = null);
+      }
+      _message('已清理 $deleted 个任务记录，文件与产物保留');
+    } catch (error) {
+      _message('已清理 $deleted 个任务；后续清理已停止：$error');
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   static bool _reorderable(Map<String, dynamic> t) =>
       t['approved_at'] != null &&
       t['claimed_at'] == null &&
@@ -357,7 +412,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         }
         return Scaffold(
           appBar: AppBar(
-            title: const Text('任务'),
+            title: Text(widget.overview ? '总览' : 'GPU 任务'),
             actions: [
               _serverSelector(service, servers),
               const SizedBox(width: 24),
@@ -380,6 +435,10 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
       listenable: queue,
       builder: (context, _) {
         final connected = queue.hasSnapshot && queue.connected && ssh != null && !ssh.isClosed;
+        final deleteSupported = queue.snapshot['capabilities'] is Map &&
+            queue.snapshot['capabilities']['task_delete'] == true;
+        final canDelete = connected && deleteSupported && !queue.acting && !queue.loading && !_deleting;
+        final cleanupCount = queue.tasks.where((t) => const ['completed', 'cancelled'].contains(t['state'])).length;
         final sshAvailable = ssh != null && !ssh.isClosed;
         final fresh = queue.resources.any(
           (r) => QueueTarget.fresh(r, DateTime.now(), connected: connected),
@@ -415,8 +474,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               widget.overview
                   ? '总览'
                   : widget.serverFilter != null
-                  ? '关联任务'
-                  : '任务',
+                  ? '关联 GPU 任务'
+                  : 'GPU 任务',
             ),
             actions: [
               _serverSelector(service, servers),
@@ -654,6 +713,13 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                 '${queue.tasks.where((t) => t['state'] == 'ready').length} 个待开始 · ${queue.tasks.where((t) => QueuePresentation.attentionStates.contains(t['state'])).length} 个需处理',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
+                              if (!widget.overview && widget.serverFilter == null)
+                                IconButton(
+                                  tooltip: !deleteSupported ? '请先更新个人任务服务以启用删除'
+                                      : '清理已完成 / 已取消（$cleanupCount）',
+                                  onPressed: canDelete && cleanupCount > 0 ? () => _cleanup(queue) : null,
+                                  icon: const Icon(Icons.delete_sweep_outlined),
+                                ),
                             ],
                           ),
                           const SizedBox(height: 16),
@@ -724,8 +790,15 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                             itemCount: tasks.length,
                                             itemBuilder: (context, index) {
                                               final current = tasks[index];
-                                              return QueueTaskRow(
+                                              final ended = _ended.contains(current['state']) ||
+                                                  (current['state'] == 'ready' && current['approved_at'] == null && current['claimed_at'] == null);
+                                              return QueueSwipeDelete(
                                                 key: ValueKey(current['id']),
+                                                onDelete: canDelete && ended ? () => _deleteRecord(queue, current) : null,
+                                                disabledReason: !deleteSupported ? '请先更新个人任务服务以启用删除'
+                                                    : !ended ? '请先停止任务并等待服务器确认'
+                                                    : !canDelete ? '请等待任务服务连接并完成同步' : null,
+                                                child: QueueTaskRow(
                                                 task: current,
                                                 selected:
                                                     _selected == current['id'],
@@ -787,6 +860,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                                                   queue,
                                                   servers,
                                                   wide,
+                                                ),
                                                 ),
                                               );
                                             },

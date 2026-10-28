@@ -490,7 +490,7 @@ class _QueueSidebarState extends State<QueueSidebar> {
                   () => widget.onSelect(0),
                 ),
                 item(
-                  '任务',
+                  'GPU 任务',
                   Icons.article_outlined,
                   !widget.settingsOpen && widget.selected == 1,
                   () => widget.onSelect(1),

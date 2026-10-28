@@ -1,9 +1,18 @@
 import 'package:material_ui/material_ui.dart';
 
 /// Three persistent sections, arranged by the space available to the page.
-class OverviewLayout extends StatelessWidget {
+class OverviewLayout extends StatefulWidget {
   const OverviewLayout({super.key, required this.gpu, required this.feishu, required this.calendar});
   final Widget gpu, feishu, calendar;
+
+  @override
+  State<OverviewLayout> createState() => _OverviewLayoutState();
+}
+
+class _OverviewLayoutState extends State<OverviewLayout> {
+  // Reparent the same native WebKit document across breakpoints. Recreating it
+  // during resize loses navigation and can strand an in-flight platform view.
+  final _gpuKey = GlobalKey(), _feishuKey = GlobalKey(), _calendarKey = GlobalKey();
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(builder: (context, box) {
@@ -17,7 +26,9 @@ class OverviewLayout extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: child,
     );
-    final gpuPanel = panel(gpu), feishuPanel = panel(feishu), calendarPanel = panel(calendar);
+    final gpuPanel = panel(KeyedSubtree(key: _gpuKey, child: widget.gpu));
+    final feishuPanel = panel(KeyedSubtree(key: _feishuKey, child: widget.feishu));
+    final calendarPanel = panel(KeyedSubtree(key: _calendarKey, child: widget.calendar));
     return SingleChildScrollView(
       key: const PageStorageKey('overview-scroll'),
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),

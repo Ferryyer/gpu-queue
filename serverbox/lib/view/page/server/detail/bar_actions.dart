@@ -38,7 +38,7 @@ final class ServerPageAction {
     return [
       ServerPageAction._(
         Icons.view_list_outlined,
-        'Inspire Queue',
+        'GPU 任务',
         () => Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => GpuQueuePage(serverFilter: spi.id)),
         ),

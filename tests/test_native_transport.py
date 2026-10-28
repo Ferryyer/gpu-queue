@@ -55,6 +55,20 @@ class NativeTransportTests(unittest.TestCase):
         stopped=self.request('/api/tasks/'+self.id+'/stop',{'digest':self.digest})
         self.assertEqual(stopped['status'],200)
         self.assertEqual(stopped['body']['tasks'][0]['state'],'cancelled')
+    def test_delete_and_cleanup_reach_the_private_service(self):
+        state = self.request('/api/state')['body']
+        self.assertTrue(state['capabilities']['task_delete'])
+        self.assertEqual(self.request('/api/tasks/cleanup', {'ids':[self.id], 'revision':state['revision']})['status'],409)
+        task = self.store.get(self.id)
+        task['public']['state'] = 'completed'
+        self.store.save(task)
+        result = self.request('/api/tasks/cleanup', {'ids':[self.id], 'revision':state['revision']})
+        self.assertEqual(result['status'],200)
+        self.assertEqual(result['body']['tasks'],[])
+        self.assertEqual(self.request('/api/tasks/'+self.id+'/delete',{'digest':'bad'})['status'],409)
+        self.assertEqual(self.request('/api/tasks/'+self.id+'/delete',{'digest':self.digest})['body']['tasks'],[])
+        self.assertIsNotNone(self.store.get(self.id))
+
     def test_unavailable_service_is_not_successful_empty_state(self):
         self.script=self.script.replace(repr(str(self.socket)),repr(str(self.root/'x')))
         result=self.request('/api/state')

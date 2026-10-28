@@ -6,7 +6,7 @@ abstract final class QueueProtocol {
 
   static String command(String path, [Map<String, dynamic>? body]) {
     if (!RegExp(
-      r'^/api/(state|health|queue/reorder|tasks/GQ-[a-f0-9]{16}/(start|stop))$',
+      r'^/api/(state|health|queue/reorder|tasks/cleanup|tasks/GQ-[a-f0-9]{16}/(start|stop|delete))$',
     ).hasMatch(path)) {
       throw ArgumentError.value(path, 'path');
     }

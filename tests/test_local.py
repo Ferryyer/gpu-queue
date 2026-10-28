@@ -126,6 +126,10 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(status,200)
             stopped=next(t for t in json.loads(body)['tasks'] if t['id']==self.ids[0])
             self.assertEqual(stopped['state'],'cancelled')
+            delete_path='/api/tasks/'+self.ids[0]+'/delete'
+            self.assertEqual(request('POST',delete_path,{'digest':'0'*64},forbidden)[0],403)
+            self.assertEqual(request('POST',delete_path,{'digest':'0'*64},headers)[0],200)
+            self.assertNotIn(self.ids[0],[t['id'] for t in self.control.state()['tasks']])
         finally:
             child.terminate();child.wait(timeout=5)
 

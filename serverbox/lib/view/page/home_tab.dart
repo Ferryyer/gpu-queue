@@ -54,7 +54,7 @@ extension AppTabViewX on AppTab {
   String get label {
     return switch (this) {
       AppTab.overview => '总览',
-      AppTab.tasks => '任务',
+      AppTab.tasks => 'GPU 任务',
       AppTab.feishu => '飞书任务',
       AppTab.server => libL10n.server,
       // Not "SSH": a terminal is what this tab holds, and SSH is only where

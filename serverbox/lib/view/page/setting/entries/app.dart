@@ -8,12 +8,12 @@ extension _App on _AppSettingsPageState {
   List<SettingsGroup> _buildApp() {
     return [
       SettingsGroup(libL10n.general, [_buildLocale(), _buildCollapseUI()]),
-      SettingsGroup('任务服务连接', [
+      SettingsGroup('GPU 任务服务连接', [
         SettingsRow(
-          '任务服务与服务器关联',
+          'GPU 任务服务与服务器关联',
           () => ListTile(
             leading: const Icon(Icons.dns_outlined),
-            title: const Text('任务服务与服务器关联'),
+            title: const Text('GPU 任务服务与服务器关联'),
             subtitle: const Text('复用服务器列表的 SSH 配置与安全存储'),
             onTap: () => Navigator.of(
               context,

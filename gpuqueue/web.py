@@ -72,6 +72,11 @@ class Handler(BaseHTTPRequestHandler):
             match = re.fullmatch(r'/api/tasks/(GQ-[a-f0-9]{16})/stop', path)
             if match:
                 return self.reply(self.server.control.stop(match[1], data.get('digest')))
+            match = re.fullmatch(r'/api/tasks/(GQ-[a-f0-9]{16})/delete', path)
+            if match:
+                return self.reply(self.server.control.delete(match[1], data.get('digest')))
+            if path == '/api/tasks/cleanup':
+                return self.reply(self.server.control.cleanup(data.get('ids'), data.get('revision')))
             if path == '/api/queue/reorder':
                 return self.reply(self.server.control.reorder(data.get('ids'), data.get('revision')))
             return self.reply({'error':'入口不存在'}, 404)

@@ -1,7 +1,9 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/utils/gpu_queue_theme.dart';
+import 'package:server_box/view/page/gpu_queue/swipe_delete.dart';
 import 'package:server_box/view/page/gpu_queue/workspace.dart';
 
 void main() {
@@ -37,6 +39,55 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('swipe reveals pale red delete but never deletes without a click', (tester) async {
+    for (final dark in [false, true]) {
+      var deleted = 0, opened = 0;
+      await show(tester, Align(alignment: Alignment.topCenter, child: QueueSwipeDelete(
+        key: ValueKey(dark),
+        onDelete: () => deleted++,
+        child: QueueTaskRow(task: task, selected: false, onTap: () => opened++),
+      )), size: const Size(390, 600), dark: dark);
+      final button = find.widgetWithText(TextButton, '删除');
+      expect(button.hitTestable(), findsNothing);
+      await tester.drag(find.byType(QueueTaskRow), const Offset(-350, 0));
+      await tester.pumpAndSettle();
+      expect(deleted, 0);
+      expect(button.hitTestable(), findsOneWidget);
+      await tester.tap(button);
+      expect(deleted, 1);
+      expect(opened, 0);
+      await tester.drag(find.byType(QueueSwipeDelete), const Offset(120, 0));
+      await tester.pumpAndSettle();
+      expect(button.hitTestable(), findsNothing);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  testWidgets('trackpad horizontal scroll reveals deletion; vertical scroll does not', (tester) async {
+    await show(tester, Align(alignment: Alignment.topCenter, child: QueueSwipeDelete(
+      onDelete: () {}, child: QueueTaskRow(task: task, selected: false, onTap: () {}),
+    )), size: const Size(390, 600));
+    final point = tester.getCenter(find.byType(QueueTaskRow));
+    final button = find.widgetWithText(TextButton, '删除');
+    await tester.sendEventToBinding(PointerScrollEvent(position: point, scrollDelta: const Offset(0, 80)));
+    await tester.pumpAndSettle();
+    expect(button.hitTestable(), findsNothing);
+    await tester.sendEventToBinding(PointerScrollEvent(position: point, scrollDelta: const Offset(12, 0)));
+    await tester.pumpAndSettle();
+    expect(button.hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('a running task can reveal only a disabled delete action', (tester) async {
+    await show(tester, Align(alignment: Alignment.topCenter, child: QueueSwipeDelete(
+      onDelete: null, disabledReason: '请先停止任务并等待服务器确认',
+      child: QueueTaskRow(task: {...task, 'state': 'running'}, selected: false, onTap: () {}),
+    )), size: const Size(390, 600));
+    await tester.drag(find.byType(QueueTaskRow), const Offset(-180, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextButton>(find.widgetWithText(TextButton, '删除')).onPressed, isNull);
+    expect(find.byTooltip('请先停止任务并等待服务器确认'), findsOneWidget);
+  });
 
   testWidgets('employee welcome and overview work with large text on narrow screens', (tester) async {
     for (final dark in [false, true]) {
@@ -173,6 +224,7 @@ void main() {
       expect(destination, 2);
       await tester.tap(find.text('终端'));
       expect(destination, 3);
+      expect(find.text('GPU 任务'), findsOneWidget);
       await tester.tap(find.byTooltip('收起侧栏'));
       await tester.pumpAndSettle();
       expect(tester.getSize(find.byType(QueueSidebar)).width, 64);
@@ -183,7 +235,7 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('展开侧栏'));
       await tester.pumpAndSettle();
-      expect(find.text('任务'), findsOneWidget);
+      expect(find.text('GPU 任务'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );

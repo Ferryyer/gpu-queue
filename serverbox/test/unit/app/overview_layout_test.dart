@@ -44,6 +44,14 @@ void main() {
     await tester.tap(find.byTooltip('打开完整飞书任务页'));
     expect(expanded, isTrue);
     expect(tester.takeException(), isNull);
+    final webState = tester.state(find.byType(AppKitView));
+    for (final width in [900.0, 1600.0, 360.0, 900.0]) {
+      await tester.binding.setSurfaceSize(Size(width, 800));
+      await tester.pump();
+      expect(tester.state(find.byType(AppKitView)), same(webState),
+        reason: 'Resizing must not recreate the authenticated native document');
+      expect(tester.takeException(), isNull);
+    }
     await tester.pumpWidget(const SizedBox());
     await tester.binding.setSurfaceSize(null);
   }, variant: TargetPlatformVariant({TargetPlatform.macOS}));
