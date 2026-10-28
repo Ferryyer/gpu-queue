@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Inspire Queue · 飞书任务
 // @namespace    local.feishu.task
-// @version      2.0.0
+// @version      2.0.1
 // @description  隐藏全局导航，暖白与陶土色主题，小窗口可展开任务导航。
 // @match        https://uqyv5nolng8.feishu.cn/*
 // @grant        GM_getValue
@@ -31,12 +31,14 @@
       --iq-bg: #faf9f6; --iq-panel: #ffffff; --iq-nav: #f0eee8;
       --iq-text: #292722; --iq-muted: #716d65; --iq-line: #e5e1d8;
       --iq-accent: #ae583f; --iq-selected: #f4e8e2; --iq-hover: #eeeae2;
+      --iq-on-accent: #ffffff; --iq-accent-hover: #934a35;
       color-scheme: light;
     }
     html[${attribute}][data-inspire-dark] {
       --iq-bg: #222321; --iq-panel: #292a27; --iq-nav: #1d1e1c;
       --iq-text: #ecece7; --iq-muted: #abada5; --iq-line: #41433c;
       --iq-accent: #de947a; --iq-selected: #42332e; --iq-hover: #343630;
+      --iq-on-accent: #222321; --iq-accent-hover: #ecaa93;
       color-scheme: dark;
     }
     html[${attribute}] .appNavbar { display: none !important; }
@@ -48,18 +50,38 @@
       color: var(--iq-text); position: relative; box-sizing: border-box;
       font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
     }
-    html[${attribute}] #root-todo, html[${attribute}] #root-todo * {
+    html[${attribute}], html[${attribute}] body * {
       --bg-body: var(--iq-bg) !important; --bg-base: var(--iq-nav) !important;
       --bg-float: var(--iq-panel) !important; --bg-float-base: var(--iq-nav) !important;
       --bg-float-overlay: var(--iq-hover) !important; --bg-body-overlay: var(--iq-hover) !important;
+      --bg-content-base: var(--iq-bg) !important; --bg-sub-navigation: var(--iq-nav) !important;
       --text-title: var(--iq-text) !important; --text-caption: var(--iq-muted) !important;
       --text-placeholder: var(--iq-muted) !important; --text-link-normal: var(--iq-accent) !important;
       --primary-fill-default: var(--iq-accent) !important;
       --primary-content-default: var(--iq-accent) !important;
+      --primary-on-primary-fill: var(--iq-on-accent) !important;
+      --primary-fill-hover: var(--iq-accent-hover) !important; --primary-fill-pressed: var(--iq-accent-hover) !important;
+      --primary-content-hover: var(--iq-accent-hover) !important; --primary-content-pressed: var(--iq-accent-hover) !important;
+      --primary-fill-transparent-01: var(--iq-selected) !important;
+      --primary-fill-transparent-02: var(--iq-selected) !important;
+      --primary-fill-transparent-03: var(--iq-selected) !important;
+      --primary-fill-solid-01: var(--iq-selected) !important;
+      --primary-fill-solid-02: var(--iq-selected) !important;
+      --primary-fill-solid-03: var(--iq-selected) !important;
+      --text-link-hover: var(--iq-accent-hover) !important; --text-link-pressed: var(--iq-accent-hover) !important;
+      --udtoken-btn-se-bg-pri-hover: var(--iq-selected) !important;
+      --udtoken-btn-se-bg-pri-focus: var(--iq-selected) !important;
+      --udtoken-btn-se-bg-pri-pressed: var(--iq-hover) !important;
+      --udtoken-btn-text-bg-pri-hover: var(--iq-selected) !important;
+      --udtoken-btn-text-bg-pri-focus: var(--iq-selected) !important;
+      --udtoken-btn-text-bg-pri-pressed: var(--iq-hover) !important;
       --primary-pri-500: var(--iq-accent) !important; --primary-pri-100: var(--iq-selected) !important;
       --fill-hover: var(--iq-hover) !important; --fill-selected: var(--iq-selected) !important;
+      --fill-active: var(--iq-selected) !important; --fill-focus: var(--iq-hover) !important;
       --line-divider-default: var(--iq-line) !important; --line-border-card: var(--iq-line) !important;
+      --line-border-component: var(--iq-line) !important; --line-divider-module: var(--iq-line) !important;
     }
+    html[${attribute}] [data-inspire-task-layout] { position: relative !important; }
     html[${attribute}] [data-inspire-task-nav] { background: var(--iq-nav) !important; }
     html[${attribute}] [data-inspire-task-main] { min-width: 0 !important; flex: 1 1 0 !important; }
     html[${attribute}] #root-todo button { border-radius: 7px; }
@@ -76,7 +98,7 @@
       }
       html[${attribute}] [data-inspire-task-nav] { display: none !important; }
       html[${attribute}][data-inspire-nav-open] [data-inspire-task-nav] {
-        display: flex !important; position: absolute !important; left: 0; top: 44px; bottom: 0;
+        display: flex !important; position: absolute !important; left: 0; top: 0; bottom: 0;
         width: min(260px, 85%) !important; height: auto !important;
         z-index: 100; box-shadow: 8px 0 24px #0002;
       }
@@ -97,6 +119,7 @@
       if (sibling && candidate.querySelector('a[href$="/next/task/watched-tasks"]') &&
           sibling.querySelector('.task-view-toolbar')) {
         nav = candidate;
+        nav.parentElement.setAttribute('data-inspire-task-layout', '');
         nav.setAttribute('data-inspire-task-nav', '');
         nav.id ||= 'inspire-task-navigation';
         sibling.setAttribute('data-inspire-task-main', '');
@@ -127,13 +150,15 @@
     const root = active ? document.querySelector('#root-todo') : null;
     if (root) locateNavigation(root);
     const ready = !!(root && nav && root.contains(nav));
+    const wasReady = html.hasAttribute('data-inspire-nav-ready');
     html.toggleAttribute('data-inspire-nav-ready', ready);
     html.toggleAttribute('data-inspire-nav-open', ready && open);
     if (button) {
-      button.textContent = open ? '收起任务导航' : '☰ 任务导航';
+      const label = open ? '收起任务导航' : '☰ 任务导航';
+      if (button.textContent !== label) button.textContent = label;
       button.setAttribute('aria-expanded', String(open));
     }
-    if (active !== wasActive) window.dispatchEvent(new Event('resize'));
+    if (active !== wasActive || ready !== wasReady) window.dispatchEvent(new Event('resize'));
   }
   window.InspireTaskAppearance = {
     setEnabled(value) { enabled = value === true; sync(); },
