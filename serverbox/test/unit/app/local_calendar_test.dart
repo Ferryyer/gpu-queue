@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:server_box/core/calendar/local_calendar.dart';
 import 'package:server_box/core/calendar/updater.dart';
+import 'package:server_box/core/calendar/notes.dart';
 
 void main() {
   late Directory dir;
@@ -44,7 +46,7 @@ void main() {
 
   test('first run downloads once, resuming keeps the same bytes, midnight updates', () async {
     final days = <String>[];
-    final updater = CalendarUpdater(LocalCalendar(dir), download: (_, day) async {
+    final updater = CalendarUpdater(LocalCalendar(dir), downloadNotes: (_) async => null, download: (_, day) async {
       days.add(day); await image(day); return true;
     });
     await Future.wait([updater.update(now), updater.update(now)]);
@@ -54,7 +56,7 @@ void main() {
     await updater.update(now, force: true);
     expect(updater.reading, same(reading));
     expect(days, ['2026-10-29']);
-    expect(updater.nextCheck(now), const Duration(hours: 14, minutes: 1));
+    expect(updater.nextCheck(now), const Duration(minutes: 30)); // Await the morning editorial note.
     await updater.update(DateTime.utc(2026, 10, 29, 16, 1));
     expect(days, ['2026-10-29', '2026-10-30']);
   });
@@ -63,7 +65,7 @@ void main() {
     await image('2026-10-28');
     var calls = 0;
     var online = false;
-    final updater = CalendarUpdater(LocalCalendar(dir), download: (_, day) async {
+    final updater = CalendarUpdater(LocalCalendar(dir), downloadNotes: (_) async => null, download: (_, day) async {
       calls++;
       if (!online) throw const SocketException('offline');
       await image(day); return true;
@@ -83,7 +85,7 @@ void main() {
 
   test('manual retry bypasses backoff and next-day checks cross a year boundary', () async {
     var calls = 0;
-    final updater = CalendarUpdater(LocalCalendar(dir), download: (_, _) async { calls++; return false; });
+    final updater = CalendarUpdater(LocalCalendar(dir), downloadNotes: (_) async => null, download: (_, _) async { calls++; return false; });
     await updater.update(now);
     await updater.update(now, force: true);
     expect(calls, 2);
@@ -92,4 +94,33 @@ void main() {
     await updater.update(yearEnd);
     expect(updater.nextCheck(yearEnd), const Duration(minutes: 2));
   });
+  test('published notes match the image day and cannot load HTML or oversize content', () {
+    final note = '${CalendarNotes.marker("2026-10-29")}\n# Test\nSource';
+    expect(CalendarNotes.parse(utf8.encode(note), '2026-10-29'), '# Test\nSource');
+    expect(CalendarNotes.parse(utf8.encode(note), '2026-10-28'), isNull);
+    expect(CalendarNotes.parse(utf8.encode('$note<script>'), '2026-10-29'), isNull);
+    expect(CalendarNotes.parse(List.filled(65537, 65), '2026-10-29'), isNull);
+  });
+
+  test('late notes arrive without replacing image bytes and survive offline restart', () async {
+    await image('2026-10-29');
+    var published = false, requests = 0;
+    final updater = CalendarUpdater(LocalCalendar(dir), download: (_, _) async => false,
+      downloadNotes: (day) async { expect(day, '2026-10-29'); requests++; return published ? '# Verified source' : null; });
+    await updater.update(now);
+    final bytes = updater.reading!.bytes;
+    expect(updater.reading!.hasResearchNotes, isFalse);
+    published = true;
+    await updater.update(now.add(const Duration(minutes: 2)));
+    expect(requests, 1);
+    await updater.update(now.add(const Duration(minutes: 30)));
+    expect(updater.reading!.hasResearchNotes, isTrue);
+    expect(updater.reading!.bytes, same(bytes));
+    final offline = CalendarUpdater(LocalCalendar(dir), download: (_, _) async => false,
+      downloadNotes: (_) async => throw const SocketException('offline'));
+    await offline.update(now);
+    expect(offline.reading!.notes, '# Verified source');
+    expect(offline.nextCheck(now), const Duration(hours: 14, minutes: 1));
+  });
+
 }

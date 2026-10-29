@@ -75,15 +75,17 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel> with WidgetsBin
     showDialog<void>(context: context, builder: (dialogContext) => Dialog(
       child: SizedBox(width: notes ? 720 : 560, height: MediaQuery.sizeOf(context).height * .85,
         child: Column(children: [
-          ListTile(title: Text(notes ? '单向历 · 图片来源' : '单向历'),
+          ListTile(title: Text(notes ? '单向历 · 出处笔记' : '单向历'),
             subtitle: Text(reading.date),
             trailing: IconButton(tooltip: '关闭', onPressed: () => Navigator.of(dialogContext, rootNavigator: true).pop(), icon: const Icon(Icons.close))),
           const Divider(height: 1),
           Expanded(child: notes ? Markdown(
-            data: reading.notes ?? '作者与作品出处见原图署名。', selectable: true,
+            data: reading.hasResearchNotes ? reading.notes! :
+              '${reading.notes ?? "作者与作品出处见原图署名。"}\n\n当天出处笔记尚未发布或暂时无法获取，稍后自动检查。', selectable: true,
+            imageBuilder: (_, _, _) => const SizedBox.shrink(),
             onTapLink: (_, href, _) {
               final uri = Uri.tryParse(href ?? '');
-              if (uri != null && const ['https', 'http'].contains(uri.scheme)) {
+              if (uri != null && uri.scheme == 'https' && uri.userInfo.isEmpty) {
                 unawaited(launchUrl(uri, mode: LaunchMode.externalApplication));
               }
             },
@@ -112,7 +114,7 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel> with WidgetsBin
         TextButton.icon(onPressed: reading == null ? null : _expand,
           icon: const Icon(Icons.open_in_full, size: 16), label: const Text('看大图')),
         TextButton.icon(onPressed: reading?.notes == null ? null : () => _expand(notes: true),
-          icon: const Icon(Icons.menu_book_outlined, size: 16), label: const Text('图片来源')),
+          icon: const Icon(Icons.menu_book_outlined, size: 16), label: const Text('出处笔记')),
       ])),
     ]);
   }

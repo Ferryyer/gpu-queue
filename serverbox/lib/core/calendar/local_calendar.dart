@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:server_box/core/calendar/notes.dart';
+
 /// App-owned, dated files written atomically by the bundled calendar script.
 class LocalCalendar {
   LocalCalendar(this.directory);
@@ -48,15 +50,24 @@ class LocalCalendar {
     } on FormatException {
       // Ignore malformed text rather than breaking the image.
     }
-    return CalendarReading(bytes: bytes, date: date, notes: notes);
+    var hasResearchNotes = false;
+    final researchFile = File('${directory.path}/$date.notes.md');
+    try {
+      if (await researchFile.length() <= CalendarNotes.maxBytes) {
+        final research = CalendarNotes.parse(await researchFile.readAsBytes(), date);
+        if (research != null) { notes = research; hasResearchNotes = true; }
+      }
+    } on FileSystemException { /* A missing note does not hide the image. */ }
+    return CalendarReading(bytes: bytes, date: date, notes: notes, hasResearchNotes: hasResearchNotes);
   }
 }
 
 class CalendarReading {
-  const CalendarReading({required this.bytes, required this.date, this.notes});
+  const CalendarReading({required this.bytes, required this.date, this.notes, this.hasResearchNotes = false});
   final Uint8List bytes;
   final String date;
   final String? notes;
+  final bool hasResearchNotes;
 
   static String day(DateTime time) {
     final date = time.toUtc().add(const Duration(hours: 8));
