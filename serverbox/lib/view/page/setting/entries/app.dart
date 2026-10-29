@@ -153,12 +153,14 @@ extension _App on _AppSettingsPageState {
             String display;
             if (val != null) {
               if (val > BuildData.build) {
-                display = libL10n.versionHasUpdate(val);
+                display = libL10n.versionHasUpdate(val).replaceAll('1.0.$val', '2.0.$val');
               } else {
-                display = libL10n.versionUpdated(BuildData.build);
+                display = libL10n.versionUpdated(BuildData.build)
+                  .replaceAll('1.0.${BuildData.build}', BuildData.version);
               }
             } else {
-              display = libL10n.versionUnknownUpdate(BuildData.build);
+              display = libL10n.versionUnknownUpdate(BuildData.build)
+                .replaceAll('1.0.${BuildData.build}', BuildData.version);
             }
             return Text(display, style: UIs.textGrey);
           },
@@ -180,7 +182,7 @@ extension _App on _AppSettingsPageState {
       ),
       // The version is on this row, so it is what somebody typing one is
       // looking for.
-      keywords: 'v${BuildData.build}',
+      keywords: 'v${BuildData.version}',
     );
   }
 

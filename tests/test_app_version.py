@@ -22,11 +22,13 @@ class AppVersionTests(unittest.TestCase):
             version.sync(app)
             version.sync(app, check=True)
             self.assertIn('build = 2004;', target.read_text())
+            self.assertIn('version = "2.0.2004";', target.read_text())
             (app / 'pubspec.yaml').write_text('version: 2.0.2005+2005\n')
             with self.assertRaises(ValueError):
                 version.sync(app, check=True)
             version.sync(app)
             self.assertIn('build = 2005;', target.read_text())
+            self.assertIn('version = "2.0.2005";', target.read_text())
 
     def test_checked_in_ui_version_matches_the_release(self):
         version.sync(ROOT / 'serverbox', check=True)

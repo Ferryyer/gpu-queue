@@ -21,6 +21,7 @@ def build_data(app):
             '// ignore_for_file: prefer_single_quotes\n\n'
             'abstract class BuildData {\n'
             '  static const String name = "Inspire Queue";\n'
+            f'  static const String version = "{version.group(1)}";\n'
             f'  static const int build = {build};\n'
             '}\n')
 
