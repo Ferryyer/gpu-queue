@@ -81,15 +81,15 @@ void main() {
     expect(find.textContaining('boom'), findsOneWidget);
     // The claim the report is not anonymous, which is the reason this is shown
     // rather than sent.
-    expect(find.text(l10n.crashReportHint), findsOneWidget);
+    expect(find.textContaining('只保存在本机，不会发送'), findsOneWidget);
   });
 
-  testWidgets('offers all three answers', (tester) async {
+  testWidgets('offers local copy and delete without a submission action', (tester) async {
     await open(tester);
 
     expect(find.text(libL10n.delete), findsOneWidget);
     expect(find.text(libL10n.copy), findsOneWidget);
-    expect(find.text(l10n.crashReportSubmit), findsOneWidget);
+    expect(find.text(l10n.crashReportSubmit), findsNothing);
   });
 
   testWidgets('deleting closes the dialog, not the page, and answers false', (

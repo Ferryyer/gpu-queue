@@ -233,7 +233,9 @@ def test_commands(args):
           'test/unit/app/mac_update_release_test.dart', 'test/unit/app/mac_update_bridge_test.dart',
           'lib/core/ssh_bundle', 'lib/view/widget/client_bundle_setup.dart',
           'lib/app.dart', 'lib/intro.dart', 'lib/view/page/setting/entry.dart',
-          'lib/view/page/setting/entries/ssh.dart'], APP),
+          'lib/view/page/setting/entries/ssh.dart', 'lib/view/page/setting/entries/app.dart',
+          'lib/core/service/diagnostics_upload.dart', 'lib/data/model/app/diagnostics_level.dart',
+          'lib/view/widget/crash_report_dialog.dart', 'lib/main.dart'], APP),
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
           '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
@@ -246,7 +248,9 @@ def test_commands(args):
           'test/unit/app/mac_update_bridge_test.dart',
           'test/widget/terminal_reconnect_test.dart',
           'test/unit/app/app_tab_test.dart',
-          'test/unit/ssh/client_bundle_test.dart', 'test/unit/app/virt_intro_test.dart'], APP),
+          'test/unit/ssh/client_bundle_test.dart', 'test/unit/app/virt_intro_test.dart',
+          'test/unit/app/diagnostics_sync_test.dart', 'test/unit/app/diagnostics_level_test.dart',
+          'test/unit/app/diagnostics_retire_full_test.dart', 'test/widget/crash_report_dialog_test.dart'], APP),
     ]
 
 

@@ -144,7 +144,7 @@ final class _IntroPage extends StatelessWidget {
     children: [
       ..._head('连接你的服务器', padTop / 2),
       const ClientBundleSetup(),
-      _prose('也可以稍后在设置 → SSH → 导入服务器配置包中完成。'),
+      _prose('也可以稍后在设置 → 终端 → 导入服务器配置包中完成。'),
       UIs.height77,
     ],
   );

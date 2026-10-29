@@ -23,15 +23,17 @@ void main() {
     await SqliteDb.close();
   });
 
-  test('turned off while starting, it ends off', () async {
-    Stores.setting.diagnosticsLevel.put(DiagnosticsLevel.basic.name);
-    // Not awaited: the start is still inside `Sentry.init` when Settings
-    // asks for it to stop.
-    final starting = DiagnosticsUpload.sync();
-    Stores.setting.diagnosticsLevel.put(DiagnosticsLevel.none.name);
-    final stopping = DiagnosticsUpload.sync();
-    await Future.wait([starting, stopping]);
-
-    expect(DiagnosticsUpload.uploading, isFalse);
+  test('old upload choices and consent cannot reactivate transmission', () async {
+    for (final choice in ['basic', 'full']) {
+      Stores.setting.diagnosticsLevel.put(choice);
+      Stores.setting.diagnosticsConsentVer.put(kDiagnosticsConsentVer);
+      await Future.wait([DiagnosticsUpload.sync(), DiagnosticsUpload.sync()]);
+      expect(DiagnosticsUpload.availableInBuild, isFalse);
+      expect(DiagnosticsUpload.dsn, isEmpty);
+      expect(DiagnosticsUpload.uploading, isFalse);
+      expect(DiagnosticsUpload.level, DiagnosticsLevel.none);
+      expect(Stores.setting.diagnosticsLevel.fetch(), 'none');
+      expect(Stores.setting.diagnosticsConsentVer.fetch(), 0);
+    }
   });
 }

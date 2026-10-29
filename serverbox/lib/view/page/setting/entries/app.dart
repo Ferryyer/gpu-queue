@@ -307,20 +307,6 @@ extension _App on _AppSettingsPageState {
   /// and a row buried in a collapsed tile cannot.
   List<SettingsGroup> _buildPrivacy() {
     return [
-      // Only where a report could actually be sent. A control that cannot do
-      // anything is worse than one that is not offered, and a build with no
-      // DSN in it can do nothing here. See [DiagnosticsUpload].
-      //
-      // Uncarded: the picker is a list of cards already.
-      if (DiagnosticsUpload.availableInBuild)
-        SettingsGroup(l10n.crashCollect, [
-          _buildDiagnosticsUpload(),
-        ], carded: false),
-      // Not behind `availableInBuild` — a build with no upload endpoint is
-      // exactly the one where handing the log over by hand is the only way a
-      // crash gets reported at all. Absent when nothing crashed: a row reading
-      // "no crash report" would be on the page for the whole life of every
-      // healthy install, while a row that appears is itself the news.
       if (_savedCrashReport != null)
         SettingsGroup(libL10n.log, [_buildLastCrashReport()]),
       SettingsGroup(l10n.privacy, [
@@ -333,24 +319,6 @@ extension _App on _AppSettingsPageState {
         ?PlatformPublicSettings.privacyBlur?.row,
       ]),
     ];
-  }
-
-  /// Where the choice made on the intro page can be revisited.
-  ///
-  /// The same widget the intro puts the question with, so the answer reads the
-  /// same in both places. It replaced a row whose trailing text named the
-  /// current level and whose tap opened a picker of bare labels: the
-  /// sentence saying what a level actually sends existed only on the intro,
-  /// which is the one screen a user sees once and cannot go back to.
-  SettingsRow _buildDiagnosticsUpload() {
-    return SettingsRow(
-      l10n.crashCollect,
-      () => DiagnosticsLevelPicker(
-        // Applied now rather than at the next launch: turning it down has to
-        // take the sink out immediately, not eventually.
-        onPicked: () => unawaited(DiagnosticsUpload.sync()),
-      ),
-    );
   }
 
   /// The previous run's log, when there is one.

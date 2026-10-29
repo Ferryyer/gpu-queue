@@ -58,7 +58,7 @@ enum AppTab {
   /// Primary destinations in Inspire Queue. The Mac sidebar mirrors this
   /// order; other tools remain reachable through "more". Keep declaration
   /// indices stable: older records store positional values, newer ones names.
-  static const defaultOrder = [overview, tasks, server, ssh, feishu];
+  static const defaultOrder = [overview, tasks, server, ssh, file, feishu];
 
   /// The tabs not in [enabled], in declaration order — what "more" holds.
   ///

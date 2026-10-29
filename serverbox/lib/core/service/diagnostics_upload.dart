@@ -1,221 +1,31 @@
-import 'dart:async';
-
 import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter/foundation.dart';
 import 'package:sentry/sentry.dart' as sentry;
-import 'package:server_box/core/service/diagnostics_platform.dart';
 import 'package:server_box/core/service/known_identifiers.dart';
-import 'package:server_box/core/service/native_exit.dart';
-import 'package:server_box/core/service/report_filter.dart';
 import 'package:server_box/data/model/app/diagnostics_level.dart';
-import 'package:server_box/data/res/build_data.dart';
 import 'package:server_box/data/res/store.dart';
 
-/// The revision of the crash-collection notice.
-///
-/// Bumped when what is collected changes materially, which shows the intro
-/// page again — consent given for one arrangement is not consent for another.
+// Kept only to read old settings and test migrations. No upload SDK is started.
 const kDiagnosticsConsentVer = 1;
 
-/// Sends what [Diag] records to a Sentry-compatible server, when the user has
-/// asked for it.
-///
-/// **`sentry`, not `sentry_flutter`, and that is the whole design.** The
-/// Flutter package brings an Android and an iOS SDK whose job is to install
-/// signal handlers for SIGSEGV and SIGABRT. This app must not have those: the
-/// iOS Linux engine interrupts its guest threads with SIGUSR1 and expects to
-/// own signal disposition, and `enableNativeCrashHandling = false` is a
-/// runtime flag that has been reported not to take effect. The pure-Dart
-/// package has no native half to disable — nothing to get wrong.
-///
-/// What that gives up, this app already had: native crashes come from
-/// `ApplicationExitInfo` and MetricKit, and breadcrumbs are placed by hand
-/// where they are worth having. It also costs nothing in dependencies — the
-/// package pulls in no transitive additions at all, which is the difference
-/// between a reviewable diff and an Android SDK for F-Droid to vet.
-///
-/// **Off unless the user turns it on.** That is the only gate, and it is the
-/// one F-Droid's Tracking anti-feature actually asks for: opt-in, disabled by
-/// default, and told plainly what is sent.
+/// Diagnostics are local-only in Inspire Queue. Old consent, restored backups
+/// and build-time DSNs cannot re-enable an outbound sink.
 abstract final class DiagnosticsUpload {
-  /// Where reports go.
-  ///
-  /// Committed rather than injected, because a Sentry DSN is not a secret: it
-  /// ships inside every client that uses it, is recoverable from any build,
-  /// and grants only the ability to *write* events — it reads nothing back.
-  ///
-  /// The alternative was a build-time define, which would have left every
-  /// F-Droid build without an upload path. That sounds tidy and is the wrong
-  /// trade: opt-in and off-by-default is already what the anti-feature policy
-  /// requires, so the define bought no compliance — it only excluded the users
-  /// most likely to hit the crashes, since F-Droid is where a large part of
-  /// this app's Android install base comes from. All three open crash reports
-  /// are from that side.
-  ///
-  /// Still overridable with `--dart-define=SENTRY_DSN=...`, which is how a
-  /// build points at a test instance instead of the live one.
-  static const dsn = String.fromEnvironment(
-    'SENTRY_DSN',
-    defaultValue: 'https://b13cb67be5014853ac12fb760acf2b97@sentry.lollipopkit.com/1',
-  );
+  static const dsn = '';
+  static bool get availableInBuild => false;
+  static DiagnosticsLevel get level => DiagnosticsLevel.none;
+  static bool get uploading => false;
 
-  /// Whether this build can upload at all.
-  ///
-  /// Normally true; false only where a build deliberately defined an empty
-  /// DSN. The settings page hides the switch when it is false, since a switch
-  /// that cannot do anything is worse than one that is not offered.
-  static bool get availableInBuild => dsn.isNotEmpty;
-
-  static DiagnosticsLevel? _started;
-
-  /// What the user has chosen.
-  static DiagnosticsLevel get level =>
-      DiagnosticsLevel.fromName(Stores.setting.diagnosticsLevel.fetch());
-
-  /// Whether an error handed to [Diag] *now* would be uploaded.
-  ///
-  /// Not the same question as [level]: a level that uploads still answers
-  /// false for the whole of startup, because the sink goes in at the end of
-  /// `_doPlatformRelated`. That gap is what [CrashLog.uploadsNow] reads it
-  /// for — a crash inside it is one nothing sent, and the only one the next
-  /// launch has to report on its behalf.
-  static bool get uploading => _started != null;
-
-  /// Starts, stops or re-levels uploading to match the setting.
-  ///
-  /// Safe to call whenever the setting changes, and at launch.
-  ///
-  /// Nothing is uploaded unless the user picked a level that uploads — the
-  /// default is `none` — and the intro page explaining the levels has been
-  /// completed: a level picked in an intro left before its end is not yet an
-  /// answer.
-  ///
-  /// One at a time, each reading the setting when its turn comes. Run side by
-  /// side, a start begun at launch could finish after a stop asked for from
-  /// Settings — `Sentry.init` awaits — and install the sink the user had just
-  /// turned off.
-  static Future<void> sync() =>
-      _syncing = _syncing.catchError((_) {}).then((_) => _sync());
-
-  static Future<void> _syncing = Future.value();
-
-  static Future<void> _sync() async {
-    final acknowledged =
-        Stores.setting.diagnosticsConsentVer.fetch() >= kDiagnosticsConsentVer;
-    final wanted = availableInBuild && acknowledged && level.uploads
-        ? level
-        : null;
-
-    if (wanted == _started) return;
-    if (wanted == null) {
-      await _stop();
-    } else {
-      await _start(wanted);
-    }
-  }
-
-  // TODO: remove once no install can still be at the removed `full` level.
-  /// Moves an install that chose the removed `full` level to `basic`, and
-  /// deletes the profile id `full` created for its analytics destination: an
-  /// identifier with no remaining purpose does not stay on the device.
-  ///
-  /// `basic` rather than `none`, because `full` included everything `basic`
-  /// sends: the user agreed to that much.
-  static Future<void> retireFullLevel() async {
-    if (Stores.setting.diagnosticsLevel.fetch() == 'full') {
-      Stores.setting.diagnosticsLevel.put(DiagnosticsLevel.basic.name);
-    }
-    await PrefStore.shared.remove('openpanel_profile_id');
-  }
-
-  static Future<void> _start(DiagnosticsLevel wanted) async {
-    try {
-      await sentry.Sentry.init((options) {
-        options.dsn = dsn;
-        options.release = 'server_box@1.0.${BuildData.build}';
-
-        // Nothing is traced: a report is sent when something breaks, never
-        // while the app is behaving. Set rather than left to the default, so
-        // a later SDK changing it cannot start sending on its own.
-        options.tracesSampleRate = 0.0;
-        // Never, at any level — see [SentrySink.log]. Set rather than left to
-        // the default, because the default flipping in a later SDK would
-        // silently start streaming the app's log lines off the device.
-        options.enableLogs = false;
-        // No IP address, no username, nothing the SDK infers. A crash report
-        // is about a build and a code path, not about a person. It is the
-        // default, and set anyway because a later SDK flipping it would be
-        // silent.
-        options.sendDefaultPii = false;
-        // The crumbs this app places are deliberate and already redacted; the
-        // SDK does not get to turn every `print` into one as well.
-        options.enablePrintBreadcrumbs = false;
-        options.maxBreadcrumbs = 200;
-        // Thread names and stack dumps of unrelated isolates are not what a
-        // report needs, and are the SDK guessing at context rather than this
-        // app supplying it.
-        options.attachThreads = false;
-        // The last thing every event passes through, and what decides whether
-        // it goes at all — see [scrubWithStoredIdentifiers].
-        //
-        // A transaction comes here too, and only because `beforeSendTransaction`
-        // is left unset: `SentryClient._runBeforeSend` tries that callback
-        // first and falls through to this one when it is null. Setting it would
-        // be a second entry point for a kind of event nothing in this app
-        // produces — no `startTransaction` call exists here or in fl_lib, and
-        // the pure-Dart SDK auto-instruments nothing. If one is ever started,
-        // its spans need covering as well, which is a different function.
-        //
-        // Before the scrub, an error that is not a defect goes nowhere — see
-        // [ReportFilter]. Here rather than in [SentrySink], because the SDK's
-        // own isolate-error integration captures without passing the sink.
-        options.beforeSend = (event, hint) {
-          final error = event.throwable;
-          if (error != null && !ReportFilter.isDefect(error)) return null;
-          final scrubbed = scrubWithStoredIdentifiers(event);
-          return scrubbed == null ? null : groupByCallSite(scrubbed);
-        };
-      });
-      // Before the sink is installed, so the first error to arrive already
-      // says what it arrived from. The pure-Dart SDK cannot work this out for
-      // itself — see [DiagnosticsPlatform], which is also where the line
-      // between "what hardware" and "whose hardware" is drawn.
-      await DiagnosticsPlatform.describe();
-      Diag.install(
-        FanOutSink([LocalDiagnosticsSink(), const SentrySink()]),
-      );
-      // **Only now.** [uploading] answers from this, and `CrashLog.uploadsNow`
-      // reads that to decide whether the marker keeps the error — so between
-      // an early assignment and this line, `uploading` said yes while nothing
-      // was installed to make it true. That window is two awaits wide and both
-      // reach the network, so a crash inside it was recorded as one somebody
-      // had already heard about, and the next launch dropped it.
-      _started = wanted;
-      Loggers.app.info('Crash upload started at ${wanted.name}');
-      // The last thing, and only now: a native crash is collected before this
-      // runs and has been waiting for a sink that uploads. Without this the
-      // one class of crash Dart cannot see at all -- a SIGSEGV in the Rust
-      // FFI, in proot or in sqlite -- reached the local log and stopped there.
-      NativeExitReport.shared.reportPending();
-    } catch (e, s) {
-      // A bad DSN or an unreachable server must not stop the app, and must
-      // not take the local log down with it.
-      Loggers.app.warning('Crash upload failed to start', e, s);
-      _started = null;
-    }
-  }
-
-  static Future<void> _stop() async {
-    // Taken out of the sink first, so nothing is handed to an SDK that is
-    // being shut down — and so withdrawing consent stops delivery rather than
-    // asking the SDK to be quiet.
+  static Future<void> sync() async {
     Diag.install(LocalDiagnosticsSink());
-    _started = null;
-    try {
-      await sentry.Sentry.close();
-    } catch (e, s) {
-      Loggers.app.warning('Crash upload failed to stop', e, s);
-    }
+    Stores.setting.diagnosticsLevel.putSync(DiagnosticsLevel.none.name);
+    Stores.setting.diagnosticsConsentVer.putSync(0);
+  }
+
+  /// Clear legacy upload choices and analytics identifiers on upgrade.
+  static Future<void> retireFullLevel() async {
+    await sync();
+    await PrefStore.shared.remove('openpanel_profile_id');
   }
 
   /// [scrub], with what this install currently knows to be the user's — or
@@ -414,84 +224,3 @@ abstract final class DiagnosticsUpload {
   }
 }
 
-/// Forwards [Diag] to Sentry.
-///
-/// A second sink beside the local file rather than a replacement for it: the
-/// file is what works with no network and no account, and is what a user
-/// pastes into an issue. Uploading is an addition to that, never a substitute.
-final class SentrySink extends DiagnosticsSink {
-  const SentrySink();
-
-  @override
-  void breadcrumb(Breadcrumb crumb) {
-    // The one thing `basic` withholds. A crumb is already redacted — it says
-    // "a machine on a LAN", not which — so this is not about identifiability
-    // but about how much of a session's shape leaves the device.
-    if (!DiagnosticsUpload.level.sendsBreadcrumbs) return;
-    sentry.Sentry.addBreadcrumb(
-      sentry.Breadcrumb(
-        category: crumb.category.name,
-        message: crumb.message,
-        level: _level(crumb.level),
-        data: crumb.data,
-      ),
-    );
-  }
-
-  @override
-  void error(Object error, StackTrace? stack, {String? source}) {
-    unawaited(
-      sentry.Sentry.captureException(
-        error,
-        stackTrace: stack,
-        withScope: source == null
-            ? null
-            : (scope) => scope.setTag('source', source),
-      ),
-    );
-  }
-
-  /// Dropped, at every level. The log stream does not leave the device.
-  ///
-  /// It used to be forwarded at `full`, and it was the wrong thing to offer.
-  /// A crumb is written to be published — [Breadcrumb] says so, and [Redact]
-  /// is applied where the crumb is made. A log line is not: it is written for
-  /// a developer reading the file on the device, by code going back years,
-  /// and some of it formats a server name straight into the message. Uploading
-  /// that continuously meant the one channel carrying unaudited strings was
-  /// also the one that ran while nothing was wrong.
-  ///
-  /// Nothing is lost that a report needs. Crumbs carry what happened, and the
-  /// log itself is still written, still shown by the Logs page, and still
-  /// quoted into a crash report — which the user reads before sending.
-  ///
-  /// Overridden to say so rather than inherited, since an empty inherited
-  /// `log` reads as a sink that has not got round to it.
-  @override
-  void log(DiagLevel level, String message, {String? logger}) {}
-
-  @override
-  void tag(String key, String? value) {
-    sentry.Sentry.configureScope((scope) {
-      if (value == null) {
-        scope.removeTag(key);
-      } else {
-        scope.setTag(key, value);
-      }
-    });
-  }
-
-  /// Nothing to do: `captureException` is already dispatched when it is
-  /// called, and the SDK has no separate drain. Overridden to say so, since an
-  /// empty inherited `flush` looks like an oversight rather than a fact about
-  /// this backend.
-  @override
-  Future<void> flush() async {}
-
-  static sentry.SentryLevel _level(DiagLevel level) => switch (level) {
-    DiagLevel.debug => sentry.SentryLevel.debug,
-    DiagLevel.info => sentry.SentryLevel.info,
-    DiagLevel.warning => sentry.SentryLevel.warning,
-    DiagLevel.error => sentry.SentryLevel.error,
-  };
-}

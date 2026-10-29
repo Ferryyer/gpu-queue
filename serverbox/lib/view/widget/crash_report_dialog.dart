@@ -2,22 +2,8 @@ import 'package:fl_lib/fl_lib.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/core/service/crash_report.dart';
-import 'package:server_box/data/res/url.dart';
 
-/// Shows what the previous run left behind, after it crashed.
-///
-/// **Nothing here reaches the network.** The report goes on the clipboard and
-/// the issue page is opened, so the user is the one who posts it and sees what
-/// they are posting first. That is the only honest arrangement while the log
-/// can still name a server — see [CrashReport] — and it is the reason the log
-/// is never part of what an upload level sends, at any level.
-///
-/// **Reached from Settings → Privacy, not from a prompt.** A toast used to be
-/// raised on the launch after a crash, which put the question in front of
-/// somebody who had just opened the app to do something else, and put it there
-/// exactly once. What replaced it is a row that waits: the report is kept on
-/// disk until it is dropped or another crash replaces it, so a user who reads
-/// about a bug a week later can still find the log for it.
+/// Shows a local crash record. No upload or issue-submission action is exposed.
 abstract final class CrashReportDialog {
   /// Opens the report, and answers whether it is still on the device after.
   ///
@@ -36,10 +22,6 @@ abstract final class CrashReportDialog {
           text: libL10n.copy,
           onTap: () => ctx.popDialog(_ReportAction.copy),
         ),
-        Btn.text(
-          text: l10n.crashReportSubmit,
-          onTap: () => ctx.popDialog(_ReportAction.submit),
-        ),
       ],
     );
 
@@ -55,17 +37,11 @@ abstract final class CrashReportDialog {
       case _ReportAction.copy:
         Pfs.copy(report);
         return true;
-      case _ReportAction.submit:
-        // Copied before the page opens, so it is already on the clipboard when
-        // the user gets to the text box.
-        Pfs.copy(report);
-        await Urls.newIssue.launchUrl();
-        return true;
     }
   }
 }
 
-enum _ReportAction { drop, copy, submit }
+enum _ReportAction { drop, copy }
 
 /// The report, above the sentence asking the user to read it.
 class _ReportBody extends StatelessWidget {
@@ -80,7 +56,7 @@ class _ReportBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          l10n.crashReportHint,
+          '崩溃记录只保存在本机，不会发送。你可以查看、复制或删除。',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         UIs.height13,

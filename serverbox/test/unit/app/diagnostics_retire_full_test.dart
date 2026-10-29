@@ -1,5 +1,3 @@
-// TODO: remove with `DiagnosticsUpload.retireFullLevel`.
-
 import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:server_box/core/service/diagnostics_upload.dart';
@@ -27,13 +25,13 @@ void main() {
     await SqliteDb.close();
   });
 
-  test('full becomes basic and its profile id is deleted', () async {
+  test('full becomes none and its profile id is deleted', () async {
     Stores.setting.diagnosticsLevel.put('full');
     await PrefStore.shared.set('openpanel_profile_id', 'deadbeef');
 
     await DiagnosticsUpload.retireFullLevel();
 
-    expect(Stores.setting.diagnosticsLevel.fetch(), DiagnosticsLevel.basic.name);
+    expect(Stores.setting.diagnosticsLevel.fetch(), DiagnosticsLevel.none.name);
     expect(PrefStore.shared.get<String>('openpanel_profile_id'), isNull);
   });
 

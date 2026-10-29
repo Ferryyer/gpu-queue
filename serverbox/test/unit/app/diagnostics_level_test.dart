@@ -35,10 +35,10 @@ void main() {
     expect(none.sendsBreadcrumbs, isFalse);
   });
 
-  test('basic reports failures but is silent in between', () {
+  test('legacy basic cannot send diagnostics', () {
     const basic = DiagnosticsLevel.basic;
-    expect(basic.uploads, isTrue);
-    expect(basic.sendsBreadcrumbs, isTrue, reason: 'context for a failure');
+    expect(basic.uploads, isFalse);
+    expect(basic.sendsBreadcrumbs, isFalse);
   });
 
   // TODO: remove with `DiagnosticsUpload.retireFullLevel`.

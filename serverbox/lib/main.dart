@@ -378,32 +378,15 @@ Future<void> _doPlatformRelated() async {
   // `CrashLog.attach`, whose answer about the previous run it may correct.
   await NativeExitReport.shared.collect();
 
-  // Adds the upload sink beside the local one, if this build has a DSN and the
-  // user asked for it. Neither is true by default. Not awaited: the local sink
-  // is already recording, and a slow or unreachable server must not hold up
-  // startup to add a second destination for it.
-  //
-  // The crash report is split around it, because only half of it needs a sink.
-  // Both orderings matter. `CrashReport.keep` writes the file the settings page
-  // offers and waits for nothing — behind the sink it waited on `Sentry.init`,
-  // so on a slow endpoint the row was missing from a
-  // page opened straight after launch. `CrashReport.report` files the error and
-  // has nowhere to send it until the sink is in. Both are after
-  // `NativeExitReport.shared.collect` above, which is what may decide the previous run
-  // ended badly at all.
+  // Preserve crash records on this device and retire any historical consent.
+  // No remote diagnostics SDK or upload sink is installed.
   unawaited(() async {
     await CrashReport.keep();
-    // Isolated, because a throw here would take `report` with it and leave the
-    // previous run's crash unreported for the sake of an unrelated failure —
-    // and, being unawaited, would reach the zone handler and mark *this* run
-    // as having ended badly too.
     try {
       await DiagnosticsUpload.retireFullLevel();
-      await DiagnosticsUpload.sync();
     } catch (e, s) {
-      Loggers.app.warning('Crash upload sync failed', e, s);
+      Loggers.app.warning('Local diagnostics migration failed', e, s);
     }
-    CrashReport.report();
   }());
 
   // Where the Linux userland is, and whether there is one — proot and an
