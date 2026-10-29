@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import plistlib
 import re
 import subprocess
 
@@ -33,7 +34,15 @@ def main():
     subprocess.run(['swiftc', '-swift-version', '5', str(ROOT/'serverbox/macos/Updater/main.swift'),
                     '-o', str(helper)], check=True)
     subprocess.run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(helper)], check=True)
-    subprocess.run(['codesign', '--force', '--deep', '--sign', '-', '--timestamp=none', str(app)], check=True)
+    entitlements = ROOT / 'serverbox/macos/Runner/Preview.entitlements'
+    subprocess.run(['codesign', '--force', '--deep', '--sign', '-', '--timestamp=none',
+                    '--entitlements', str(entitlements), str(app)], check=True)
+    signed_entitlements = plistlib.loads(subprocess.check_output(
+        ['codesign', '--display', '--entitlements', ':-', str(app)], stderr=subprocess.DEVNULL))
+    if signed_entitlements.get('com.apple.security.files.user-selected.read-write') is not True:
+        raise RuntimeError('Release must retain the native file picker entitlement')
+    if signed_entitlements.get('com.apple.security.app-sandbox', False):
+        raise RuntimeError('Desktop preview must preserve local terminal and SSH access')
     subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
     out = ROOT / 'build/unified-release'
     out.mkdir(parents=True, exist_ok=True)
