@@ -1,24 +1,33 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-/// Reads the two files produced by the existing daily calendar automation.
-/// No network requests, script execution, or writes to the user's desktop.
+/// App-owned, dated files written atomically by the bundled calendar script.
 class LocalCalendar {
   LocalCalendar(this.directory);
   final Directory directory;
 
-  static LocalCalendar? desktop() {
-    final home = Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'];
-    return home == null ? null : LocalCalendar(Directory('$home/Desktop'));
+  Future<CalendarReading?> readLatest(DateTime now) async {
+    if (!await directory.exists()) return null;
+    final today = CalendarReading.day(now);
+    final names = <String>[];
+    await for (final entry in directory.list(followLinks: false)) {
+      final name = entry.uri.pathSegments.last;
+      if (entry is File && RegExp(r'^\d{4}-\d{2}-\d{2}\.jpg$').hasMatch(name) &&
+          name.substring(0, 10).compareTo(today) <= 0) {
+        names.add(name);
+      }
+    }
+    names.sort((a, b) => b.compareTo(a));
+    for (final name in names) {
+      try { return await _read(name); } on FileSystemException { continue; }
+    }
+    return null;
   }
 
-  Future<CalendarReading> read() async {
-    final image = File('${directory.path}/今日单向历.jpg');
+  Future<CalendarReading> _read(String name) async {
+    final image = File('${directory.path}/$name');
     final stat = await image.stat();
-    if (stat.type != FileSystemEntityType.file) {
-      throw const FileSystemException('桌面还没有今日单向历.jpg');
-    }
-    if (stat.size < 4 || stat.size > 10 * 1024 * 1024) {
+    if (stat.type != FileSystemEntityType.file || stat.size < 4 || stat.size > 10 * 1024 * 1024) {
       throw const FileSystemException('单向历图片大小无效');
     }
     final bytes = await image.readAsBytes();
@@ -26,36 +35,32 @@ class LocalCalendar {
         bytes[bytes.length - 2] != 0xff || bytes.last != 0xd9) {
       throw const FileSystemException('单向历图片不是完整的 JPEG');
     }
+    final date = name.substring(0, 10);
     String? notes;
-    DateTime? notesModified;
-    final noteFile = File('${directory.path}/今日单向历出处.md');
+    final noteFile = File('${directory.path}/$date.md');
     try {
       final noteStat = await noteFile.stat();
       if (noteStat.type == FileSystemEntityType.file && noteStat.size <= 128 * 1024) {
         notes = await noteFile.readAsString();
-        notesModified = noteStat.modified;
       }
     } on FileSystemException {
-      // Notes can be replaced independently of the image.
+      // Optional provenance cannot hide a valid calendar image.
     } on FormatException {
-      // A malformed note must not hide a valid calendar image.
+      // Ignore malformed text rather than breaking the image.
     }
-    return CalendarReading(bytes: bytes, modified: stat.modified,
-      notes: notes, notesModified: notesModified);
+    return CalendarReading(bytes: bytes, date: date, notes: notes);
   }
 }
 
 class CalendarReading {
-  const CalendarReading({required this.bytes, required this.modified, this.notes, this.notesModified});
+  const CalendarReading({required this.bytes, required this.date, this.notes});
   final Uint8List bytes;
-  final DateTime modified;
+  final String date;
   final String? notes;
-  final DateTime? notesModified;
 
-  // The existing automation uses Asia/Shanghai even while the user travels.
   static String day(DateTime time) {
     final date = time.toUtc().add(const Duration(hours: 8));
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
-  bool updatedToday(DateTime now) => day(modified) == day(now);
+  bool updatedToday(DateTime now) => date == day(now);
 }

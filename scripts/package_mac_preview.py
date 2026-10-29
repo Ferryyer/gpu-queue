@@ -34,6 +34,13 @@ def main():
     subprocess.run(['swiftc', '-swift-version', '5', str(ROOT/'serverbox/macos/Updater/main.swift'),
                     '-o', str(helper)], check=True)
     subprocess.run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(helper)], check=True)
+    calendar_check = helpers / 'CalendarCheck'
+    subprocess.run(['swiftc', '-swift-version', '5', '-target', 'arm64-apple-macosx13.0',
+                    str(ROOT/'serverbox/macos/CalendarCheck/main.swift'), '-o', str(calendar_check)], check=True)
+    subprocess.run(['codesign', '--force', '--sign', '-', '--timestamp=none', str(calendar_check)], check=True)
+    calendar_script = helpers / 'UpdateDailyCalendar'
+    calendar_script.write_bytes((ROOT/'scripts/update_daily_calendar.sh').read_bytes())
+    calendar_script.chmod(0o755)
     entitlements = ROOT / 'serverbox/macos/Runner/Preview.entitlements'
     subprocess.run(['codesign', '--force', '--deep', '--sign', '-', '--timestamp=none',
                     '--entitlements', str(entitlements), str(app)], check=True)
@@ -63,6 +70,7 @@ def main():
         + (ROOT / f'docs/RELEASE-{build}.md').read_text(), encoding='utf-8')
     (out / 'EMPLOYEE-SETUP.md').write_text((ROOT / 'docs/EMPLOYEE-SETUP.md').read_text(), encoding='utf-8')
     (out / 'APPLE-NOTARIZATION.md').write_text((ROOT / 'docs/APPLE-NOTARIZATION.md').read_text(), encoding='utf-8')
+    (out / 'DAILY-CALENDAR.md').write_text((ROOT / 'docs/DAILY-CALENDAR.md').read_text(), encoding='utf-8')
     # Every published file except the checksum manifest is covered.
     (out / 'SHA256SUMS').write_text(''.join(
         f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n'
