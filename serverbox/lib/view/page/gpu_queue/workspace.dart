@@ -508,17 +508,23 @@ class _QueueSidebarState extends State<QueueSidebar> {
                   () => widget.onSelect(3),
                 ),
                 item(
-                  '飞书任务',
-                  Icons.task_alt,
+                  '文件',
+                  Icons.folder_open,
                   !widget.settingsOpen && widget.selected == 4,
                   () => widget.onSelect(4),
                 ),
+                item(
+                  '飞书任务',
+                  Icons.task_alt,
+                  !widget.settingsOpen && widget.selected == 5,
+                  () => widget.onSelect(5),
+                ),
                 Tooltip(
-                  message: '文件、分屏工作区与其他工具',
+                  message: '分屏工作区与其他工具',
                   child: item(
                     '更多工具',
                     Icons.more_horiz,
-                    !widget.settingsOpen && widget.selected > 4,
+                    !widget.settingsOpen && widget.selected > 5,
                     widget.onMore,
                   ),
                 ),

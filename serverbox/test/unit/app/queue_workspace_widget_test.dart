@@ -224,12 +224,18 @@ void main() {
       expect(destination, 2);
       await tester.tap(find.text('终端'));
       expect(destination, 3);
+      await tester.tap(find.text('文件'));
+      expect(destination, 4);
+      await tester.tap(find.text('飞书任务'));
+      expect(destination, 5);
       expect(find.text('GPU 任务'), findsOneWidget);
       await tester.tap(find.byTooltip('收起侧栏'));
       await tester.pumpAndSettle();
       expect(tester.getSize(find.byType(QueueSidebar)).width, 64);
       await tester.tap(find.byIcon(Icons.terminal_outlined));
       expect(destination, 3);
+      await tester.tap(find.byIcon(Icons.folder_open));
+      expect(destination, 4);
       await tester.tap(find.byIcon(Icons.settings_outlined));
       expect(settings, 1);
       expect(tester.takeException(), isNull);
@@ -241,12 +247,12 @@ void main() {
   );
 
   testWidgets('terminal is selected independently of more tools in a small window', (tester) async {
-    for (final selected in [0, 3, 4, 5]) {
+    for (final selected in [0, 3, 4, 5, 6]) {
       await show(tester, Row(children: [
         QueueSidebar(selected: selected, onSelect: (_) {}, onSettings: () {}, onMore: () {}),
         const Expanded(child: SizedBox()),
       ]), size: const Size(760, 600), scale: 1.5);
-      for (final entry in {'总览': 0, '终端': 3, '飞书任务': 4, '更多工具': 5}.entries) {
+      for (final entry in {'总览': 0, '终端': 3, '文件': 4, '飞书任务': 5, '更多工具': 6}.entries) {
         final tile = tester.widget<ListTile>(find.ancestor(of: find.text(entry.key), matching: find.byType(ListTile)));
         expect(tile.selected, selected == entry.value);
       }
