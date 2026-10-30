@@ -12,6 +12,7 @@ import 'package:server_box/core/utils/monitor_listener.dart';
 import 'package:server_box/core/utils/monitor_tunnel.dart';
 import 'package:server_box/core/utils/result_preview.dart';
 import 'package:server_box/core/utils/server_tcp.dart';
+import 'package:server_box/core/utils/ssh_exec.dart';
 import 'package:server_box/core/utils/ssh_local_tunnel.dart';
 import 'package:server_box/data/model/app/menu/server_func.dart';
 import 'package:server_box/data/model/server/capabilities.dart';
@@ -371,6 +372,9 @@ class PortForwardNotifier extends _$PortForwardNotifier {
       final bundled = await rootBundle.loadString('assets/result_preview.b64');
       final script = utf8.decode(base64.decode(bundled.trim()));
       final exec = await ref.read(serverProvider(_serverId).notifier).ensureExec();
+      if (exec is! SshExec || !identical(exec.client, client)) {
+        throw StateError('成果服务必须使用同一个 SSH 账号；请将服务器的连接方式设为 SSH 后重试');
+      }
       final stop = Completer<void>();
       final timer = Timer(const Duration(seconds: 35), () => stop.complete());
       try {
