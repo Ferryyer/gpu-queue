@@ -29,3 +29,15 @@ test('widget mode deep links override saved browser mode; invalid modes are igno
  const auto=setup(null,'?mode=auto');assert.equal(auto.start.disabled,true);assert.equal(auto.storage.get('gpuq.interactionMode'),'auto');
  const invalid=setup(null,'?mode=start');assert.equal(invalid.start.disabled,false);
 });
+
+test('release status distinguishes 90-minute grace, unsupported release, and closed resources',()=>{
+ const s=setup();
+ const message=resources=>vm.runInContext(`releasePolicyText(${JSON.stringify({resources})})`,s.context);
+ assert.match(message([]),/结束 90 分钟后/);
+ const grace={status:'online',release:{state:'grace_period',release_after:1792830000}};
+ assert.match(message([grace]),/保留 90 分钟，计划/);
+ assert.match(message([grace]),/当前未确认释放/);
+ const due={status:'online',release:{state:'pending_interface'}};
+ assert.match(message([grace,due]),/释放待处理/);
+ assert.doesNotMatch(message([{...due,status:'closed'},grace]),/释放待处理/);
+});
