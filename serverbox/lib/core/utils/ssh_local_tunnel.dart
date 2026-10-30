@@ -124,6 +124,11 @@ class SshLocalTunnel {
   ) async =>
       _DartSshTunnelChannel(await client.forwardLocal(remoteHost, remotePort));
 
+  /// Run a bundled byte relay in the user's execution namespace. Some SSH
+  /// gateways cannot reach per-user Unix sockets from direct-streamlocal.
+  static Future<SshTunnelChannel> forwardExec(SSHClient client, String command) async =>
+      _ExecSshTunnelChannel(await client.execute(command));
+
   /// The lifecycle seam used by tests and alternative SSH transports.
   ///
   /// [authenticated] makes it a tunnel with an [accessToken] — see the class.
@@ -376,6 +381,38 @@ class SshLocalTunnel {
       _bridges.toList().map((bridge) => bridge.catchError((_) {})),
     );
   }
+}
+
+class _ExecSshTunnelChannel implements SshTunnelChannel {
+  _ExecSshTunnelChannel(this._session) {
+    _stderr = _session.stderr.listen((_) {}, onError: (Object _) {});
+  }
+  final SSHSession _session;
+  late final StreamSubscription<Uint8List> _stderr;
+  @override
+  Stream<List<int>> get stream => _session.stdout.cast<List<int>>();
+  @override
+  StreamSink<List<int>> get sink => _SessionInputSink(_session.stdin);
+  @override
+  Future<void> close() async {
+    await _stderr.cancel();
+    await _session.channel.close();
+  }
+}
+
+class _SessionInputSink implements StreamSink<List<int>> {
+  _SessionInputSink(this.inner);
+  final StreamSink<Uint8List> inner;
+  @override
+  void add(List<int> data) => inner.add(data is Uint8List ? data : Uint8List.fromList(data));
+  @override
+  void addError(Object error, [StackTrace? stackTrace]) => inner.addError(error, stackTrace);
+  @override
+  Future<void> addStream(Stream<List<int>> stream) => inner.addStream(stream.map(Uint8List.fromList));
+  @override
+  Future<void> close() => inner.close();
+  @override
+  Future<void> get done => inner.done;
 }
 
 class _DartSshTunnelChannel implements SshTunnelChannel {

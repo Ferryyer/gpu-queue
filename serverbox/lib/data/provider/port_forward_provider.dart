@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:fl_lib/fl_lib.dart';
+import 'package:flutter/services.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:server_box/core/diag.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/core/utils/monitor_listener.dart';
 import 'package:server_box/core/utils/monitor_tunnel.dart';
+import 'package:server_box/core/utils/result_preview.dart';
 import 'package:server_box/core/utils/server_tcp.dart';
 import 'package:server_box/core/utils/ssh_local_tunnel.dart';
 import 'package:server_box/data/model/app/menu/server_func.dart';
@@ -320,6 +323,9 @@ class PortForwardNotifier extends _$PortForwardNotifier {
   );
 
   Future<_ForwardEntry> _startLocalForward(PortForwardConfig config) async {
+    if (config.remoteHost == resultPreviewDestination) {
+      return _startResultPreview(config);
+    }
     if (config.remoteHost == null || config.remotePort == null) {
       throw Exception('Invalid local port forward: remote destination not set');
     }
@@ -347,6 +353,42 @@ class PortForwardNotifier extends _$PortForwardNotifier {
       '-> ${config.remoteHost}:${config.remotePort}',
     );
     return _TunnelForwardEntry(tunnel, dialer, viaSsh: !_viaAgent(server));
+  }
+
+  Future<_ForwardEntry> _startResultPreview(PortForwardConfig config) async {
+    if (config.localHost != '127.0.0.1' || config.localPort != 8780) {
+      throw StateError('成果预览只允许本机 127.0.0.1:8780');
+    }
+    final client = await _connectedClient();
+    final ready = Completer<String>();
+    ready.future.ignore();
+    // Reserve the local port before changing the remote host. Pending browser
+    // requests wait for initialization to finish.
+    final tunnel = await SshLocalTunnel.bindWithDialer(
+      bindHost: '127.0.0.1', bindPort: 8780, sshDone: client.done,
+      dialer: () async => SshLocalTunnel.forwardExec(client, await ready.future));
+    try {
+      final bundled = await rootBundle.loadString('assets/result_preview.b64');
+      final script = utf8.decode(base64.decode(bundled.trim()));
+      final exec = await ref.read(serverProvider(_serverId).notifier).ensureExec();
+      final stop = Completer<void>();
+      final timer = Timer(const Duration(seconds: 35), () => stop.complete());
+      try {
+        final result = await exec.run(script, entry: 'sh', cancel: stop.future);
+        if (!result.succeeded || stop.isCompleted) {
+          throw StateError(result.combined.isEmpty ? '成果服务初始化超时或失败' : result.combined);
+        }
+      } finally {
+        timer.cancel();
+      }
+      final relay = await rootBundle.loadString('assets/result_preview_relay.b64');
+      ready.complete(utf8.decode(base64.decode(relay.trim())));
+      return _PreviewForwardEntry(tunnel);
+    } catch (error, stack) {
+      if (!ready.isCompleted) ready.completeError(error, stack);
+      await tunnel.close();
+      rethrow;
+    }
   }
 
   Future<_ForwardEntry> _startRemoteForward(PortForwardConfig config) async {
@@ -486,6 +528,17 @@ abstract class _ForwardEntry {
   /// Completes when it has ended from the far side. Never, for one that only
   /// ends when it is closed here.
   Future<void> get ended => Completer<void>().future;
+}
+
+class _PreviewForwardEntry extends _ForwardEntry {
+  _PreviewForwardEntry(this.tunnel);
+  final SshLocalTunnel tunnel;
+  @override
+  bool get viaSsh => true;
+  @override
+  Future<void> get ended => tunnel.done;
+  @override
+  Future<void> close() => tunnel.close();
 }
 
 /// A local listener whose connections are dialled from the server: a local

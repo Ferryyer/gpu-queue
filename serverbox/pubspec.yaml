@@ -208,6 +208,8 @@ flutter:
     # base64, because App Store validation rejects a bundled `.sh` — see
     # `YabsScript.assetPath`. A shell script cannot be added to this list.
     - assets/yabs.b64
+    - assets/result_preview.b64
+    - assets/result_preview_relay.b64
     # The Agent's built-in skill, the very files Claude Code reads in this
     # repository — one copy, see `LlmHost.builtinSkills`.
     - .claude/skills/serverbox-help/

@@ -147,7 +147,8 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(config.displayAddr, style: UIs.text13Grey),
+          Text(config.remoteHost == resultPreviewDestination
+            ? '本机 8780 → 本人成果服务（自动准备）' : config.displayAddr, style: UIs.text13Grey),
           if (hasError)
             Text(
               status!.error!,
@@ -165,7 +166,7 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
           ContextMenuButton(
             tooltip: libL10n.more,
             actions: () => [
-              ContextMenuAction(
+              if (config.remoteHost != resultPreviewDestination) ContextMenuAction(
                 text: libL10n.edit,
                 icon: Icons.edit_outlined,
                 onTap: () => _onEdit(config),
@@ -200,12 +201,12 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
           title: const Text('打开成果链接'),
           content: SizedBox(width: 520, child: Column(mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('通过 ${widget.args.spi.name} 转发网页。请确认成果服务运行在这台服务器的 8780 端口。'),
+              Text('通过 ${widget.args.spi.name} 打开成果。建立转发后会自动检查并准备本人成果服务；已有链接会保留。'),
               const SizedBox(height: 12),
               TextFormField(initialValue: input, onChanged: (value) => input = value, autofocus: true, maxLines: 3,
                 decoration: InputDecoration(labelText: '成果链接', errorText: error)),
               const SizedBox(height: 12),
-              const Text('本机 8780 → 服务器 8780。同一服务的所有网页共用转发；关闭应用或 SSH 断开后，可从这里重新建立。'),
+              const Text('本机固定使用 8780，服务器使用本人私有连接。同一服务的所有网页共用转发；关闭应用或 SSH 断开后，可从这里重新建立。'),
             ])),
           actions: [
             TextButton(onPressed: () => Navigator.of(dialogContext, rootNavigator: true).pop(), child: const Text('取消')),
@@ -227,11 +228,11 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
       final configs = ref.read(provider).configs;
       final existing = configs.where((c) => c.type == PortForwardType.local &&
         c.localHost == '127.0.0.1' && c.localPort == 8780 &&
-        c.remoteHost == '127.0.0.1' && c.remotePort == 8780).firstOrNull;
+        c.remoteHost == resultPreviewDestination).firstOrNull;
       final config = existing ?? PortForwardConfig(
         id: ShortId.generate(), serverId: widget.args.spi.id, name: '成果预览 · 8780',
         type: PortForwardType.local, localHost: '127.0.0.1', localPort: 8780,
-        remoteHost: '127.0.0.1', remotePort: 8780);
+        remoteHost: resultPreviewDestination);
       if (existing == null) await _notifier.addConfig(config);
       if (ref.read(provider).activeForwards[config.id]?.isActive != true) {
         await _notifier.startForward(config.id);
@@ -239,7 +240,7 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
       if (!mounted) return;
       final status = ref.read(provider).activeForwards[config.id];
       if (status?.isActive != true) {
-        Toast.error('转发未建立，请检查 SSH 连接和本机 8780 端口是否被占用。${status?.error ?? ""}');
+        Toast.error('成果预览未就绪：${status?.error ?? "请检查 SSH 连接和本机 8780 端口是否被占用"}');
         return;
       }
       if (!await launchUrl(url, mode: LaunchMode.externalApplication) && mounted) {
