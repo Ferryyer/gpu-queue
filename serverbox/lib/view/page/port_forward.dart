@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/core/route.dart';
+import 'package:server_box/core/utils/result_preview.dart';
 import 'package:server_box/data/model/app/feature.dart';
 import 'package:server_box/data/model/server/port_forward.dart';
 import 'package:server_box/data/provider/port_forward_provider.dart';
 import 'package:server_box/data/provider/server/single.dart';
 import 'package:server_box/data/res/store.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 final class PortForwardPage extends ConsumerStatefulWidget {
   final SpiRequiredArgs args;
@@ -25,6 +27,7 @@ final class PortForwardPage extends ConsumerStatefulWidget {
 
 final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
   late final PortForwardNotifier _notifier;
+  bool _openingPreview = false;
 
   @override
   void initState() {
@@ -81,7 +84,11 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
           down: widget.args.spi.name,
           mark: Feature.portForward.mark(tip: context.l10n.betaTip),
         ),
-        actions: [IconButton(tooltip: libL10n.add, icon: const Icon(Icons.add), onPressed: _onAdd)],
+        actions: [
+          IconButton(tooltip: '打开成果链接', icon: const Icon(Icons.open_in_browser),
+            onPressed: _openingPreview ? null : _openResultPreview),
+          IconButton(tooltip: libL10n.add, icon: const Icon(Icons.add), onPressed: _onAdd),
+        ],
       ),
       body: _buildBody(),
     );
@@ -116,6 +123,9 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
           Text(libL10n.empty, style: UIs.textGrey),
           const SizedBox(height: 8),
           Text(context.l10n.portForward_startPrompt, style: UIs.text13Grey),
+          const SizedBox(height: 16),
+          FilledButton.icon(onPressed: _openingPreview ? null : _openResultPreview,
+            icon: const Icon(Icons.open_in_browser), label: const Text('打开成果链接 · 8780')),
         ],
       ),
     );
@@ -176,6 +186,70 @@ final class _PortForwardPageState extends ConsumerState<PortForwardPage> {
 
   void _onAdd() {
     _showConfigDialog(null);
+  }
+
+  Future<void> _openResultPreview() async {
+    if (_openingPreview) return;
+    setState(() => _openingPreview = true);
+    var input = 'http://127.0.0.1:8780/';
+    Uri? url;
+    try {
+      url = await showDialog<Uri>(context: context, builder: (dialogContext) {
+        String? error;
+        return StatefulBuilder(builder: (context, update) => AlertDialog(
+          title: const Text('打开成果链接'),
+          content: SizedBox(width: 520, child: Column(mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('通过 ${widget.args.spi.name} 转发网页。请确认成果服务运行在这台服务器的 8780 端口。'),
+              const SizedBox(height: 12),
+              TextFormField(initialValue: input, onChanged: (value) => input = value, autofocus: true, maxLines: 3,
+                decoration: InputDecoration(labelText: '成果链接', errorText: error)),
+              const SizedBox(height: 12),
+              const Text('本机 8780 → 服务器 8780。同一服务的所有网页共用转发；关闭应用或 SSH 断开后，可从这里重新建立。'),
+            ])),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(dialogContext, rootNavigator: true).pop(), child: const Text('取消')),
+            FilledButton(onPressed: () {
+              try {
+                final parsed = parseResultPreviewUrl(input);
+                Navigator.of(dialogContext, rootNavigator: true).pop(parsed);
+              } on FormatException catch (e) {
+                update(() => error = e.message);
+              }
+            }, child: const Text('建立转发并打开')),
+          ],
+        ));
+      });
+      if (url == null || !mounted) return;
+      final provider = portForwardProvider(widget.args.spi.id);
+      // Reuse only an exact destination. Never repoint an existing listener
+      // (or stop another server's listener) just because its port matches.
+      final configs = ref.read(provider).configs;
+      final existing = configs.where((c) => c.type == PortForwardType.local &&
+        c.localHost == '127.0.0.1' && c.localPort == 8780 &&
+        c.remoteHost == '127.0.0.1' && c.remotePort == 8780).firstOrNull;
+      final config = existing ?? PortForwardConfig(
+        id: ShortId.generate(), serverId: widget.args.spi.id, name: '成果预览 · 8780',
+        type: PortForwardType.local, localHost: '127.0.0.1', localPort: 8780,
+        remoteHost: '127.0.0.1', remotePort: 8780);
+      if (existing == null) await _notifier.addConfig(config);
+      if (ref.read(provider).activeForwards[config.id]?.isActive != true) {
+        await _notifier.startForward(config.id);
+      }
+      if (!mounted) return;
+      final status = ref.read(provider).activeForwards[config.id];
+      if (status?.isActive != true) {
+        Toast.error('转发未建立，请检查 SSH 连接和本机 8780 端口是否被占用。${status?.error ?? ""}');
+        return;
+      }
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication) && mounted) {
+        Toast.error('转发已建立，请在浏览器中打开成果链接。');
+      }
+    } catch (_) {
+      if (mounted) Toast.error('无法打开成果链接，请检查转发状态后重试。');
+    } finally {
+      if (mounted) setState(() => _openingPreview = false);
+    }
   }
 
   void _onEdit(PortForwardConfig config) {
