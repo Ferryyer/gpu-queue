@@ -88,3 +88,29 @@ test('the actual release ZIP has only allowed paths, regular files and bounded s
   assert.throws(()=>U.archiveMetadata(metadata.replace(/(\s+unx\s+)\d+/,'$1'+'99999999')));
  } finally {fs.rmSync(temp,{recursive:true,force:true});}
 });
+
+test('binary ZIP validation is independent of zipinfo text and rejects conflicting local headers',()=>{
+ const temp=fs.mkdtempSync(path.join(os.tmpdir(),'gpuq-zip-'));
+ try {
+  cp.execFileSync('python3',[path.join(__dirname,'../scripts/package-widget.py'),'--output-dir',temp]);
+  const bytes=fs.readFileSync(path.join(temp,'GPU任务台-桌面小组件-macOS.zip'));
+  U.archiveBytes(bytes);U.archiveBase64(bytes.toString('base64'));
+  // Validate the immutable versions users are trying to update from/to as well.
+  for(const v of ['1.1.2','1.1.3'])U.archiveBytes(fs.readFileSync(path.join(__dirname,'../downloads/GPU-Queue-Widget-'+v+'-macOS.zip')));
+  const end=bytes.length-22,central=bytes.readUInt32LE(end+16);
+  function corrupt(offset,value,size=4){const copy=Buffer.from(bytes);if(size===2)copy.writeUInt16LE(value,offset);else copy.writeUInt32LE(value,offset);return copy;}
+  for(const bad of [bytes.subarray(0,-1),Buffer.concat([bytes,Buffer.from([0])]),
+   corrupt(end+10,10,2),corrupt(end+16,0),corrupt(central+42,1),
+   corrupt(central+38,0xa1ff0000),corrupt(central+24,99999999),
+   corrupt(6,0x801,2),corrupt(18,0),corrupt(30,0x2e2e2f2f)])assert.throws(()=>U.archiveBytes(bad));
+  // The second/third (enable/disable) file names have equal byte lengths.
+  const duplicate=Buffer.from(bytes),headers=[];let cursor=central;
+  for(let i=0;i<9;i++){headers.push(cursor);cursor+=46+bytes.readUInt16LE(cursor+28)+bytes.readUInt16LE(cursor+30)+bytes.readUInt16LE(cursor+32);}
+  const source=headers[1],target=headers[2],length=bytes.readUInt16LE(source+28),local=bytes.readUInt32LE(target+42);
+  assert.equal(length,bytes.readUInt16LE(target+28));
+  bytes.copy(duplicate,target+46,source+46,source+46+length);
+  bytes.copy(duplicate,local+30,source+46,source+46+length);
+  assert.throws(()=>U.archiveBytes(duplicate));
+  for(const value of ['!', 'AAA', '=AAA', 'AAAA===='])assert.throws(()=>U.archiveBase64(value));
+ } finally {fs.rmSync(temp,{recursive:true,force:true});}
+});
