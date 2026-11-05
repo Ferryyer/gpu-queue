@@ -218,6 +218,7 @@ class Service:
         atomic_json(folder/'run/dispatch.json', {'task':task['id'],'digest':task['digest'],'request':resource['id'],'job':job,'argv':argv})
         task['public']['events'].append('复用可用 GPU，完整流程已提交；每一步成功后才进入下一步')
         self.store.save(task)
+        self.platform.begin_task_sampling(task)
 
     def tick(self):
         for task in self.store.tasks():

@@ -152,6 +152,34 @@ class Markflow:
             raise PlatformError('GPU 任务回执不完整，已停止自动重试')
         return value['job']
 
+    def begin_task_sampling(self, task):
+        """Bind sampling to each actual dispatch, including reused allocations."""
+        internal = task['internal']
+        if (not internal.get('approved_at') or internal.get('dispatch') != 'submitted'
+                or not internal.get('job_uuid') or internal.get('stop_requested_at')
+                or task['public']['state'] not in ['dispatching', 'starting', 'running']):
+            return
+        resource = self.resources.get(internal.get('request_uuid'))
+        if not resource or resource['status'] not in ['online', 'ready']:
+            return
+        previous = resource.get('sampling_start') or {}
+        if previous.get('task') == task['id'] and previous.get('job') == internal['job_uuid']:
+            return
+        started = time.time()
+        resource.update(sampling_start={'task': task['id'], 'job': internal['job_uuid'], 'at': started},
+                        sample_requested_at=started, probe_checked=0,
+                        monitor={'state': 'sampling', 'attempts': 0, 'at': started})
+        self.persist()
+        try:
+            self.refresh_probe(resource)
+        except (PlatformError, OSError, subprocess.SubprocessError) as error:
+            # Computation has already been dispatched. Monitoring failure must
+            # not turn a successful submission into a failed/repeated attempt.
+            resource['monitor'].update(state='retry', error=type(error).__name__)
+        finally:
+            self.persist()
+            publish_serverbox(self.resources, self.home)
+
     def recover_active_probe(self, resource):
         """Retry only diagnostics, with fresh evidence from an existing runner.
 
@@ -216,7 +244,9 @@ class Markflow:
                     raise PlatformError('GPU 遥测采样时间无效')
                 resource.update(status='online', telemetry={'gpus': gpus, 'apps': apps, 'at': stamp, 'host': payload.get('host', '')}, probe=None, probe_checked=time.time())
                 resource.pop('error', None)
-                resource.pop('monitor', None)
+                if stamp >= resource.get('sample_requested_at', 0):
+                    resource.pop('sample_requested_at', None)
+                    resource.pop('monitor', None)
                 if resource.get('probe_timeout'):
                     resource['last_probe_timeout'] = resource.pop('probe_timeout')
                 resource.setdefault('samples', []).append({'at': stamp, 'utilization': max((g['utilization'] for g in gpus), default=100)})
@@ -245,7 +275,8 @@ class Markflow:
         # With a slow platform poll, adding another 30 seconds here made a
         # healthy allocation repeatedly cross the 90-second freshness limit.
         last_sample = (resource.get('telemetry') or {}).get('at', resource.get('probe_checked', 0))
-        if not resource.get('probe_checked') or time.time()-last_sample >= 10:
+        if (not resource.get('probe_checked') or time.time()-last_sample >= 10
+                or resource.get('sample_requested_at', 0) > last_sample):
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
             resource['probe'] = {'job': job, 'at': time.time()}
             self.persist()

@@ -125,6 +125,55 @@ class ProbeRecoveryTests(unittest.TestCase):
         self.adapter.refresh_probe(self.resource)
         self.adapter.submit_job.assert_called_once()
 
+    def test_each_new_task_start_samples_even_when_reusing_fresh_gpu(self):
+        self.resource.update(status='online', probe_checked=time.time(), telemetry=dict(at=time.time()))
+        self.adapter.resources = {REQUEST: self.resource}
+        self.adapter.begin_task_sampling(self.task)
+        self.adapter.submit_job.assert_called_once()
+        self.assertEqual(self.resource['sampling_start']['task'], self.task['id'])
+        # A repeated lifecycle notification reuses the outstanding query.
+        self.adapter.begin_task_sampling(self.task)
+        self.adapter.submit_job.assert_called_once()
+        self.resource.update(probe=None, probe_checked=time.time(), telemetry=dict(at=time.time()))
+        second = dict(self.task, id='GQ-second', internal=dict(self.task['internal'], job_uuid='compute-2'))
+        self.adapter.begin_task_sampling(second)
+        self.assertEqual(self.adapter.submit_job.call_count, 2)
+
+    def test_start_waits_for_existing_probe_and_requests_post_start_sample(self):
+        before = time.time()-1
+        self.resource.update(status='online', probe=dict(job=JOB, at=before))
+        self.adapter.resources = {REQUEST: self.resource}
+        folder = self.adapter.job_folder(REQUEST)/JOB
+        atomic_json(folder/'status.json', dict(state='finished', exit_code=0))
+        (folder/'output.log').write_text('GPUQ_TELEMETRY='+json.dumps(dict(
+            at=before, gpus='0, GPU-test, H100, 81559, 1, 0, 30', apps='')))
+        self.adapter.begin_task_sampling(self.task)
+        self.adapter.submit_job.assert_not_called()
+        self.assertIn('sample_requested_at', self.resource)
+        self.adapter.refresh_probe(self.resource)
+        self.adapter.submit_job.assert_called_once()
+
+    def test_no_sampling_for_unstarted_stopped_or_unready_task(self):
+        self.adapter.resources = {REQUEST: self.resource}
+        for status in ['pending', 'closed', 'failed', 'unknown']:
+            self.resource['status'] = status
+            self.adapter.begin_task_sampling(self.task)
+        self.resource['status'] = 'online'
+        for changes in [dict(approved_at=None), dict(dispatch='submitting'),
+                        dict(job_uuid=None), dict(stop_requested_at='now')]:
+            self.adapter.begin_task_sampling(dict(self.task, internal=dict(self.task['internal'], **changes)))
+        self.adapter.submit_job.assert_not_called()
+        self.assertNotIn('sampling_start', self.resource)
+
+    def test_sampling_error_does_not_undo_computation_dispatch(self):
+        self.resource['status'] = 'online'
+        self.adapter.resources = {REQUEST: self.resource}
+        self.adapter.submit_job.side_effect = OSError('probe transport unavailable')
+        self.adapter.begin_task_sampling(self.task)
+        self.assertEqual(self.task['internal']['dispatch'], 'submitted')
+        self.assertEqual(self.task['internal']['job_uuid'], 'compute')
+        self.assertEqual(self.resource['monitor']['state'], 'retry')
+
 
 if __name__ == '__main__':
     unittest.main()
