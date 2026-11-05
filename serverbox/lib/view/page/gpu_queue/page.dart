@@ -443,6 +443,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         final fresh = queue.resources.any(
           (r) => QueueTarget.fresh(r, DateTime.now(), connected: connected),
         );
+        final latestSample = QueuePresentation.latestSample(queue.resources, DateTime.now());
         final tasks = queue.tasks.where((task) {
           if (widget.serverFilter != null &&
               _target(service, task, servers)?.id != widget.serverFilter) {
@@ -885,7 +886,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                               subtitle: Text(
                                 fresh
                                     ? '实时采样'
-                                    : '暂无数据 · 上次采样：${queue.resources.isEmpty ? '未提供' : QueuePresentation.sampleAbsolute(queue.resources.first)}',
+                                    : '暂无实时数据 · 上次采样：${latestSample == null ? '未提供' : QueuePresentation.sampleAbsolute(latestSample)}',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                               children: [

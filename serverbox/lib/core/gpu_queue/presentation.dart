@@ -183,6 +183,41 @@ abstract final class QueuePresentation {
         '${two(at.hour)}:${two(at.minute)}:${two(at.second)} ${at.timeZoneName}';
   }
 
+  static Map<String, dynamic>? latestSample(
+    List<Map<String, dynamic>> resources,
+    DateTime now,
+  ) {
+    Map<String, dynamic>? latest;
+    DateTime? last;
+    for (final resource in resources) {
+      final at = sampleTime(resource);
+      if (at == null || at.isAfter(now.add(const Duration(seconds: 5)))) continue;
+      if (last == null || at.isAfter(last)) {
+        latest = resource;
+        last = at;
+      }
+    }
+    return latest;
+  }
+
+  static String resourceStatus(Map<String, dynamic> resource) {
+    final status = resource['status'];
+    if (status == 'closed') return '已记录关闭';
+    if (status == 'failed') return '申请或启动失败';
+    final monitor = resource['monitor'];
+    final recovery = monitor is Map ? monitor['state'] : null;
+    return const {
+      'retry': '正在恢复采样',
+      'waiting': '查询超时，等待原查询回执',
+      'reconciling': '正在核对原查询回执',
+      'sampling': '正在重新采样',
+    }[recovery] ?? const {
+      'pending': '等待资源就绪',
+      'ready': '实例就绪，等待采样',
+      'unknown': '采样连接待核查',
+    }[status] ?? '采样已过期';
+  }
+
   static List<QueueGpuReading> gpus(
     Map<String, dynamic> resource,
     DateTime now, {

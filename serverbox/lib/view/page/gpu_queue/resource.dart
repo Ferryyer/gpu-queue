@@ -30,6 +30,7 @@ class QueueResourceView extends StatelessWidget {
             child: Text(QueuePresentation.sampleAge(resource, now)),
           ),
           if (!fresh) const Text('实时指标不可用，等待有效采样'),
+          if (!fresh) Text(connected ? QueuePresentation.resourceStatus(resource) : '任务服务连接已断开'),
           if (gpus.isEmpty) const Text('尚无 GPU 采样'),
           for (final gpu in gpus) ...[
             const SizedBox(height: 12),

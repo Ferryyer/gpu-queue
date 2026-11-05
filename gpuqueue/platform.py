@@ -1,5 +1,6 @@
 """Personal Markflow adapter. No action is called until browser approval exists."""
 import csv
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import json
 import math
@@ -110,7 +111,7 @@ class Markflow:
         if resource['status'] in ['closed', 'failed'] or time.time() - resource.get('notice_checked', 0) < 60:
             return
         resource['notice_checked'] = time.time()
-        data = self.lark(['im', '+messages-search', '--query', resource['id'], '--no-reactions'])
+        data = self.lark(['im', '+messages-search', '--query', resource['id'], '--no-reactions'], timeout=8)
         messages = data.get('messages', [])
         for message in reversed(messages):
             if message.get('sender', {}).get('id') != TRUSTED_SENDER or message.get('deleted'):
@@ -151,8 +152,47 @@ class Markflow:
             raise PlatformError('GPU 任务回执不完整，已停止自动重试')
         return value['job']
 
+    def recover_active_probe(self, resource):
+        """Retry only diagnostics, with fresh evidence from an existing runner.
+
+        A pending probe keeps its identity until its actual receipt arrives.
+        Historical notices and old running receipts cannot trigger retries.
+        """
+        if not self.probe_timed_out(resource) or resource.get('probe'):
+            return
+        monitor = resource.get('monitor') or {}
+        if monitor.get('attempts', 0) >= 3 or time.time()-monitor.get('at', 0) < 30:
+            return
+        for task in self.store.tasks():
+            internal = task['internal']
+            if (internal.get('request_uuid') != resource['id'] or not internal.get('approved_at')
+                    or internal.get('dispatch') != 'submitted' or not internal.get('job_uuid')
+                    or internal.get('stop_requested_at')
+                    or task['public']['state'] not in ['starting', 'running']):
+                continue
+            runner = read_json(self.store.root/'tasks'/task['id']/'run/status.json', {})
+            at = runner.get('updated_at')
+            if (runner.get('gpu_verified') is not True or runner.get('state') != 'running'
+                    or not isinstance(at, (int, float)) or not math.isfinite(at)
+                    or not -5 <= time.time()-at < 90):
+                continue
+            old_job = (resource.get('probe_timeout') or {}).get('job')
+            if old_job:
+                folder = self.job_folder(resource['id'])
+                receipt = read_json(folder/old_job/'status.json', {})
+                if (folder/(old_job+'.json')).exists() or receipt.get('state') == 'running':
+                    resource['probe'] = {'job': old_job, 'at': time.time()}
+                    resource['monitor'] = dict(monitor, state='reconciling')
+                    return
+            resource['monitor'] = dict(state='sampling', attempts=monitor.get('attempts', 0)+1,
+                                       at=time.time(), task=task['id'])
+            resource['probe_checked'] = 0
+            return
+
     def refresh_probe(self, resource):
-        if resource['status'] not in ['ready', 'online']:
+        if resource['status'] not in ['ready', 'online'] and not (
+                resource['status'] == 'unknown' and (resource.get('probe') or
+                    (resource.get('monitor') or {}).get('state') == 'sampling')):
             return
         probe = resource.get('probe')
         if probe:
@@ -175,6 +215,10 @@ class Markflow:
                 if not math.isfinite(stamp) or stamp <= 0 or stamp > time.time()+5:
                     raise PlatformError('GPU 遥测采样时间无效')
                 resource.update(status='online', telemetry={'gpus': gpus, 'apps': apps, 'at': stamp, 'host': payload.get('host', '')}, probe=None, probe_checked=time.time())
+                resource.pop('error', None)
+                resource.pop('monitor', None)
+                if resource.get('probe_timeout'):
+                    resource['last_probe_timeout'] = resource.pop('probe_timeout')
                 resource.setdefault('samples', []).append({'at': stamp, 'utilization': max((g['utilization'] for g in gpus), default=100)})
                 resource['samples'] = [sample for sample in resource['samples'] if stamp-sample['at'] < 420]
                 return
@@ -184,17 +228,18 @@ class Markflow:
                              'GPUQ_PROBE_TIMEOUT=1' in output.read_text(errors='replace').splitlines())
                 resource.update(status='unknown', probe=None,
                                 error='GPU 检查超时；旧实例是否回收尚未确认' if timed_out else 'GPU 只读检查失败，无法确认资源可用')
+                if resource.get('monitor'):
+                    resource['monitor']['state'] = 'retry'
                 if timed_out:
                     resource['probe_timeout'] = {'at': now(), 'job': probe['job']}
                 return
             if time.time()-probe['at'] > 100:
-                # Only remove a diagnostic that has not been claimed.
-                specification = self.job_folder(resource['id'])/(probe['job']+'.json')
-                if not status and specification.exists():
-                    specification.unlink()
-                resource.update(status='unknown', probe=None,
+                # A slow claim is not a failed query. Keep this exact probe so
+                # a late receipt is reconciled instead of submitting duplicates.
+                resource.update(status='unknown',
                                 probe_timeout={'at': now(), 'job': probe['job']},
                                 error='GPU 检查超时；旧实例是否回收尚未确认')
+                resource.setdefault('monitor', {})['state'] = 'waiting'
             return
         if time.time()-resource.get('probe_checked', 0) >= 30:
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
@@ -211,19 +256,27 @@ class Markflow:
             for task in self.store.tasks():
                 replaceable.update(r['id'] for r in self.replacement_candidates(task))
                 replaceable.update(task['internal'].get('timeout_replacement', {}).get('prior_requests', []))
-            for resource in list(self.resources.values()):
-                # A failed notification query must not prevent reading a probe
-                # already completed in shared HOME, or skip other allocations.
-                for refresh in (self.refresh_notice, self.refresh_probe):
+            resources = list(self.resources.values())
+            # Slow historical notification searches must not serially delay
+            # current GPU samples beyond their 90-second freshness window.
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                notices = [(resource, pool.submit(self.refresh_notice, resource)) for resource in resources]
+                for resource, future in notices:
                     try:
-                        refresh(resource)
+                        future.result()
                     except (PlatformError, OSError, subprocess.SubprocessError) as error:
-                        if refresh == self.refresh_notice and resource['id'] in replaceable and self.probe_timed_out(resource):
-                            # An unreachable historical notice must not veto the
-                            # user's timeout policy or block a newer allocation.
+                        if resource['id'] in replaceable and self.probe_timed_out(resource):
                             resource['notice_error'] = str(error)[:400]
                         else:
                             errors.append(error)
+            for resource in resources:
+                # A failed notification query must not prevent reading a probe
+                # already completed in shared HOME, or skip other allocations.
+                for refresh in (self.recover_active_probe, self.refresh_probe):
+                    try:
+                        refresh(resource)
+                    except (PlatformError, OSError, subprocess.SubprocessError) as error:
+                        errors.append(error)
             if errors:
                 # Keep the scheduler fail-closed while publishing any real
                 # samples recovered above; never refresh their GPU timestamp.

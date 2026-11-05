@@ -75,6 +75,21 @@ void main() {
     expect(QueuePresentation.requirements(task), '申请 GPU：1 张 GPU · 每卡显存：2 GB');
     expect(QueuePresentation.version(task), 'abc123');
   });
+  test('last sample is the newest real GPU timestamp, regardless of record order', () {
+    final old = resource(age: 86400, status: 'closed');
+    final recent = resource(age: 120, status: 'unknown');
+    final future = resource(age: -60);
+    for (final records in [
+      [old, recent, future, <String, dynamic>{}],
+      [recent, old, future],
+    ]) {
+      expect(QueuePresentation.latestSample(records, now), same(recent));
+    }
+    expect(QueuePresentation.latestSample([{}, future], now), isNull);
+    expect(QueuePresentation.resourceStatus({'status': 'unknown'}), '采样连接待核查');
+    expect(QueuePresentation.resourceStatus({'status': 'unknown', 'monitor': {'state': 'sampling'}}), '正在重新采样');
+    expect(QueuePresentation.resourceStatus({'status': 'closed', 'monitor': {'state': 'sampling'}}), '已记录关闭');
+  });
   test('missing requirements are never presented as zero', () {
     for (final resources in [
       null,

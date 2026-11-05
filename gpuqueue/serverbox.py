@@ -30,6 +30,7 @@ def publish(resources, home):
                              temperature_c=metric(gpu.get('temperature_c'))))
         records.append(dict(request=request, status=resource['status'],
                             collected_at=stamp, host=telemetry.get('host', ''), gpus=gpus,
+                            monitor={key: resource['monitor'][key] for key in ['state'] if key in resource.get('monitor', {})},
                             release_pending=resource.get('release', {}).get('state') == 'pending_interface'))
     path = Path(home)/'.local/state/serverbox-gpu/registry.json'
     atomic_json(path, dict(schema=1, source='gpuq', updated_at=time.time(), resources=records))
