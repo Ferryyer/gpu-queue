@@ -241,7 +241,11 @@ class Markflow:
                                 error='GPU 检查超时；旧实例是否回收尚未确认')
                 resource.setdefault('monitor', {})['state'] = 'waiting'
             return
-        if time.time()-resource.get('probe_checked', 0) >= 30:
+        # Count from the GPU sample, not when a delayed receipt was consumed.
+        # With a slow platform poll, adding another 30 seconds here made a
+        # healthy allocation repeatedly cross the 90-second freshness limit.
+        last_sample = (resource.get('telemetry') or {}).get('at', resource.get('probe_checked', 0))
+        if not resource.get('probe_checked') or time.time()-last_sample >= 10:
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
             resource['probe'] = {'job': job, 'at': time.time()}
             self.persist()

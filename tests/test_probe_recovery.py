@@ -117,6 +117,14 @@ class ProbeRecoveryTests(unittest.TestCase):
         self.assertEqual(self.adapter.lark.call_count, 2)
         self.adapter.submit_job.assert_not_called()
 
+    def test_delayed_receipt_does_not_add_another_thirty_seconds_before_sampling(self):
+        self.resource.update(status='online', probe_checked=time.time(),
+                             telemetry=dict(at=time.time()-20))
+        self.adapter.refresh_probe(self.resource)
+        self.adapter.submit_job.assert_called_once()
+        self.adapter.refresh_probe(self.resource)
+        self.adapter.submit_job.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()
