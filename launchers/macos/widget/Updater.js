@@ -38,13 +38,6 @@ function command(path, args, done) {
         } else done(null, out);
     });
 }
-function zipListing(option, done) {
-    // Finder does not reliably provide a UTF-8 locale. Do not inherit options
-    // that could change the listing format used by the package validator.
-    command('/usr/bin/env', ['LC_ALL=en_US.UTF-8','LANG=en_US.UTF-8',
-        'ZIPINFO=','ZIPINFOOPT=','UNZIP=','UNZIPOPT=',
-        '/usr/bin/unzip','-Z',option,archive], done);
-}
 function curl(url, output, maximum, done) {
     var args = ['--fail','--silent','--show-error','--location','--proto','=https','--proto-redir','=https',
         '--connect-timeout','10','--max-time',output ? '150' : '20','--max-filesize',String(maximum)];
@@ -67,18 +60,15 @@ function operation(phase, release, done) {
             else done(null);
         });
     } else if (phase === 'extracting') {
-        zipListing('-1',function (error,out) {
+        try {
+            var zip = $.NSData.dataWithContentsOfFile(archive);
+            if (zip.isNil()) throw new Error('无法读取安装包');
+            GPUQUpdates.archiveBase64(text(zip.base64EncodedStringWithOptions(0)));
+        } catch (error) { done(error.message); return; }
+        command('/usr/bin/ditto',['-x','-k',archive,unpacked],function (error) {
             if (error) { done(error); return; }
-            try { GPUQUpdates.archiveEntries(out); } catch (e) { done(e.message); return; }
-            zipListing('-l',function (error,listing) {
-                if (error) { done(error); return; }
-                try { GPUQUpdates.archiveMetadata(listing); } catch (e) { done(e.message); return; }
-                command('/usr/bin/ditto',['-x','-k',archive,unpacked],function (error) {
-                    if (error) { done(error); return; }
-                    if (readFile(unpacked + '/GPU任务台桌面小组件/VERSION') !== release.version) done('安装包版本与更新信息不一致。');
-                    else done(null);
-                });
-            });
+            if (readFile(unpacked + '/GPU任务台桌面小组件/VERSION') !== release.version) done('安装包版本与更新信息不一致。');
+            else done(null);
         });
     } else if (phase === 'preparing') {
         command('/bin/bash',[unpacked + '/GPU任务台桌面小组件/安装桌面小组件.command','--update',workDir],done);
