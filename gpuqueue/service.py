@@ -1,6 +1,7 @@
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -10,6 +11,8 @@ from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, re
 from .platform import Markflow, PlatformError
 
 from .control import Control, QueueChanged
+
+RELEASE_DELAY_SECONDS = 90 * 60
 
 def redact(text):
     text = re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[redacted]', text)
@@ -243,25 +246,50 @@ class Service:
                     self.store.save(task)
 
     def record_release_intents(self, tasks):
-        """Track the user's intent without pretending an unsupported release ran."""
+        """Persist a 90-minute idle grace period, never a fictitious release."""
         policy = self.store.metadata('resource_policy') or {}
-        if not policy.get('release_when_queue_idle'):
-            return
+        enabled = policy.get('release_when_queue_idle')
         # A failed/blocked submission may still be running. It must be reconciled
         # before any future release adapter can act on this intent.
         busy = any(t['internal'].get('approved_at') and (
             t['public']['state'] not in TERMINAL or
             t['internal'].get('dispatch') in ['submitting', 'unknown']
         ) for t in tasks)
+        # Detect a newly approved task even if it finished while we were down.
+        queue_digest = hashlib.sha256(canonical(sorted(
+            (t['id'], t['digest'], t['internal']['approved_at'])
+            for t in tasks if t['internal'].get('approved_at')
+        )).encode()).hexdigest()
+        stamp = time.time()
         changed = False
         for resource in self.platform.resources.values():
             if not resource.get('owned_by_gpuq') or not resource.get('release_when_done') or resource['status'] in ['closed', 'failed']:
                 continue
-            intended = 'armed' if busy else 'pending_interface'
-            if resource.get('release', {}).get('state') == intended:
+            previous = resource.get('release') or {}
+            if not enabled and not previous:
                 continue
-            release = {'state': intended, 'at': now(), 'released': False,
-                       'reason': '等待已启动的队列结束' if busy else '队列已结束；平台尚无成员主动释放接口，资源未确认释放'}
+            release = {'state': 'disabled' if not enabled else 'armed',
+                       'released': False, 'delay_seconds': RELEASE_DELAY_SECONDS,
+                       'reason': '自动释放偏好已关闭' if not enabled else '等待所有已启动任务结束，再保留 GPU 90 分钟'}
+            if enabled and not busy:
+                idle_since = previous.get('idle_since')
+                valid = (previous.get('state') in ['grace_period', 'pending_interface'] and
+                         previous.get('queue_digest') == queue_digest and
+                         previous.get('delay_seconds') == RELEASE_DELAY_SECONDS and
+                         type(idle_since) in [int, float] and math.isfinite(idle_since) and
+                         0 <= idle_since <= stamp)
+                if not valid:
+                    idle_since = stamp
+                release_after = idle_since + RELEASE_DELAY_SECONDS
+                due = stamp >= release_after
+                release.update(state='pending_interface' if due else 'grace_period',
+                               idle_since=idle_since, release_after=release_after,
+                               queue_digest=queue_digest,
+                               reason='队列结束已满 90 分钟；平台尚无成员主动释放接口，资源未确认释放' if due else
+                                      '所有已启动任务均已结束，保留 GPU 90 分钟后待释放；平台释放接口尚未开放')
+            if {k: v for k, v in previous.items() if k != 'at'} == release:
+                continue
+            release['at'] = now()
             resource['release'] = release
             atomic_json(self.store.root/'release-intents'/(resource['id']+'.json'), {'request': resource['id'], **release})
             changed = True
