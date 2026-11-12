@@ -27,6 +27,7 @@ class HandoffTests(unittest.TestCase):
         }
         self.store = Store(self.home/'queue')
         self.adapter = Markflow(self.store, {'home': str(self.home), 'username': 'linlishuo'})
+        self.adapter.check_auth = Mock()
         self.adapter.run = Mock(side_effect=AssertionError('external command forbidden'))
         self.adapter.submit_job = Mock(side_effect=AssertionError('GPU dispatch forbidden'))
 
@@ -130,6 +131,7 @@ class HandoffTests(unittest.TestCase):
         request = task['internal']['request_uuid']
         self.assertEqual(read_json(self.home/'.local/state/markflow-gpu-requests'/request/'state.json')['state'], 'submission_unknown')
         self.adapter = Markflow(self.store, self.adapter.config)
+        self.adapter.check_auth = Mock()
         self.adapter.lark = Mock(side_effect=AssertionError('no HTTP replay'))
         self.adapter.submit_job = Mock(side_effect=AssertionError('no GPU dispatch'))
         self.assertEqual(self.cycle()['internal']['request_uuid'], request)

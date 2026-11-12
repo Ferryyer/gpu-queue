@@ -25,6 +25,7 @@ class ProbeRecoveryTests(unittest.TestCase):
         self.store.metadata.return_value = {}
         self.store.tasks.return_value = [self.task]
         self.adapter = Markflow(self.store, dict(home=str(self.home)))
+        self.adapter.check_auth = Mock()
         self.adapter.submit_job = Mock(return_value=JOB)
         self.resource = dict(id=REQUEST, status='unknown', probe_timeout=dict(at='old', job='old-probe'))
         self.runner = self.store.root/'tasks/GQ-test/run/status.json'

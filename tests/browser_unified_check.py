@@ -18,9 +18,18 @@ try:
         page = browser.new_page(viewport={'width':1440,'height':1000})
         errors=[]; page.on('pageerror', lambda e: errors.append(str(e)))
         sampled=time.time()-35
+        auth_blocked=False
         def state(route):
             data=route.fetch().json()
             data['heartbeat']['resources']=[dict(id='fixture-gpu',status='online',telemetry=dict(at=sampled,host='fixture-host',gpus=[dict(index=0,name='H100',used_mb=40960,total_mb=81920,utilization=65,temperature_c=61)]))]
+            if auth_blocked:
+                data['heartbeat']['feishu_auth'] = dict(state='blocked', code='token_missing',
+                    message='飞书本人登录凭据缺失', checked_at='2026-11-12T10:30:00Z')
+                head, *waiting = [task for task in data['tasks'] if task['approved_at'] and not task['claimed_at']
+                                  and task['state'] in ('queued','waiting_gpu','checking_resources')]
+                head.update(queue_stage='feishu_auth', phase='等待飞书本人授权，尚未投放计算')
+                for task in waiting:
+                    task.update(queue_stage='predecessor', phase='等待前序任务，前序任务等待飞书本人授权')
             route.fulfill(json=data)
         page.route('**/api/state',state)
         page.route('**/api/host',lambda r:r.fulfill(json={'available':True,'at':time.time(),'text':'42 个线程\n8 个进程 · fixture'}))
@@ -119,6 +128,17 @@ try:
         # Explicit actions only: toggling modes, failed reads and recovery do
         # not authorize any ready fixture task.
         assert next(t for t in page.request.get('http://127.0.0.1:8765/api/state').json()['tasks'] if t['id']=='GQ-0000000000000004')['approved_at'] is None
+        auth_blocked=True
+        page.locator('#refresh').click()
+        expect(page.locator('#feishu-auth')).to_be_visible()
+        expect(page.locator('.task-row .badge',has_text='等待飞书本人授权')).to_have_count(1)
+        expect(page.locator('.task-row .badge',has_text='等待前序任务')).to_have_count(1)
+        page.locator('#feishu-auth summary').click()
+        expect(page.locator('#feishu-auth code')).to_have_text('gpuq auth')
+        expect(page.locator('#feishu-auth-reason')).to_contain_text('18:30')
+        auth_blocked=False
+        page.locator('#refresh').click()
+        expect(page.locator('#feishu-auth')).to_be_hidden()
         assert not errors,errors
         browser.close()
         (OUT/'checks.json').write_text(json.dumps({'focusPolls':2,'keyboardActionAfterPoll':True,'widths':[320,390,640,800,1024,1440],'freshnessFailureRecovery':True,'mobileDetail':True,'modalChecks':modal_checks,'nestedStopDialog':True,'resizeClearsIsolation':True,'errors':errors},indent=2))

@@ -20,6 +20,14 @@
 <main>
 <div class="page-heading"><div><div class="eyebrow">YOUR EXPERIMENTS, IN ORDER.</div><h1>每个实验，都有进展<span>。</span></h1><p>准备就绪的任务在这里集合。查看、排序，然后开始。</p></div><button class="button secondary" id="refresh">↻ 刷新状态</button></div>
 <div class="demo-note" id="connection-note"><span>◈</span><span>正在连接服务器。任务由 Agent 准备提交；只有你在这里点击开始，才会复用或申请 GPU。</span></div>
+<section class="notice failure" id="feishu-auth" aria-labelledby="feishu-auth-title" hidden>
+<strong id="feishu-auth-title">等待飞书本人授权，尚未投放计算</strong>
+<p id="feishu-auth-reason" role="status"></p>
+<details><summary>恢复飞书本人授权</summary>
+<p>在任务台所在的 CPU 网关终端运行 <code>gpuq auth</code>，按飞书提示使用任务所属成员本人账号授权。授权被拒绝或链接到期后，可重新运行该命令。队列会保留原有的启动授权，核验通过后自动继续。</p>
+<button class="button secondary" id="copy-feishu-auth">复制登录命令</button>
+</details>
+</section>
 <section class="mode-toolbar" aria-label="操作模式"><button id="interaction-mode" class="mode-switch" aria-describedby="mode-hint" aria-keyshortcuts="Shift+Tab" aria-pressed="false"><span id="mode-label">Edit mode</span><kbd>Shift ⇥</kbd></button><span id="mode-hint" role="status" aria-live="polite">编辑队列，手动启动准备好的任务。</span></section>
 <section class="stats" id="stats" aria-label="任务统计"></section>
 <div class="workbench">

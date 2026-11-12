@@ -8,12 +8,15 @@ import shutil
 import time
 from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, read_json, canonical, now
 from .platform import Markflow, PlatformError
+from .feishu import FeishuAuthError
 
 from .control import Control, QueueChanged
 
 def redact(text):
     text = re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[redacted]', text)
-    text = re.sub(r'(?i)((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+', r'\1[redacted]', text)
+    text = re.sub(
+        r"""(?i)((?:api[_-]?key|(?:access|refresh)[_-]?token|device[_-]?code|password|secret)["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s,;]+)""",
+        r'\1[redacted]', text)
     return re.sub(r'\bsk-[A-Za-z0-9_-]{15,}', '[redacted]', text)
 
 def tail(path, limit=8000):
@@ -31,6 +34,7 @@ class Service:
         self.remote_revision = None
         self.synced = {}
         self.error = None
+        self.checked_at = None
 
     def remote(self, path, payload):
         control = Control(self.store)
@@ -51,8 +55,14 @@ class Service:
                 changed.append({'id': task['id'], 'digest': task['digest'], 'payload': task['public']})
         resources = []
         for resource in self.platform.resources.values():
-            resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'monitor']})
-        response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {'service': 'online', 'error': self.error, 'resources': resources, 'resource_policy': self.store.metadata('resource_policy'), 'updated_at': now()}})
+            resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'monitor', 'recorded_phase']})
+        response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {
+            'service': 'online', 'error': self.error, 'resources': resources,
+            'resource_policy': self.store.metadata('resource_policy'), 'updated_at': now(),
+            'feishu_auth': self.store.metadata('feishu_auth'),
+            'checked_at': self.checked_at,
+            'last_success_at': self.store.metadata('queue_last_success_at'),
+        }})
         self.synced.update(fingerprints)
         self.remote_revision = response['revision']
         for remote in response['tasks']:
@@ -61,8 +71,14 @@ class Service:
                 continue
             if remote.get('approved_at') and not local['internal'].get('approved_at'):
                 local['internal']['approved_at'] = remote['approved_at']
-                local['public'].update(state='queued', approved_at=remote['approved_at'])
+                local['public']['approved_at'] = remote['approved_at']
+                if local['public']['state'] == 'ready':
+                    local['public']['state'] = 'queued'
                 local['public']['events'].append('你在网页点击了开始，授权执行这一版完整流程')
+            if (remote.get('claimed_at') and not local['internal'].get('dispatch')
+                    and not local['internal'].get('job_uuid') and local['public']['state'] not in TERMINAL):
+                local['internal']['dispatch'] = 'unknown'
+                local['public'].update(state='blocked', failureReason='任务已被领取，正在核对计算投放记录')
             local['internal']['position'] = remote['position']
             if remote.get('stop_requested_at'):
                 at = remote['stop_requested_at']
@@ -77,15 +93,21 @@ class Service:
     def refresh_task(self, task):
         internal, public = task['internal'], task['public']
         request_id, job_id = internal.get('request_uuid'), internal.get('job_uuid')
-        if internal.get('dispatch') == 'submitting' and not job_id:
-            expected = internal['argv']
+        if internal.get('dispatch') in ['submitting', 'unknown'] and not job_id:
+            expected = internal.get('argv')
+            if not expected:
+                marker = read_json(self.store.root/'tasks'/task['id']/'run/dispatch.json', {})
+                if marker.get('task') == task['id'] and marker.get('digest') == task['digest']:
+                    request_id, expected = marker.get('request'), marker.get('argv')
             matches = []
-            for file in self.platform.job_folder(request_id).glob('*.json'):
-                if read_json(file, {}).get('argv') == expected:
-                    matches.append(file.stem)
+            if request_id and expected:
+                for file in self.platform.job_folder(request_id).glob('*.json'):
+                    if read_json(file, {}).get('argv') == expected:
+                        matches.append(file.stem)
             if len(matches) == 1:
-                internal.update(job_uuid=matches[0], dispatch='submitted')
+                internal.update(request_uuid=request_id, job_uuid=matches[0], dispatch='submitted')
                 job_id = matches[0]
+                public.update(state='dispatching', phase='已核对计算回执，等待执行状态')
             else:
                 internal['dispatch'] = 'unknown'
                 public.update(state='blocked', failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
@@ -113,6 +135,8 @@ class Service:
                 internal['finished_recorded'] = True
         elif job_status.get('state') in ['finished', 'failed']:
             public.update(state='failed', failureReason='执行入口退出，尚未开始步骤。请查看任务日志。', entry_log=tail(self.platform.job_folder(request_id)/job_id/'output.log'))
+        elif public['state'] not in TERMINAL and time.time()-internal.get('dispatched_at', job_status.get('at', 0)) > 180:
+            public.update(state='execution_unknown', failureReason='已投放计算，等待执行端回执核查')
         resource = self.platform.resources.get(request_id, {})
         if resource.get('status') == 'closed' and public['state'] not in TERMINAL:
             public.update(state='interrupted', failureReason='GPU 已回收，任务中断；保留已有检查点，不自动重新申请或重跑')
@@ -228,8 +252,11 @@ class Service:
         for task in self.store.tasks():
             self.process_stop(task)
         tasks = self.store.tasks()
-        active = [t for t in tasks if t['public']['state'] in ['starting', 'running', 'dispatching', 'execution_unknown', 'stopping']]
-        pending = sorted([t for t in tasks if t['internal'].get('approved_at') and t['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']], key=lambda t: t['internal']['position'])
+        active = [t for t in tasks if t['public']['state'] in ['starting', 'running', 'dispatching', 'execution_unknown', 'stopping']
+                  or t['internal'].get('dispatch') in ['submitting', 'unknown'] and not t['internal'].get('stop_confirmed')]
+        pending = sorted([t for t in tasks if t['internal'].get('approved_at')
+                          and not t['internal'].get('dispatch') and not t['internal'].get('job_uuid')
+                          and t['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']], key=lambda t: t['internal']['position'])
         self.platform.refresh(active=bool(active or pending))
         self.record_release_intents(tasks)
         if not pending:
@@ -277,19 +304,25 @@ class Service:
         try:
             self.tick()
             self.error = None
+            self.store.metadata('queue_last_success_at', now())
         except QueueChanged:
             pass
         except Exception as error:
             message = redact(str(error))[:400]
+            if isinstance(error, FeishuAuthError):
+                if self.platform.auth.get('code') != error.code:
+                    self.platform.record_auth(error)
+                message = '等待飞书本人授权，尚未投放计算。'+str(error)
             if message != self.error:
                 print('Queue service: '+message, flush=True)
             self.error = message
             for task in self.store.tasks():
                 if task['internal'].get('approved_at') and task['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']:
-                    task['public']['phase'] = 'GPU 申请或状态核查未完成；已暂停新增申请：'+message
+                    task['public']['phase'] = message if isinstance(error, FeishuAuthError) else 'GPU 申请或状态核查未完成；已暂停新增申请：'+message
                     self.store.save(task)
         # tick publishes before platform I/O to read browser decisions. Publish
         # again afterwards so failures and recovered states reach the UI now.
+        self.checked_at = now()
         try:
             self.sync()
         except Exception as error:

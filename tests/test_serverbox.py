@@ -19,6 +19,7 @@ class ServerBoxTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.store = Store(self.home/'queue')
         self.adapter = Markflow(self.store, dict(home=str(self.home), username='linlishuo'))
+        self.adapter.check_auth = Mock()
         self.path = self.home/'.local/state/serverbox-gpu/registry.json'
 
     def tearDown(self):

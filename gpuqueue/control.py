@@ -1,4 +1,6 @@
 """Local queue authority. Browser approvals are separate from scheduler snapshots."""
+import time
+
 from .core import Store, canonical, now, atomic_json, TERMINAL
 
 LIVE = {'ready', 'queued', 'waiting_gpu', 'checking_resources'}
@@ -46,7 +48,31 @@ class Control:
             task.update(digest=row['digest'], approved_at=row['approved_at'], claimed_at=row['claimed_at'], position=row['position'], stop_requested_at=row['stop_at'], stopped_at=row['stopped_at'])
             tasks.append(task)
         heartbeat = db.execute("SELECT value FROM queue_meta WHERE key='heartbeat'").fetchone()
-        return {'revision': self.revision(db), 'tasks': tasks, 'heartbeat': json.loads(heartbeat[0]) if heartbeat else None, 'capabilities': {'task_delete': True}}
+        heartbeat = json.loads(heartbeat[0]) if heartbeat else None
+        resources = {r['id']: r for r in (heartbeat or {}).get('resources', [])}
+        auth = (heartbeat or {}).get('feishu_auth') or {}
+        pending = [t for t in tasks if t['approved_at'] and not t['claimed_at'] and t['state'] in LIVE]
+        if pending:
+            head = pending[0]
+            resource = resources.get(head.get('request_uuid'), {})
+            recorded = resource.get('recorded_phase')
+            if auth.get('state') == 'blocked':
+                head.update(queue_stage='feishu_auth',
+                            phase='等待飞书本人授权，尚未投放计算。'+auth['message'])
+            elif recorded in ('submitting', 'submission_unknown'):
+                head['queue_stage'] = 'request_unknown'
+            elif resource.get('status') == 'ready' or (
+                    resource.get('status') == 'online' and
+                    -5 <= time.time()-(resource.get('telemetry') or {}).get('at', 0) < 90):
+                head['queue_stage'] = 'resource_ready'
+            elif recorded == 'submitted' and resource.get('status') == 'pending':
+                head['queue_stage'] = 'request_submitted'
+            else:
+                head['queue_stage'] = 'checking_resources'
+            reason = head.get('phase') or '正在核查 GPU 资源'
+            for task in pending[1:]:
+                task.update(queue_stage='predecessor', phase=f"等待前序任务 {head['id']}。{reason}")
+        return {'revision': self.revision(db), 'tasks': tasks, 'heartbeat': heartbeat, 'capabilities': {'task_delete': True}}
 
     def _check_delete(self, db, task):
         import json
