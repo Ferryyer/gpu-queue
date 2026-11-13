@@ -33,9 +33,20 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
     }
   }
 }
-if info["FixtureQuitWhenReady"] as? Bool == true {
+if let plan = info["FixturePlan"] as? String {
   let status = URL(fileURLWithPath: info["FixtureStatus"] as! String)
+  let helper = Process()
+  helper.executableURL = URL(fileURLWithPath: info["FixtureHelper"] as! String)
+  helper.arguments = [plan]
+  let log = FileHandle(forWritingAtPath: info["FixtureLog"] as! String)!
+  helper.standardOutput = log
+  helper.standardError = log
+  var started = false
   Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+    if !started && FileManager.default.fileExists(atPath: plan) {
+      started = true
+      try! helper.run()
+    }
     if let data = try? Data(contentsOf: status),
        let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
        state["phase"] as? String == "ready" {
@@ -97,20 +108,26 @@ def main():
             bundle_id = 'work.gpuqueue.updater.fixture.' + uuid.uuid4().hex
             pids = set()
             child = None
-            log = (out/f'{scenario}.log').open('wb')
+            log_path = out/f'{scenario}.log'
+            log = log_path.open('wb')
+            planfile = work/'plan.json'
             try:
                 def make_app(path, build, ack, identifier=bundle_id, quit_when_ready=False):
                     contents = path/'Contents'
                     (contents/'MacOS').mkdir(parents=True)
                     (contents/'MacOS/Fixture').write_bytes(fixture.read_bytes())
                     (contents/'MacOS/Fixture').chmod(0o755)
-                    (contents/'Info.plist').write_bytes(plistlib.dumps({
+                    info = {
                         'CFBundleExecutable': 'Fixture', 'CFBundleIdentifier': identifier,
                         'CFBundleVersion': str(build), 'CFBundleShortVersionString': f'2.0.{build}',
                         'CFBundleName': 'Inspire Queue Fixture', 'CFBundlePackageType': 'APPL',
                         'LSUIElement': True, 'FixtureAck': ack, 'FixtureStatus': str(status),
-                        'FixtureReceipt': str(receipt), 'FixtureQuitWhenReady': quit_when_ready,
-                    }))
+                        'FixtureReceipt': str(receipt),
+                    }
+                    if quit_when_ready:
+                        info.update(FixtureHelper=str(helper), FixturePlan=str(planfile),
+                                    FixtureLog=str(log_path))
+                    (contents/'Info.plist').write_bytes(plistlib.dumps(info))
                     run('codesign', '--force', '--sign', '-', str(path))
 
                 make_app(destination, 100, False, quit_when_ready=scenario == 'success')
@@ -134,28 +151,36 @@ def main():
                     plan['sha256'] = '0' * 64
                 if scenario == 'cancelled':
                     (work/'cancel').touch()
-                planfile = work/'plan.json'
-                planfile.write_text(json.dumps(plan))
-                child = subprocess.Popen([str(helper), str(planfile)], stdout=log, stderr=log)
-                if scenario in ('legacy_payload', 'rollback', 'quit_timeout'):
-                    wait_for(lambda: read(status).get('phase') in ('ready', 'failed'))
-                    assert read(status)['phase'] == 'ready', read(status)
-                if scenario in ('legacy_payload', 'rollback'):
-                    os.kill(old['pid'], signal.SIGTERM)
-                code = child.wait(timeout=55)
+                draft_plan = work/'plan.tmp'
+                draft_plan.write_text(json.dumps(plan))
+                draft_plan.replace(planfile)
+                if scenario == 'success':
+                    # Match production: the quitting application is the helper's parent.
+                    wait_for(lambda: read(status).get('phase') in ('complete', 'failed', 'rolled_back'))
+                    assert read(status)['phase'] == 'complete', read(status)
+                    wait_for(lambda: not work.exists())
+                else:
+                    child = subprocess.Popen([str(helper), str(planfile)], stdout=log, stderr=log)
+                    if scenario in ('legacy_payload', 'rollback', 'quit_timeout'):
+                        wait_for(lambda: read(status).get('phase') in ('ready', 'failed'))
+                        assert read(status)['phase'] == 'ready', read(status)
+                    if scenario in ('legacy_payload', 'rollback'):
+                        os.kill(old['pid'], signal.SIGTERM)
+                    code = child.wait(timeout=55)
+                    assert (code == 0) == (scenario in ('legacy_payload', 'rollback')), read(status)
                 state = read(status)
                 installed = plistlib.loads((destination/'Contents/Info.plist').read_bytes())
                 if scenario in ('success', 'legacy_payload'):
-                    assert code == 0 and state['phase'] == 'complete', state
+                    assert state['phase'] == 'complete', state
                     assert installed['CFBundleVersion'] == '101'
                     assert Path(state['backup']).is_dir()
                     assert read(receipt)['build'] == '101'
                 elif scenario == 'rollback':
-                    assert code == 0 and state['phase'] == 'rolled_back', state
+                    assert state['phase'] == 'rolled_back', state
                     assert installed['CFBundleVersion'] == '100'
                     wait_for(lambda: read(receipt).get('build') == '100' and read(receipt).get('pid') != old['pid'])
                 else:
-                    assert code != 0 and state['phase'] == 'failed', state
+                    assert state['phase'] == 'failed', state
                     assert installed['CFBundleVersion'] == '100'
                     os.kill(old['pid'], 0)  # A failed preflight never terminates the old application.
                 assert data.read_text() == '{"ssh":"keep","token":"fixture"}'
