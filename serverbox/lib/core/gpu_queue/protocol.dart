@@ -83,4 +83,14 @@ abstract final class QueueTarget {
         ? value
         : null;
   }
+
+  static String? resultDirectory(Object? path) {
+    if (path is! String || !path.startsWith('/') || path.endsWith('/') ||
+        path.contains('\x00') ||
+        path.split('/').any((part) => part == '.' || part == '..')) {
+      return null;
+    }
+    final slash = path.lastIndexOf('/');
+    return slash == 0 ? '/' : path.substring(0, slash);
+  }
 }

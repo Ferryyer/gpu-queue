@@ -40,6 +40,9 @@ final class SftpPageArgs {
 
   final String? initPath;
 
+  /// Show the requested directory's listing error for an explicit file link.
+  final bool fallbackOnMissingPath;
+
   /// Where this page publishes its toolbar instead of drawing one.
   ///
   /// A host that already has a bar of its own — the file tab's strip of
@@ -58,6 +61,7 @@ final class SftpPageArgs {
     required this.spi,
     this.isSelect = false,
     this.initPath,
+    this.fallbackOnMissingPath = true,
     this.onPathChanged,
     this.actionsSink,
   });
@@ -312,6 +316,7 @@ extension _Open on _SftpPageState {
       // listing error with nothing to press — for as long as the tab was
       // remembered, which is every launch.
       path:
+          (widget.args.fallbackOnMissingPath ? null : widget.args.initPath) ??
           await _openable(backend, widget.args.initPath) ??
           await _lastPath(backend) ??
           await _openable(backend, home) ??

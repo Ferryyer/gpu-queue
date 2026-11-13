@@ -60,6 +60,13 @@ void main() {
       );
     },
   );
+  test('result paths open the exact containing directory', () {
+    expect(QueueTarget.resultDirectory('/shared/成果 final/video.mp4'), '/shared/成果 final');
+    expect(QueueTarget.resultDirectory('/video.mp4'), '/');
+    for (final invalid in [null, 7, 'outputs/video.mp4', '/outputs/', '/outputs/../video.mp4', '/a\x00/b']) {
+      expect(QueueTarget.resultDirectory(invalid), isNull);
+    }
+  });
   test('binding invalidates when either SSH endpoint changes', () {
     final binding = {'identity': 'target:22', 'origin': 'queue:22'};
     expect(

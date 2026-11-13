@@ -973,8 +973,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
     bool mobile = false,
   }) {
     servers = ref.read(serversProvider).servers;
-    final target = _target(service, task, servers),
-        directory = QueueTarget.directory(task);
+    final target = _target(service, task, servers);
+    final directory = QueueTarget.directory(task);
     final resource = queue.resources
         .where((r) => r['id'] == QueueTarget.instance(task))
         .firstOrNull;
@@ -1180,51 +1180,71 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
                 style: const TextStyle(fontFamily: 'Menlo', fontSize: 12),
               ),
             ]),
-            page('results', [
-              if (target == null) ...[
-                const Text('打开结果文件前，请关联能访问这些文件的个人服务器。文件在共享 HOME 时可选择个人 CPU 服务器。'),
-                TextButton(onPressed: QueueTarget.instance(task) == null ? null : () => _bind(service, task, servers), child: const Text('关联结果服务器')),
-              ],
-              const SizedBox(height: 24),
-              Text('结果文件', style: Theme.of(context).textTheme.titleLarge),
-              if (steps.every((s) => (s['outputs'] as List? ?? []).isEmpty))
-                const Text('尚无已验证产物。成功步骤的结果将出现在这里。'),
-              for (final step in steps)
-                for (final file in step['outputs'] as List? ?? [])
-                  ListTile(
-                    title: Text('${file['name']}'),
-                    subtitle: SelectableText(
-                      '${file['path']} · ${file['size']} bytes',
+            Builder(builder: (context) {
+              final bound = _target(service, task, servers);
+              final origin = servers[service];
+              final resultServer = bound ?? (origin?.sshOn == null ? null : origin);
+              return page('results', [
+                const SizedBox(height: 24),
+                Text('结果文件', style: Theme.of(context).textTheme.titleLarge),
+                if (QueueTarget.instance(task) != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton(
+                      onPressed: () async {
+                        await _bind(service, task, servers);
+                        if (context.mounted) updateDetail(() {});
+                      },
+                      child: Text(bound == null ? '关联结果服务器' : '更改结果服务器'),
                     ),
-                    trailing: IconButton(
-                      tooltip: '复制路径',
-                      onPressed: () => Clipboard.setData(
-                        ClipboardData(text: '${file['path']}'),
-                      ),
-                      icon: const Icon(Icons.copy),
-                    ),
-                    onTap:
-                        target == null ||
-                            file['path'] is! String ||
-                            !(file['path'] as String).startsWith('/')
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => SftpPage(
-                                args: SftpPageArgs(
-                                  spi: target,
-                                  initPath: (file['path'] as String).substring(
-                                    0,
-                                    (file['path'] as String).lastIndexOf('/'),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
                   ),
-            ]),
+                if (steps.every((s) => (s['outputs'] as List? ?? []).isEmpty))
+                  const Text('尚无已验证产物。成功步骤的结果将出现在这里。'),
+                for (final step in steps)
+                  for (final file in step['outputs'] as List? ?? [])
+                    if (file is Map) _resultFile(context, file, resultServer),
+              ]);
+            }),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _resultFile(BuildContext context, Map<dynamic, dynamic> file, Spi? server) {
+    final directory = QueueTarget.resultDirectory(file['path']);
+    final open = server == null || directory == null
+        ? null
+        : () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => SftpPage(
+                args: SftpPageArgs(
+                  spi: server,
+                  initPath: directory,
+                  fallbackOnMissingPath: false,
+                ),
+              ),
+            ),
+          );
+    return ListTile(
+      title: Text('${file['name']}'),
+      subtitle: SelectableText('${file['path']} · ${file['size']} bytes'),
+      onTap: open,
+      trailing: Wrap(
+        children: [
+          IconButton(
+            tooltip: '打开所在目录',
+            onPressed: open,
+            icon: const Icon(Icons.folder_open_outlined),
+          ),
+          IconButton(
+            tooltip: '复制路径',
+            onPressed: () => Clipboard.setData(
+              ClipboardData(text: '${file['path']}'),
+            ),
+            icon: const Icon(Icons.copy),
+          ),
+        ],
       ),
     );
   }
