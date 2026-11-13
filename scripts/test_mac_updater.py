@@ -33,6 +33,16 @@ DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
     }
   }
 }
+if info["FixtureQuitWhenReady"] as? Bool == true {
+  let status = URL(fileURLWithPath: info["FixtureStatus"] as! String)
+  Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+    if let data = try? Data(contentsOf: status),
+       let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+       state["phase"] as? String == "ready" {
+      app.terminate(nil)
+    }
+  }
+}
 app.run()
 '''
 
@@ -89,7 +99,7 @@ def main():
             child = None
             log = (out/f'{scenario}.log').open('wb')
             try:
-                def make_app(path, build, ack, identifier=bundle_id):
+                def make_app(path, build, ack, identifier=bundle_id, quit_when_ready=False):
                     contents = path/'Contents'
                     (contents/'MacOS').mkdir(parents=True)
                     (contents/'MacOS/Fixture').write_bytes(fixture.read_bytes())
@@ -99,11 +109,11 @@ def main():
                         'CFBundleVersion': str(build), 'CFBundleShortVersionString': f'2.0.{build}',
                         'CFBundleName': 'Inspire Queue Fixture', 'CFBundlePackageType': 'APPL',
                         'LSUIElement': True, 'FixtureAck': ack, 'FixtureStatus': str(status),
-                        'FixtureReceipt': str(receipt),
+                        'FixtureReceipt': str(receipt), 'FixtureQuitWhenReady': quit_when_ready,
                     }))
                     run('codesign', '--force', '--sign', '-', str(path))
 
-                make_app(destination, 100, False)
+                make_app(destination, 100, False, quit_when_ready=scenario == 'success')
                 payload = case/'payload'
                 payload_name = 'GPU Queue.app' if scenario == 'legacy_payload' else 'Inspire Queue.app'
                 make_app(payload/payload_name, 101, scenario != 'rollback',
@@ -127,10 +137,10 @@ def main():
                 planfile = work/'plan.json'
                 planfile.write_text(json.dumps(plan))
                 child = subprocess.Popen([str(helper), str(planfile)], stdout=log, stderr=log)
-                if scenario in ('success', 'legacy_payload', 'rollback', 'quit_timeout'):
+                if scenario in ('legacy_payload', 'rollback', 'quit_timeout'):
                     wait_for(lambda: read(status).get('phase') in ('ready', 'failed'))
                     assert read(status)['phase'] == 'ready', read(status)
-                if scenario in ('success', 'legacy_payload', 'rollback'):
+                if scenario in ('legacy_payload', 'rollback'):
                     os.kill(old['pid'], signal.SIGTERM)
                 code = child.wait(timeout=55)
                 state = read(status)

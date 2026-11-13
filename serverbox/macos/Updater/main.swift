@@ -105,6 +105,17 @@ do {
         old.bundleURL?.standardizedFileURL == destination else {
     try fail("请先将应用移到可写的 Applications 文件夹后重试。")
   }
+  // Launch Services can retain stale state after the old app exits. Register
+  // with the kernel before staging, so the exit event is tied to this process.
+  let exitQueue = kqueue()
+  guard exitQueue >= 0 else { try fail("无法监听旧应用退出，旧应用未改动。") }
+  defer { close(exitQueue) }
+  var watch = kevent(ident: UInt(oldPID), filter: Int16(EVFILT_PROC),
+                     flags: UInt16(EV_ADD | EV_ONESHOT), fflags: UInt32(NOTE_EXIT),
+                     data: 0, udata: nil)
+  guard kevent(exitQueue, &watch, 1, nil, 0, nil) == 0 else {
+    try fail("无法监听旧应用退出，旧应用未改动。请重新打开后重试。")
+  }
   // Read in chunks: a DMG must not be loaded entirely into the helper's memory.
   let handle = try FileHandle(forReadingFrom: dmg)
   var hash = SHA256()
@@ -148,13 +159,21 @@ do {
   state["backup"] = backup.path
   guard !fm.fileExists(atPath: work.appendingPathComponent("cancel").path) else { try fail("更新已取消，旧应用未改动。") }
   try status("ready")
-  let quitDeadline = Date().addingTimeInterval(quitTimeout)
-  while !old.isTerminated && Date() < quitDeadline {
+  let quitDeadline = ProcessInfo.processInfo.systemUptime + quitTimeout
+  var exited = false
+  while !exited && ProcessInfo.processInfo.systemUptime < quitDeadline {
     guard !fm.fileExists(atPath: work.appendingPathComponent("cancel").path) else { try fail("更新已取消，旧应用未改动。") }
-    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+    var interval = timespec(tv_sec: 0, tv_nsec: 100_000_000)
+    var event = kevent()
+    let count = kevent(exitQueue, nil, 0, &event, 1, &interval)
+    if count < 0 {
+      if errno == EINTR { continue }
+      try fail("无法确认旧应用已退出，旧应用未改动。")
+    }
+    exited = count == 1 && event.fflags & UInt32(NOTE_EXIT) != 0
   }
   guard !fm.fileExists(atPath: work.appendingPathComponent("cancel").path) else { try fail("更新已取消，旧应用未改动。") }
-  guard old.isTerminated else { try fail("等待应用退出超时，旧应用未改动。请退出后重试。") }
+  guard exited else { try fail("等待应用退出超时，旧应用未改动。请退出后重试。") }
   try fm.moveItem(at: destination, to: backup)
   var installed = false
   var running: NSRunningApplication?
