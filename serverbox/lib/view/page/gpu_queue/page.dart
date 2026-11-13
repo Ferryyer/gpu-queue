@@ -102,7 +102,7 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
         final heartbeat = queue.hasSnapshot ? queue.snapshot['heartbeat'] : null;
         final at = heartbeat is Map ? QueuePresentation.taskTime(heartbeat['at'] ?? heartbeat['updated_at']) : null;
         final age = at == null ? null : DateTime.now().toUtc().difference(at).inSeconds;
-        final heartbeatFresh = age != null && age >= -5 && age < 120;
+        final heartbeatFresh = queue.connected && age != null && age >= -5 && age < 120;
         final schedulerError = heartbeat is Map ? heartbeat['error'] : null;
         final schedulerReady = heartbeatFresh && schedulerError == null;
         final owner = queue.health?['owner'];
@@ -115,15 +115,16 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
               Text('1 · SSH 连接：${sshReady ? '已连接' : '未连接'}'),
               Text('2 · 个人任务服务：${queue.diagnosing ? '检查中…' : queue.health == null ? '未确认' : '已响应'}'),
               if (owner != null) Text('服务账号：$owner · ${ownerMatches ? '与 SSH 用户一致' : '与 SSH 用户不一致，请核对连接'}'),
-              Text('3 · 调度心跳：${schedulerReady ? '正常' : at == null ? '未收到' : !heartbeatFresh ? '已过期' : '在线，但处理任务时出错'}'),
+              Text('3 · 调度心跳：${!queue.connected ? '尚未同步' : schedulerReady ? '正常' : at == null ? '未收到' : !heartbeatFresh ? '已过期' : '在线，但处理任务时出错'}'),
               Text('最近同步：${queue.sampledAt?.toLocal().toString().split('.').first ?? '尚未成功同步'}'),
               const SizedBox(height: 16),
               Text(!sshReady ? '先连接个人 CPU 服务器；检查网络、SSH 配置和主机指纹。'
                 : queue.health == null ? 'SSH 可用时，任务服务可能尚未安装或未启动。按员工指南检查个人服务，切勿重复提交任务。'
+                : !queue.connected ? '任务服务健康检查已响应，任务列表尚未同步。请重新检查。'
                 : !heartbeatFresh ? '任务网页能响应，但调度器没有新鲜心跳。请在本人 CPU 终端检查 mf-services status。'
                 : !schedulerReady ? '调度器仍在线，但最近处理发生错误。请检查本人飞书授权、平台回执与个人服务日志；不要重复提交任务。'
                 : '连接链路正常。等待 GPU 时以平台回执为准，不会自动重复启动任务。'),
-              if (queue.diagnosticError != null || queue.error != null) ...[
+              if (queue.diagnosticError != null || (!queue.connected && queue.error != null)) ...[
                 const SizedBox(height: 12),
                 SelectableText(queue.diagnosticError ?? queue.error!),
               ],
@@ -131,7 +132,8 @@ class _GpuQueuePageState extends ConsumerState<GpuQueuePage>
           ))),
           actions: [
             TextButton(onPressed: _guide, child: const Text('接入指南')),
-            TextButton(onPressed: queue.diagnosing ? null : () => queue.diagnose(), child: const Text('重新检查')),
+            TextButton(onPressed: queue.diagnosing || queue.loading || queue.acting
+                ? null : () => queue.diagnose(connect: true), child: const Text('重新检查')),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
           ],
         );

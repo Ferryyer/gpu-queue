@@ -74,11 +74,13 @@ abstract final class PrivateKeyUnlock {
     required String cacheKey,
     required String keyName,
     PassphrasePrompt? prompt,
+    bool allowPrompt = true,
   }) async {
     if (!isLocked(pem)) return pem;
 
     final already = _opened[cacheKey];
     if (already != null) return already;
+    if (!allowPrompt) throw _locked(keyName);
 
     // Asked and refused already. Reported the same way, without putting the
     // same dialog up again.

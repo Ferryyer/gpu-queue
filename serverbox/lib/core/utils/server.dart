@@ -396,6 +396,7 @@ Future<SSHClient> genClient(
   Map<String, String>? knownHostFingerprints,
   HostKeyPersistCallback? onHostKeyAccepted,
   Future<bool> Function(HostKeyPromptInfo info)? onHostKeyPrompt,
+  bool allowKeyPrompt = true,
   Set<String>? visitedServerIds,
 }) async {
   // Bound once, up front: everything below needs SSH, and a server reached
@@ -527,6 +528,7 @@ Future<SSHClient> genClient(
                 knownHostFingerprints: hostKeyCache,
                 onHostKeyAccepted: hostKeyPersist,
                 onHostKeyPrompt: hostKeyPrompt,
+                allowKeyPrompt: allowKeyPrompt,
                 visitedServerIds: {...chainVisitedServerIds},
               );
 
@@ -619,6 +621,7 @@ Future<SSHClient> genClient(
       privateKeysByKeyId: privateKeysByKeyId,
       onStatus: onStatus,
       onKeyboardInteractive: onKeyboardInteractive,
+      allowKeyPrompt: allowKeyPrompt,
       hostKeyVerifier: HostKeyVerifier(
         spi: spi,
         cache: hostKeyCache,
@@ -651,6 +654,7 @@ Future<SSHClient> _authenticatedClient({
   required Map<String, String>? privateKeysByKeyId,
   required void Function(GenSSHClientStatus)? onStatus,
   required SSHKeyboardInteractiveHandler? onKeyboardInteractive,
+  required bool allowKeyPrompt,
   required HostKeyVerifier hostKeyVerifier,
 }) async {
   SSHClient passwordClient() {
@@ -720,6 +724,7 @@ Future<SSHClient> _authenticatedClient({
         entry.value,
         cacheKey: entry.key,
         keyName: privateKeyDisplayName(entry.key),
+        allowPrompt: allowKeyPrompt,
       ),
     );
   }

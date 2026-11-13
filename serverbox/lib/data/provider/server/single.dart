@@ -906,6 +906,8 @@ class ServerNotifier extends _$ServerNotifier {
   /// reachable. Sharing one key meant a host whose sshd refuses would burn the
   /// limiter and stop the status page from refreshing too.
   String get _shellTryId => '${state.spi.id}#shell';
+  ({Spi spi, Stopwatch since, Object error, bool transient})?
+      _backgroundShellFailure;
 
   /// Something that can run a command on this server.
   ///
@@ -1176,7 +1178,11 @@ class ServerNotifier extends _$ServerNotifier {
   ///
   /// Throws [SSHErr] when the server has no SSH configuration, or when the
   /// retry limiter has given up on it.
-  Future<SSHClient> ensureShellClient({VoidCallback? onDial}) async {
+  Future<SSHClient> ensureShellClient({
+    VoidCallback? onDial,
+    bool interactive = true,
+    bool resetRetries = false,
+  }) async {
     final existing = state.client;
     if (existing != null && !existing.isClosed) return existing;
 
@@ -1191,6 +1197,17 @@ class ServerNotifier extends _$ServerNotifier {
         type: SSHErrType.connect,
         message: 'No SSH credential configured for ${spi.name}',
       );
+    }
+    if (resetRetries) {
+      TryLimiter.reset(_shellTryId);
+      _backgroundShellFailure = null;
+    }
+    final last = _backgroundShellFailure;
+    if (!interactive && last != null && last.spi == spi) {
+      if (!last.transient || last.since.elapsed < const Duration(seconds: 30)) {
+        throw last.error;
+      }
+      TryLimiter.reset(_shellTryId);
     }
     if (!TryLimiter.canTry(_shellTryId)) {
       throw SSHErr(
@@ -1213,7 +1230,9 @@ class ServerNotifier extends _$ServerNotifier {
       client = await genClient(
         spi,
         timeout: _timeout,
-        onKeyboardInteractive: KeyboardInteractiveAuth.handle,
+        onKeyboardInteractive: interactive ? KeyboardInteractiveAuth.handle : null,
+        onHostKeyPrompt: interactive ? null : (_) async => false,
+        allowKeyPrompt: interactive,
       );
       await client.authenticated;
       // Checked after, as every await in the refresh paths already does.
@@ -1229,6 +1248,12 @@ class ServerNotifier extends _$ServerNotifier {
         throw StateError('superseded shell connect for ${origSpi.name}');
       }
       TryLimiter.reset(_shellTryId);
+      _backgroundShellFailure = null;
+      final connected = state.client;
+      if (connected != null && !connected.isClosed) {
+        client.close();
+        return connected;
+      }
       _setClient(client);
       return client;
     } catch (e, s) {
@@ -1248,6 +1273,20 @@ class ServerNotifier extends _$ServerNotifier {
         rethrow;
       }
       TryLimiter.inc(_shellTryId);
+      if (!interactive || resetRetries) {
+        final cause = e is SSHAuthAbortError ? e.reason ?? e : e;
+        final droppedBeforeAuth = e is SSHAuthAbortError &&
+            e.reason == null &&
+            e.message.startsWith('Connection closed before authentication.');
+        _backgroundShellFailure = (
+          spi: spi,
+          since: Stopwatch()..start(),
+          error: e,
+          transient: isJumpFailoverError(cause) || e is TimeoutException ||
+              droppedBeforeAuth ||
+              (e is SSHAuthAbortError && e.message == 'Authentication timed out'),
+        );
+      }
       Loggers.app.warning('Connect shell for ${spi.name}', e, s);
       rethrow;
     }
@@ -1365,7 +1404,12 @@ class ServerNotifier extends _$ServerNotifier {
           client.close();
           return;
         }
-        _setClient(client);
+        final connected = state.client;
+        if (connected != null && !connected.isClosed) {
+          client.close();
+        } else {
+          _setClient(client);
+        }
 
         final spentTime = elapsed.elapsedMilliseconds;
         if (spi.resolvedJumpIds.isEmpty) {
@@ -1403,6 +1447,8 @@ class ServerNotifier extends _$ServerNotifier {
         TermSessionManager.setActive(sessionId, hasTerminal: false);
       } catch (e) {
         if (!_isRefreshCurrent(operation, spi)) return;
+        final connected = state.client;
+        if (connected != null && !connected.isClosed) return;
         if (!keyboardInteractiveRequested || interactive) {
           TryLimiter.inc(sid);
         }
@@ -1442,6 +1488,7 @@ class ServerNotifier extends _$ServerNotifier {
           Loggers.app.warning('Failed to record connection failure', recErr);
         }
         if (!_isRefreshCurrent(operation, spi)) return;
+        if (!(state.client?.isClosed ?? true)) return;
 
         final SSHErrType errType;
         if (keyboardInteractiveRequested && !interactive) {

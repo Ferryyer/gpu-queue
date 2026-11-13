@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 
+enum QueueConnection { existing, automatic, interactive }
+
 typedef QueueRequest =
     Future<Map<String, dynamic>> Function(
       String path,
       Map<String, dynamic>? body,
-      bool connect,
+      QueueConnection connection,
     );
 
 /// Owns polling and explicit actions, independently of the borrowed SSH client.
@@ -56,10 +58,10 @@ class QueueSession extends ChangeNotifier {
   Future<Map<String, dynamic>> _request(
     String path,
     Map<String, dynamic>? body,
-    bool connect,
+    QueueConnection connection,
   ) async {
     final destination = identity();
-    final data = await request(path, body, connect);
+    final data = await request(path, body, connection);
     if (destination != identity()) throw StateError('服务器配置已变化，请重新同步');
     return data;
   }
@@ -69,14 +71,22 @@ class QueueSession extends ChangeNotifier {
     loading = true;
     _notify();
     try {
-      final data = await _request('/api/state', null, connect);
+      final data = await _request(
+        '/api/state',
+        null,
+        connect ? QueueConnection.interactive : QueueConnection.automatic,
+      );
       if (_disposed) return;
       _validateSnapshot(data);
       snapshot = data;
       _snapshotIdentity = identity();
+      final recovered = !connected;
       connected = true;
       error = null;
       sampledAt = DateTime.now();
+      if (recovered && diagnosticError != null && !diagnosing) {
+        unawaited(diagnose());
+      }
     } catch (e) {
       if (_disposed) return;
       connected = false;
@@ -102,14 +112,16 @@ class QueueSession extends ChangeNotifier {
     }
   }
 
-  Future<void> diagnose() async {
+  Future<void> diagnose({bool connect = false}) async {
     if (_disposed || diagnosing) return;
     diagnosing = true;
     health = null;
     diagnosticError = null;
     _notify();
     try {
-      final data = await _request('/api/health', null, false);
+      if (connect) await refresh(connect: true);
+      if (_disposed) return;
+      final data = await _request('/api/health', null, QueueConnection.existing);
       if (_disposed) return;
       if (data['service'] != 'gpuq' || data['owner'] is! String || data['uid'] is! int) {
         throw StateError('未识别到个人 Inspire Queue 服务，请核对服务器');
@@ -135,7 +147,7 @@ class QueueSession extends ChangeNotifier {
     acting = true;
     _notify();
     try {
-      final data = await _request(path, body, false);
+      final data = await _request(path, body, QueueConnection.existing);
       if (_disposed) return;
       _validateSnapshot(data);
       snapshot = data;

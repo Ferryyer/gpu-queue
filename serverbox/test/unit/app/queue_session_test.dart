@@ -9,7 +9,7 @@ void main() {
     final session = QueueSession(poll: false, identity: () => 'A', saveAuto: (_) {},
       request: (path, body, connect) async {
         expect(body, isNull);
-        expect(connect, isFalse);
+        expect(connect, QueueConnection.existing);
         calls.add(path);
         return {'service': 'gpuq', 'owner': 'employee', 'uid': 123};
       });
@@ -19,6 +19,65 @@ void main() {
     expect(session.diagnosticError, isNull);
     expect(calls, ['/api/health']);
   });
+  testWidgets('background poll reconnects and refreshes a failed diagnosis',
+      (tester) async {
+    var networkAvailable = false;
+    var sshConnected = false;
+    final calls = <(String, Object?, QueueConnection)>[];
+    final session = QueueSession(identity: () => 'A', saveAuto: (_) {},
+      request: (path, body, connection) async {
+        calls.add((path, body, connection));
+        if (!sshConnected && connection == QueueConnection.automatic) {
+          sshConnected = networkAvailable;
+        }
+        if (!sshConnected) throw StateError('SSH disconnected');
+        return path == '/api/health'
+            ? {'service': 'gpuq', 'owner': 'employee', 'uid': 123}
+            : {'tasks': [], 'heartbeat': {'at': 'fresh'}};
+      });
+    try {
+      await tester.pump();
+      await session.diagnose();
+      expect(session.connected, isFalse);
+      expect(session.diagnosticError, contains('SSH disconnected'));
+      networkAvailable = true;
+      await tester.pump(const Duration(seconds: 5));
+      expect(session.connected, isTrue, reason: session.error);
+      expect(session.snapshot['heartbeat']['at'], 'fresh');
+      expect(session.error, isNull);
+      expect(session.diagnosticError, isNull);
+      expect(session.health?['owner'], 'employee');
+      expect(calls, [
+        ('/api/state', null, QueueConnection.automatic),
+        ('/api/health', null, QueueConnection.existing),
+        ('/api/state', null, QueueConnection.automatic),
+        ('/api/health', null, QueueConnection.existing),
+      ]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  test('manual recheck reconnects and refreshes scheduler state', () async {
+    final calls = <(String, QueueConnection)>[];
+    final session = QueueSession(poll: false, identity: () => 'A', saveAuto: (_) {},
+      request: (path, body, connection) async {
+        expect(body, isNull);
+        calls.add((path, connection));
+        return path == '/api/state'
+            ? {'tasks': [], 'heartbeat': {'at': 'fresh'}}
+            : {'service': 'gpuq', 'owner': 'employee', 'uid': 123};
+      });
+    addTearDown(session.dispose);
+    await session.diagnose(connect: true);
+    expect(session.snapshot['heartbeat']['at'], 'fresh');
+    expect(session.health?['owner'], 'employee');
+    expect(calls, [
+      ('/api/state', QueueConnection.interactive),
+      ('/api/health', QueueConnection.existing),
+    ]);
+  });
+
   test('invalid snapshots are rejected and old identities are hidden', () async {
     var identity = 'A';
     var data = <String, dynamic>{'tasks': [{'id': 'A-task'}]};
