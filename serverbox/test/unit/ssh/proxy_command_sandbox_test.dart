@@ -52,6 +52,21 @@ void main() {
   });
 
   group('what a placeholder may expand to', () {
+    test('device proxy does not expand or validate an unused display name', () {
+      String resolve(String command) => ProxyCommandSocket.resolveCommand(
+        command: command,
+        host: 'codex-cpu-gateway',
+        originalHost: 'linlishuo · CPU',
+        port: 22223,
+        user: 'linlishuo',
+        jump: '',
+      );
+      const command = 'ssh -F "/path with spaces/config" -T markflow-gateway';
+      expect(resolve(command), command);
+      expect(resolve('proxy %%n'), 'proxy %n');
+      expect(() => resolve('proxy %n'), throwsA(isA<Object>()));
+    });
+
     test('all supported OpenSSH placeholders are expanded', () {
       expect(
         ProxyCommandSocket.resolveCommand(
