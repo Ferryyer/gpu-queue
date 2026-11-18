@@ -41,6 +41,7 @@ import 'package:server_box/view/page/server/tab/selection_bar.dart';
 import 'package:server_box/view/page/server/tab/strip.dart';
 import 'package:server_box/view/page/server/text_scale.dart';
 import 'package:server_box/view/page/setting/entry.dart';
+import 'package:server_box/view/widget/feishu_server_setup.dart';
 import 'package:server_box/view/widget/pane_settings.dart';
 import 'package:server_box/view/widget/server_globe.dart';
 import 'package:server_box/view/widget/server_share.dart';

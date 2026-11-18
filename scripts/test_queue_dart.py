@@ -32,6 +32,7 @@ def main():
             (harness/'test'/name).write_text(source)
         if args.ssh_bundle:
             (harness/'test/client_bundle_test.dart').write_text((ROOT/'serverbox/test/unit/ssh/client_bundle_test.dart').read_text())
+            (harness/'test/device_login_test.dart').write_text((ROOT/'serverbox/test/unit/ssh/device_login_test.dart').read_text())
         subprocess.run([args.flutter, 'pub', 'get', *(['--offline'] if args.offline else [])], cwd=harness, check=True)
         # Resolve the real production library; no copies, mocks, or native app
         # hooks. Only the small declared dependency graph is built by this harness.

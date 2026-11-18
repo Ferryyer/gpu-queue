@@ -22,6 +22,7 @@ import 'package:server_box/data/res/store.dart';
 import 'package:server_box/generated/l10n/l10n.dart';
 import 'package:server_box/view/page/home.dart';
 import 'package:server_box/view/widget/client_bundle_setup.dart';
+import 'package:server_box/view/widget/feishu_server_setup.dart';
 import 'package:server_box/view/widget/session_keep_alive_notice.dart';
 
 part 'intro.dart';

@@ -131,6 +131,8 @@ extension _Actions on _ServerPageState {
   Future<void> _addServer(_AddServerWay way) async {
     if (!mounted) return;
     switch (way) {
+      case _AddServerWay.feishu:
+        await FeishuServerSetup.open(context);
       case _AddServerWay.manual:
         unawaited(ServerEditPage.route.go(context));
       case _AddServerWay.qr:
@@ -298,23 +300,27 @@ extension _Utils on _ServerPageState {
 /// one thing — and so a platform that cannot offer one of them (a desktop has
 /// no camera to scan with) drops it in a single place.
 enum _AddServerWay {
+  feishu,
   manual,
   qr,
   file;
 
   bool get available => switch (this) {
+    _AddServerWay.feishu => isMacOS,
     // `isMobile` matches where the scanner page can actually open one.
     _AddServerWay.qr => isMobile,
     _ => true,
   };
 
   IconData get icon => switch (this) {
+    _AddServerWay.feishu => Icons.login,
     _AddServerWay.manual => Icons.edit,
     _AddServerWay.qr => Icons.qr_code_scanner,
     _AddServerWay.file => Icons.file_present,
   };
 
   String get label => switch (this) {
+    _AddServerWay.feishu => '飞书登录接入',
     _AddServerWay.manual => libL10n.manual,
     _AddServerWay.qr => l10n.shareScanQr,
     _AddServerWay.file => l10n.shareImportFile,
