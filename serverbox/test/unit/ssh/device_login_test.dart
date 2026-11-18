@@ -40,7 +40,7 @@ void main() {
       expect(path, '/auth/queue/device');
       expect(body, {'public_key': 'ssh-ed25519 public',
         'code_challenge': DeviceLogin.challenge(verifier),
-        'device_name': 'Inspire Queue · Mac'});
+        'device_name': 'Inspire Queue · Mac', 'lease_days': 15});
       expect(jsonEncode(body), isNot(contains(verifier)));
       return startResponse();
     });
@@ -81,14 +81,14 @@ void main() {
     for (final response in [
       {'status': 'unknown'},
       {'status': 'ready', 'expires_at': now - 10, 'bundle': 'zip'},
-      {'status': 'ready', 'expires_at': now + 90000, 'bundle': 'zip'},
+      {'status': 'ready', 'expires_at': now + 16 * Duration.secondsPerDay, 'bundle': 'zip'},
       {'status': 'ready', 'expires_at': now + 3600, 'bundle': ''},
     ]) {
       final client = DeviceLogin(post: (_, _) async => response);
       await expectLater(client.poll(request), throwsFormatException);
     }
     final client = DeviceLogin(post: (_, _) async =>
-      {'status': 'ready', 'expires_at': now + 180, 'bundle': 'zip'});
+      {'status': 'ready', 'expires_at': now + 15 * Duration.secondsPerDay, 'bundle': 'zip'});
     expect((await client.poll(request))['status'], 'ready');
   });
 

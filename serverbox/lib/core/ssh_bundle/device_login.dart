@@ -12,6 +12,7 @@ typedef DeviceLoginPost = Future<Map<String, dynamic>> Function(
 class DeviceLogin {
   DeviceLogin({DeviceLoginPost? post}) : _post = post ?? _httpsPost;
   static const origin = 'https://inspire.markflow.work';
+  static const _leaseDays = 15;
   final DeviceLoginPost _post;
   static final _value = RegExp(r'^[A-Za-z0-9_-]{43}$');
 
@@ -30,6 +31,7 @@ class DeviceLogin {
       'public_key': publicKey,
       'code_challenge': challenge(verifier),
       'device_name': 'Inspire Queue · Mac',
+      'lease_days': _leaseDays,
     });
     final id = data['request_id'];
     final code = data['user_code'];
@@ -55,7 +57,8 @@ class DeviceLogin {
       final expires = result['expires_at'];
       final bundle = result['bundle'];
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      if (expires is! int || expires <= now || expires > now + 28860 ||
+      if (expires is! int || expires <= now ||
+          expires > now + _leaseDays * Duration.secondsPerDay + 60 ||
           bundle is! String || bundle.isEmpty || bundle.length > 3 * 1024 * 1024) {
         throw const FormatException('服务器访问许可无效，请重新登录');
       }

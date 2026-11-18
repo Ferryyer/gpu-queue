@@ -254,6 +254,7 @@ def test_commands(args):
           'test/widget/terminal_reconnect_test.dart',
           'test/unit/app/app_tab_test.dart',
           'test/unit/ssh/client_bundle_test.dart', 'test/unit/ssh/device_login_test.dart',
+          'test/unit/ssh/proxy_command_sandbox_test.dart',
           'test/unit/app/virt_intro_test.dart',
           'test/unit/app/diagnostics_sync_test.dart', 'test/unit/app/diagnostics_level_test.dart',
           'test/unit/app/diagnostics_retire_full_test.dart', 'test/widget/crash_report_dialog_test.dart'], APP),
