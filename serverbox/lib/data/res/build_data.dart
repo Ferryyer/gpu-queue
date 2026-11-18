@@ -3,6 +3,6 @@
 
 abstract class BuildData {
   static const String name = "Inspire Queue";
-  static const String version = "2.0.2016";
-  static const int build = 2016;
+  static const String version = "2.0.2017";
+  static const int build = 2017;
 }
