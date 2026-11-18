@@ -1,9 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:server_box/core/ssh_bundle/device_login.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   final id = 'a' * 43;
   final verifier = 'v' * 43;
   Map<String, dynamic> startResponse() => {
@@ -13,6 +15,20 @@ void main() {
   };
   final request = DeviceLoginRequest(id, verifier, 'ABCD1234',
       DateTime.now().add(const Duration(minutes: 5)), 5);
+
+  test('Mac login uses the system HTTPS bridge with a bounded endpoint', () async {
+    const channel = MethodChannel('work.inspirequeue/device-login');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'post');
+      expect(call.arguments['path'], '/auth/queue/device');
+      expect(call.arguments['body']['code_challenge'], DeviceLogin.challenge(verifier));
+      expect(jsonEncode(call.arguments), isNot(contains(verifier)));
+      return startResponse();
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    expect((await DeviceLogin().start('ssh-ed25519 public', verifier)).id, id);
+  });
 
   test('S256 matches the RFC 7636 public-client example', () {
     expect(DeviceLogin.challenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'),

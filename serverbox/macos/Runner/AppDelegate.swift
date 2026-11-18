@@ -41,6 +41,21 @@ class AppDelegate: FlutterAppDelegate {
       updateChannel.setMethodCallHandler { call, result in
         GPUQueueUpdate.handle(call, result)
       }
+      let deviceChannel = FlutterMethodChannel(
+        name: "work.inspirequeue/device-login", binaryMessenger: controller.engine.binaryMessenger)
+      deviceChannel.setMethodCallHandler { call, result in
+        guard call.method == "post" else { result(FlutterMethodNotImplemented); return }
+        guard let args = call.arguments as? [String: Any], let path = args["path"] as? String,
+              let body = args["body"] as? [String: Any] else {
+          result(FlutterError(code: "invalid_request", message: "登录请求无效", details: nil)); return
+        }
+        QueueDeviceHTTP.shared.post(path, body) { response in
+          switch response {
+          case .success(let value): result(value)
+          case .failure: result(FlutterError(code: "unavailable", message: "无法连接登录服务，请检查网络后重试", details: nil))
+          }
+        }
+      }
       let channel = FlutterMethodChannel(name: "about", binaryMessenger: controller.engine.binaryMessenger)
       channel.setMethodCallHandler { (call: FlutterMethodCall, result: @escaping FlutterResult) in
         if call.method == "showAboutPanel" {

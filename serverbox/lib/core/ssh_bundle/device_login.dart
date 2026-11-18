@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart';
 
 typedef DeviceLoginPost = Future<Map<String, dynamic>> Function(
   String path, Map<String, dynamic> body);
@@ -75,40 +75,16 @@ class DeviceLogin {
     if (!const {'/auth/queue/device', '/auth/queue/token', '/auth/queue/revoke'}.contains(path)) {
       throw ArgumentError.value(path, 'path');
     }
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 12);
     try {
-      return await (() async {
-        final request = await client.postUrl(Uri.parse('$origin$path'));
-        request.followRedirects = false;
-        request.headers.set('Origin', origin);
-        request.headers.contentType = ContentType.json;
-        final payload = utf8.encode(jsonEncode(body));
-        request.contentLength = payload.length;
-        request.add(payload);
-        final response = await request.close();
-        if (response.statusCode != HttpStatus.ok) {
-          await response.drain<void>();
-          throw const FormatException('飞书登录服务暂不可用，请稍后重试');
-        }
-        final bytes = <int>[];
-        await for (final chunk in response) {
-          if (bytes.length + chunk.length > 3 * 1024 * 1024) {
-            throw const FormatException('登录服务响应过大');
-          }
-          bytes.addAll(chunk);
-        }
-        final value = jsonDecode(utf8.decode(bytes));
-        if (value is! Map<String, dynamic>) {
-          throw const FormatException('登录服务响应无效');
-        }
-        return value;
-      })().timeout(const Duration(seconds: 18));
-    } on SocketException {
+      final value = await const MethodChannel('work.inspirequeue/device-login')
+          .invokeMapMethod<String, dynamic>('post', {'path': path, 'body': body})
+          .timeout(const Duration(seconds: 20));
+      if (value == null) throw const FormatException('登录服务响应无效');
+      return value;
+    } on PlatformException {
       throw const FormatException('无法连接登录服务，请检查网络后重试');
     } on TimeoutException {
       throw const FormatException('登录服务响应超时，请重试');
-    } finally {
-      client.close(force: true);
     }
   }
 }
