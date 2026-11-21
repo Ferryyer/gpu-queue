@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="个人 GPU 任务台交互原型。准备实验，调整队列，一次启动完整流程。">
+<meta name="description" content="个人 GPU 任务与服务器监控工作台。">
 <meta name="theme-color" content="#f5f3ed"><title>Inspire Queue · 个人任务台</title>
 <link rel="stylesheet" href="style.css">
 </head>
@@ -20,16 +20,16 @@
 <main>
 <div class="page-heading"><div><div class="eyebrow">YOUR EXPERIMENTS, IN ORDER.</div><h1>每个实验，都有进展<span>。</span></h1><p>准备就绪的任务在这里集合。查看、排序，然后开始。</p></div><button class="button secondary" id="refresh">↻ 刷新状态</button></div>
 <div class="demo-note" id="connection-note"><span>◈</span><span>正在连接服务器。任务由 Agent 准备提交；只有你在这里点击开始，才会复用或申请 GPU。</span></div>
+<section class="notice failure" id="feishu-auth" aria-labelledby="feishu-auth-title" hidden>
+<strong id="feishu-auth-title">等待飞书本人授权，尚未投放计算</strong>
+<p id="feishu-auth-reason" role="status"></p>
+<details><summary>恢复飞书本人授权</summary>
+<p>在任务台所在的 CPU 网关终端运行 <code>gpuq auth</code>，按飞书提示使用任务所属成员本人账号授权。授权被拒绝或链接到期后，可重新运行该命令。队列会保留原有的启动授权，核验通过后自动继续。</p>
+<button class="button secondary" id="copy-feishu-auth">复制登录命令</button>
+</details>
+</section>
 <section class="mode-toolbar" aria-label="操作模式"><button id="interaction-mode" class="mode-switch" aria-describedby="mode-hint" aria-keyshortcuts="Shift+Tab" aria-pressed="false"><span id="mode-label">Edit mode</span><kbd>Shift ⇥</kbd></button><span id="mode-hint" role="status" aria-live="polite">编辑队列，手动启动准备好的任务。</span></section>
 <section class="stats" id="stats" aria-label="任务统计"></section>
-<section class="resource-card">
-<div class="resource-title"><span class="gpu-icon">▦</span><div><strong>计算资源</strong><span><i class="green-dot"></i> 等待资源状态同步</span></div></div>
-<div class="resource-meter"><div><span>GPU 利用率</span><strong id="gpu-value">—<small>%</small></strong></div><div class="meter"><i id="gpu-bar"></i></div></div>
-<div class="resource-meter memory"><div><span>显存使用</span><strong id="memory-value">— <small>GB</small></strong></div><div class="meter"><i id="memory-bar"></i></div></div>
-<div class="resource-mode"><strong id="schedule-label">● 按顺序执行</strong><small id="schedule-hint">持续低占用时，最多并行 2 个任务</small></div>
-<span class="text-button" id="low-load">低占用时自动判断并行</span>
-</section>
-<p id="resource-policy" class="release-note" hidden></p>
 <div class="workbench">
 <section class="tasks-panel" aria-label="任务列表">
 <div class="list-toolbar"><div class="tabs" id="filters"><button class="active" data-filter="all">全部任务</button><button data-filter="queue">执行队列</button><button data-filter="ready">待启动</button><button data-filter="history">已结束</button></div><button class="icon-button" id="search-toggle" aria-label="搜索任务">⌕</button></div>
@@ -39,7 +39,23 @@
 </section>
 <aside class="detail-panel" id="detail" aria-label="任务详情"></aside>
 </div>
-<footer class="page-footer"><span>INSPIRE QUEUE · 为有条理的实验而设计</span><span>顺序优先 · 空闲复用 · 失败即停</span></footer>
+<details class="full-monitor"><summary>服务器与 GPU · 展开完整监控</summary>
+<section class="resource-card">
+<div class="resource-title"><span class="gpu-icon">▦</span><div><strong>计算资源</strong><span><i class="green-dot"></i> 等待资源状态同步</span></div></div>
+<div class="resource-meter"><div><span>GPU 利用率</span><strong id="gpu-value">—<small>%</small></strong></div><div class="meter"><i id="gpu-bar"></i></div></div>
+<div class="resource-meter memory"><div><span>显存使用</span><strong id="memory-value">— <small>GiB</small></strong></div><div class="meter"><i id="memory-bar"></i></div></div>
+<div class="resource-mode"><strong id="schedule-label">● 按顺序执行</strong><small id="schedule-hint">持续低占用时，最多并行 2 个任务</small></div>
+<span class="text-button" id="low-load">低占用时自动判断并行</span>
+</section>
+<p id="resource-policy" class="release-note" hidden></p>
+<section class="server-monitor" aria-labelledby="monitor-title">
+<div class="monitor-heading"><div><div class="eyebrow">YOUR SERVERS, AT A GLANCE.</div><h2 id="monitor-title">服务器与 GPU</h2><p>复用已有 ServerBox 同步数据 · 采样超过 90 秒标记过期</p></div><button class="button secondary" id="export-monitor">导出监控 JSON</button></div>
+<details class="account-monitor"><summary>账号线程占用 <span id="account-summary">等待采样</span></summary><p>CPU 网关当前账号的可见线程快照，非 CPU 占用率。</p><pre id="account-threads">正在连接采集端…</pre></details>
+<div id="server-resources"></div>
+<p class="monitor-footnote">趋势仅记录此页面打开期间最近 30 分钟的采样，刷新后清空。实例详情为只读。</p>
+</section>
+</details>
+<footer class="page-footer"><span>INSPIRE QUEUE · 为有条理的实验而设计 · <a href="https://github.com/Ferryyer/gpu-queue/tree/codex/gpu-serverbox-integration">源码与许可证</a></span><span>顺序优先 · 空闲复用 · 失败即停</span></footer>
 </main>
 </div>
 <div id="toast" role="status" aria-live="polite"></div>

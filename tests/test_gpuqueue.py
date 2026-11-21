@@ -91,6 +91,24 @@ class QueueTests(unittest.TestCase):
   adapter.submit_job=Mock();service=Service({},self.store,adapter);service.refresh_task(task)
   self.assertEqual(task['internal']['job_uuid'],job);adapter.submit_job.assert_not_called()
 
+ def test_each_successful_dispatch_starts_sampling_after_compute_receipt_is_saved(self):
+  task=self.task();task['internal']['approved_at']='browser approval';self.store.save(task)
+  request='11111111-1111-4111-8111-111111111111'
+  compute='22222222-2222-4222-8222-222222222222';probe='33333333-3333-4333-8333-333333333333'
+  adapter=Markflow(self.store,{'username':'linlishuo','home':str(self.root)})
+  resource={'id':request,'status':'online','probe_checked':time.time(),'telemetry':{'at':time.time(),'gpus':[]}}
+  adapter.resources={request:resource};adapter.submit_job=Mock(side_effect=[compute,probe])
+  service=Service({},self.store,adapter);service.remote=Mock()
+  service.dispatch(task,(resource,['GPU-test']))
+  saved=self.store.get(task['id'])
+  self.assertEqual(saved['internal']['job_uuid'],compute)
+  self.assertEqual(saved['internal']['dispatch'],'submitted')
+  self.assertEqual(resource['probe']['job'],probe)
+  self.assertEqual(resource['sampling_start']['task'],task['id'])
+  self.assertEqual(adapter.submit_job.call_count,2)
+  service.dispatch(task,(resource,['GPU-test']))
+  self.assertEqual(adapter.submit_job.call_count,2)
+
  def release_service(self):
   adapter=Markflow(self.store,{'username':'linlishuo','home':str(self.root)})
   rid='11111111-1111-4111-8111-111111111111'

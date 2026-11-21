@@ -1,0 +1,116 @@
+import 'package:material_ui/material_ui.dart';
+
+/// The colour and weight of every hairline the app draws on a surface: the seam
+/// between two panes, the rules that bracket a panel's header and its composer,
+/// the outline of an input box.
+///
+/// One value for all of them, because they meet each other at corners and any
+/// difference between two lines that touch reads as one of the two halves being
+/// a window of its own.
+abstract final class Hairline {
+  /// Material's default divider is drawn for a light background and reads as a
+  /// bright seam on a dark one, so it is not used.
+  static const thickness = 1.0;
+
+  /// Translucent: a hairline separates two parts of one surface, and at full
+  /// strength it reads as a border around each of them.
+  static Color color(BuildContext context) =>
+      // A theme that names a divider colour names this one too: the two are
+      // the same line wherever it is drawn.
+      DividerTheme.of(context).color ?? of(Theme.of(context).colorScheme);
+
+  /// [color] from [scheme] itself, for where there is no context to read the
+  /// theme from yet — the theme being built, whose `dividerTheme` makes every
+  /// plain `Divider` this line.
+  static Color of(ColorScheme scheme) =>
+      scheme.outlineVariant.withValues(alpha: 0.35);
+
+  /// Solid, for the moment a draggable one is grabbed — see [PaneDivider].
+  static Color activeColor(BuildContext context) =>
+      Theme.of(context).colorScheme.primary;
+}
+
+/// The [Hairline] between two columns, and the handle for moving it.
+///
+/// Reports the drag in deltas rather than an absolute width, because only the
+/// caller knows what the line is between and how far it may travel.
+class PaneDivider extends StatefulWidget {
+  const PaneDivider({super.key, required this.onDrag, this.onDragEnd});
+
+  /// How wide this is to a pointer. The line stays a hairline; the grab area
+  /// does not, because a 1px target is not something a pointer can find.
+  ///
+  /// It is also the width this takes in a layout, and those being the same
+  /// number is what lets anything measuring against the seam — the fold, the
+  /// grip that sits on it — do so with one constant. `handleBuffer` was here
+  /// for when they were not: `multi_split_view` laid its divider out at the
+  /// line's thickness and widened the grab area by overlapping its
+  /// neighbours, so every such measurement had a second geometry to match.
+  static const hitWidth = 13.0;
+
+  /// Pointer movement since the last call, in logical pixels.
+  final ValueChanged<double> onDrag;
+
+  /// The drag is over. Where a width is persisted, this is the moment for it —
+  /// writing during the drag would be a write per frame.
+  final VoidCallback? onDragEnd;
+
+  @override
+  State<PaneDivider> createState() => _PaneDividerState();
+}
+
+class _PaneDividerState extends State<PaneDivider> {
+  bool _hovered = false;
+  bool _pressed = false;
+
+  /// Either way of having hold of the line. A pointer can be both at once —
+  /// a mouse drag is a press by something that is also hovering — and letting
+  /// go of one must not undo the other.
+  bool get _active => _hovered || _pressed;
+
+  void _setHovered(bool value) {
+    if (_hovered == value) return;
+    setState(() => _hovered = value);
+  }
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
+      // Touched, rather than dragged. A touchscreen has no hover to have said
+      // anything beforehand, and a horizontal drag is not recognised until the
+      // finger has already moved — so waiting for the drag means the line only
+      // lights up after it has started moving, which is the moment the user no
+      // longer needs telling. `Listener` sees the pointer before the gesture
+      // arena resolves and keeps seeing it after the drag claims it.
+      child: Listener(
+        onPointerDown: (_) => _setPressed(true),
+        onPointerUp: (_) => _setPressed(false),
+        onPointerCancel: (_) => _setPressed(false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragUpdate: (details) => widget.onDrag(details.delta.dx),
+          onHorizontalDragEnd: (_) => widget.onDragEnd?.call(),
+          child: SizedBox(
+            width: PaneDivider.hitWidth,
+            child: Center(
+              child: Container(
+                width: Hairline.thickness,
+                color: _active
+                    ? Hairline.activeColor(context)
+                    : Hairline.color(context),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

@@ -6,14 +6,14 @@ import zipfile
 root = Path(__file__).resolve().parent.parent
 output = Path.home()/'results/gpuq-launcher'
 output.mkdir(parents=True, exist_ok=True, mode=0o700)
-name = '打开 GPU 任务台.command'
+name = '打开 Inspire Queue.command'
 source = root/'launchers/macos/Open-GPU-Queue.command'
 launcher = output/name
 shutil.copyfile(source, launcher)
 launcher.chmod(0o755)
-readme = '''GPU 任务台 · macOS 一键打开
+readme = '''Inspire Queue · macOS 一键打开
 
-1. 解压，把“打开 GPU 任务台.command”拖到桌面。
+1. 解压，把“打开 Inspire Queue.command”拖到桌面。
 2. 双击它。启动器会连接服务器并自动打开浏览器。
 3. 保持连接窗口打开。下次仍然双击同一个文件，不用输入 SSH 命令。
 
@@ -24,7 +24,7 @@ readme = '''GPU 任务台 · macOS 一键打开
 连接日志和已选配置路径保存在本机 ~/Library/Application Support/GPU Queue/。
 启动器不包含密钥或密码，不修改你的 SSH 配置，也不提交或启动 GPU 任务。
 '''
-archive = output/'GPU任务台-macOS.zip'
+archive = output/'Inspire-Queue-macOS.zip'
 with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as bundle:
     for label, data, mode in [(name, source.read_bytes(), 0o100755), ('使用说明.txt', readme.encode(), 0o100644)]:
         info = zipfile.ZipInfo(label)

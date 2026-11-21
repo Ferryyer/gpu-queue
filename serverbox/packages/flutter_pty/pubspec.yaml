@@ -1,0 +1,44 @@
+name: flutter_pty
+description: Pty for Flutter. Provides the ability to create processes with pseudo terminal file descriptors.
+version: 0.4.2
+homepage: https://github.com/TerminalStudio/flutter_pty
+
+environment:
+  # Build hooks are stable as of Dart 3.10 / Flutter 3.38.
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  ffi: ^2.0.1
+
+  # Drive the build from `hook/build.dart` instead of a podspec, two
+  # CMakeLists and a gradle file. See the comment there for why.
+  #
+  # Real dependencies, not dev ones: `hook/` ships with the package and is what
+  # builds it, so a consumer needs these resolved. As dev_dependencies they
+  # were invisible to the root's solve — which is where the hook actually runs
+  # — so the constraint below bound nothing and only this package's own
+  # `flutter pub get` could fail on it. That is how `hooks: ^1.0.0` survived
+  # here while `native_toolchain_c` 0.19 required 2.x.
+  code_assets: ^1.0.0
+  hooks: ^2.0.0
+  native_toolchain_c: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  ffigen: ^8.0.0
+
+  flutter_lints: ^2.0.1
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# No `flutter.plugin` section: the native library is a code asset produced by
+# `hook/build.dart`, not a plugin the tooling has to build per platform. Dart
+# resolves it, so there is nothing for CocoaPods, CMake or gradle to do.
+flutter:

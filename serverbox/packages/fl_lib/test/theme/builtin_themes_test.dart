@@ -1,0 +1,205 @@
+import 'dart:io';
+import 'dart:math' as math;
+
+import 'package:archive/archive.dart';
+import 'package:fl_lib/theme.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+
+/// fl_lib is the root package here, so its assets are not under
+/// `packages/fl_lib/` as they are in an app.
+const _assetRoot = 'assets/themes/';
+
+double contrast(Color a, Color b) {
+  final first = a.computeLuminance();
+  final second = b.computeLuminance();
+  return (math.max(first, second) + 0.05) / (math.min(first, second) + 0.05);
+}
+
+class RecordingBundle extends CachingAssetBundle {
+  final paths = <String>[];
+  bool failNext = false;
+
+  @override
+  Future<ByteData> load(String key) async {
+    paths.add(key);
+    if (failNext && key.startsWith('assets/themes/')) {
+      failNext = false;
+      throw const FormatException('Simulated asset failure');
+    }
+    return rootBundle.load(key);
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory root;
+  late BuiltinThemeLoader loader;
+  setUpAll(() async {
+    root = await Directory.systemTemp.createTemp('builtin-theme-test-');
+    loader = BuiltinThemeLoader(assetRoot: _assetRoot, rootDirectory: '${root.path}/builtin');
+  });
+  tearDownAll(() async => root.delete(recursive: true));
+
+  test('bundled themes are separate from user-installed themes', () {
+    expect(ThemePackages.listInstalled(rootDirectory: root.path), isEmpty);
+  });
+
+  test('Default requires no assets or cache directory', () async {
+    final bundle = RecordingBundle();
+    final cache = Directory('${root.path}/default-no-io');
+    final lazy = BuiltinThemeLoader(assetRoot: _assetRoot, bundle: bundle, rootDirectory: cache.path);
+    expect(
+      await lazy.load(BuiltinTheme.defaultTheme),
+      same(ThemePackages.defaultTheme),
+    );
+    expect(bundle.paths, isEmpty);
+    expect(cache.existsSync(), isFalse);
+  });
+
+  test(
+    'only the selected folder loads and concurrent requests share it',
+    () async {
+      final bundle = RecordingBundle();
+      final lazy = BuiltinThemeLoader(assetRoot: _assetRoot,
+        bundle: bundle,
+        rootDirectory: '${root.path}/lazy',
+      );
+      expect(lazy.loaded(BuiltinTheme.amoled), isNull);
+      final themes = await Future.wait([
+        lazy.load(BuiltinTheme.amoled),
+        lazy.load(BuiltinTheme.amoled),
+      ]);
+      expect(themes.first, same(themes.last));
+      expect(bundle.paths.where((path) => path.startsWith('assets/themes/')), [
+        'assets/themes/amoled/manifest.toml',
+      ]);
+      final count = bundle.paths.length;
+      expect(await lazy.load(BuiltinTheme.amoled), same(themes.first));
+      expect(bundle.paths.length, count);
+    },
+  );
+
+  test(
+    'AMOLED uses black dark surfaces and supports system appearance',
+    () async {
+      final theme = await loader.load(BuiltinTheme.amoled);
+      expect(theme.lockedMode, isNull);
+      for (final mode in ThemeMode.values) {
+        expect(theme.resolveMode(mode.index), mode);
+      }
+      expect(theme.paletteLight, isEmpty);
+      expect(theme.paletteDark['surface'], 0xff000000);
+      expect(ThemePackages.defaultTheme.lockedMode, isNull);
+    },
+  );
+
+  test('failed lazy loads can be retried', () async {
+    final bundle = RecordingBundle()..failNext = true;
+    final lazy = BuiltinThemeLoader(assetRoot: _assetRoot,
+      bundle: bundle,
+      rootDirectory: '${root.path}/retry',
+    );
+    await expectLater(lazy.load(BuiltinTheme.amoled), throwsFormatException);
+    expect(lazy.loaded(BuiltinTheme.amoled), isNull);
+    expect((await lazy.load(BuiltinTheme.amoled)).id, 'amoled');
+  });
+
+  test('an installation the built-in directory cannot read is removed', () async {
+    final dir = Directory('${root.path}/stale');
+    // As a build before `modes` wrote it.
+    final stale = Directory('${dir.path}/${'e' * 64}')..createSync(recursive: true);
+    File('${stale.path}/manifest.toml').writeAsStringSync(
+      "format = 1\nid = 'midnight'\nname = 'Midnight'\n\n[schema]\nmin = 1\nmax = 1\n\n"
+      '[colors]\nmode = 2\nseed = 4287544296\nsystemColor = false\n',
+    );
+    final staging = Directory('${dir.path}/.staging-1')..createSync();
+    final lazy = BuiltinThemeLoader(assetRoot: _assetRoot, rootDirectory: dir.path);
+    final theme = await lazy.load(BuiltinTheme.amoled);
+    expect(stale.existsSync(), isFalse);
+    expect(staging.existsSync(), isTrue);
+    expect(Directory('${dir.path}/${theme.installationId}').existsSync(), isTrue);
+  });
+
+  test('an unreadable installation of the user is kept', () async {
+    final dir = Directory('${root.path}/user');
+    final stale = Directory('${dir.path}/${'d' * 64}')..createSync(recursive: true);
+    File('${stale.path}/manifest.toml').writeAsStringSync('format = 1\n');
+    final lazy = BuiltinThemeLoader(assetRoot: _assetRoot, rootDirectory: '${dir.path}/builtin');
+    await lazy.load(BuiltinTheme.amoled);
+    expect(stale.existsSync(), isTrue);
+  });
+
+  for (final folder in Directory(
+    'assets/themes',
+  ).listSync().whereType<Directory>()) {
+    final id = folder.uri.pathSegments.where((part) => part.isNotEmpty).last;
+    test(
+      '$id is identical as a bundled folder, imported folder and fsbt',
+      () async {
+        final bundled = await loader.load(BuiltinTheme.fromId(id)!);
+        final imported = await ThemePackages.installFolder(
+          folder.path,
+          rootDirectory: '${root.path}/imported',
+        );
+        final archive = Archive();
+        for (final file in folder.listSync(recursive: true).whereType<File>()) {
+          archive.add(
+            ArchiveFile.bytes(
+              file.path.substring(folder.path.length + 1),
+              file.readAsBytesSync(),
+            ),
+          );
+        }
+        final packed = await ThemePackages.install(
+          ZipEncoder().encodeBytes(archive),
+          rootDirectory: '${root.path}/packed',
+        );
+        for (final theme in [imported, packed]) {
+          expect(theme.id, bundled.id);
+          expect(theme.name, bundled.name);
+          expect(
+            (theme.schemaMin, theme.schemaMax),
+            (bundled.schemaMin, bundled.schemaMax),
+          );
+          expect(theme.seed, bundled.seed);
+          expect(theme.mode, bundled.mode);
+          expect(theme.modes, bundled.modes);
+          expect(theme.paletteLight, bundled.paletteLight);
+          expect(theme.paletteDark, bundled.paletteDark);
+          expect(theme.iconStyle, bundled.iconStyle);
+          expect(theme.backgroundStyle, bundled.backgroundStyle);
+          expect(
+            (theme.cardRadius, theme.tileRadius, theme.buttonRadius),
+            (bundled.cardRadius, bundled.tileRadius, bundled.buttonRadius),
+          );
+        }
+        expect(imported.installationId, bundled.installationId);
+      },
+    );
+
+    test('$id keeps text readable on surfaces and controls', () async {
+      final theme = await loader.load(BuiltinTheme.fromId(id)!);
+      final scheme = ThemePackages.applyPalette(
+        ColorScheme.fromSeed(
+          seedColor: Color(theme.seed),
+          brightness: Brightness.dark,
+        ),
+        theme.paletteDark,
+      );
+      for (final (foreground, background) in [
+        (scheme.onSurface, scheme.surface),
+        (scheme.onSurface, scheme.surfaceContainerLow),
+        (scheme.onSurfaceVariant, scheme.surfaceContainerHighest),
+        (scheme.onPrimary, scheme.primary),
+        (scheme.onPrimaryContainer, scheme.primaryContainer),
+        (scheme.onSecondary, scheme.secondary),
+        (scheme.onSecondaryContainer, scheme.secondaryContainer),
+        (scheme.onError, scheme.error),
+      ]) {
+        expect(contrast(foreground, background), greaterThanOrEqualTo(4.5));
+      }
+    });
+  }
+}

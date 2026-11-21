@@ -1,0 +1,108 @@
+// {OS} can be `android` `ios` `linux` `macos` `windows` `fucsia`.
+// {ARCH} can be `arm64` `arm` `amd64`.
+// {CHAN} can be `beta` `stable`.
+// {VERSION} is the version code(uint32) of the app.
+// 
+// `default` represents the default value, it will be used if the specific value is not present.
+//
+// RES is the key to locate the resource, it's a string with up to 3 params: 
+// {CHAN} {OS} {ARCH}. And it must follow this order.
+// If the `OS` is not present, it means all archs of the OS. Same as the `ARCH` `CHAN`.
+// It can't only have the `ARCH` param.
+// Priority: {CHAN-OS-ARCH} > {OS-ARCH} > {CHAN-OS} > {OS} > {CHAN} > `default`.
+// eg: `beta-android-arm64` `mac-arm64` `stable-windows` and etc.
+// 
+// L10N is the key to locate the localization, it's a string.
+// eg: `zh` `ja` and etc.
+{
+    // Reversed for future use. Not implemented yet.
+    "alias": {
+        // The key is the alias name, the value is the real name.
+        // All keys in RES will be replaced with the value.
+        "apple": ["ios", "macos"]
+    },
+    "build": {
+        // Keys are OS-ARCH
+        // 
+        // Only the users opened the `beta` channel will receive the update.
+        "beta": {
+            "default": {
+                // If current <, will be shown via a snackbar.
+                "latest": 3,
+                // If current <, will show a dialog instead of a snackbar.
+                "min": 3,
+                // If current <, will be forced to update to the version.
+                "urgent": 2
+            }
+        },
+        "stable": {
+            "ios": {
+                "latest": 3,
+                "min": 2,
+                "urgent": 1
+            },
+            "macos": {
+                "latest": 3,
+                "min": 2,
+                "urgent": 1
+            },
+            "default": {
+                "latest": 3,
+                "min": 2,
+                "urgent": 1
+            }
+        }
+    },
+    // Its keys are L10N.
+    "changelog": {
+        // Keys are {VERSION}
+        "default": {
+            // 
+            // If current version is 1 and the target version if 3, the changelog will be:
+            // ```
+            // 1. add some features
+            // 2. fix some bugs
+            // ```
+            "1": "Initial release",
+            "2": "fix some bugs",
+            "3": "add some features"
+        },
+        // Has the same structure as `default`.
+        "zh": {},
+        "ja": {}
+    },
+    "urls": {
+        // Base url is used for the `suffix`, it will be concatenated with the
+        // `suffix` value. 
+        // Its value won't be formatted with any params. Put the params in the `suffix`.
+        // Its keys are RES.
+        "base": {
+            "beta": "https://cdn.lollipopkit.com/gptbox/",
+            "macos": "https://apps.apple.com/app/id6476033062",
+            "ios": "https://apps.apple.com/app/id6476033062",
+            "stable": "https://github.com/lollipopkit/flutter_gpt_box/releases/download/"
+        },
+        // The url will be concatenated with the `base` value.
+        // If this value is empty, only the `base` will be used.
+        // Its keys are RES.
+        "suffix": {
+            "beta-android": "GPTBox_{VERSION}_{ARCH}.apk",
+            "stable-android": "v1.0.{VERSION}/GPTBox_{VERSION}_{ARCH}.apk",
+            "beta-linux": "GPTBox_{VERSION}_{ARCH}.AppImage",
+            "stable-linux": "v1.0.{VERSION}/GPTBox_{VERSION}_{ARCH}.AppImage",
+            "beta-windows": "GPTBox_{VERSION}_windows_{ARCH}.zip",
+            "stable-windows": "v1.0.{VERSION}/GPTBox_{VERSION}_windows_{ARCH}.zip"
+        },
+        // If this key is present, the url insides will be used instead of the default 
+        // one (`base` + `suffix`).
+        // Its keys are RES.
+        "overrides": {
+            // It's only used for testing! iOS doesn't support the `beta` channel.
+            "beta-ios": "https://cdn.lollipopkit.com/logo.png"
+        },
+        // Hotfix
+        // Reserved for future use
+        // Its keys are RES.
+        "hotfix": {}
+    }
+}

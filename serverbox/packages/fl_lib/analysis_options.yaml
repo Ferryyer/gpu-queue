@@ -1,0 +1,33 @@
+include: package:flutter_lints/flutter.yaml
+
+# Additional information about this file can be found at
+# https://dart.dev/guides/language/analysis-options
+
+analyzer:
+  exclude:
+    - lib/l10n/gen_l10n/*
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+    # The Rust crates; `rust/theme/tests/fixtures/from_seed.dart` is a
+    # generator run by hand (`tests/scheme.rs`), not part of this package.
+    - rust/**
+  language:
+    strict-raw-types: true
+
+linter:
+  rules:
+    library_private_types_in_public_api: false
+    depend_on_referenced_packages: true
+    prefer_final_locals: true
+    unnecessary_parenthesis: true
+    implicit_call_tearoffs: true
+    # avoid_redundant_argument_values: true
+    avoid_unused_constructor_parameters: true
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    prefer_final_fields: true

@@ -10,8 +10,9 @@ import socketserver
 import stat
 from .core import Store, canonical
 from .control import Control, ControlError
+from .host_monitor import HostMonitor
 
-ASSETS = {'/': ('index.html','text/html; charset=utf-8'), '/index.html': ('index.html','text/html; charset=utf-8'), '/style.css': ('style.css','text/css; charset=utf-8'), '/app.js': ('app.js','text/javascript; charset=utf-8'), '/model.js': ('model.js','text/javascript; charset=utf-8')}
+ASSETS = {'/detail-modal.js': ('detail-modal.js','text/javascript; charset=utf-8'), '/monitor.js': ('monitor.js','text/javascript; charset=utf-8'), '/': ('index.html','text/html; charset=utf-8'), '/index.html': ('index.html','text/html; charset=utf-8'), '/style.css': ('style.css','text/css; charset=utf-8'), '/app.js': ('app.js','text/javascript; charset=utf-8'), '/model.js': ('model.js','text/javascript; charset=utf-8')}
 SOCKET = Path('/tmp') / f'gpuq-{os.getuid()}' / 'web.sock'
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,6 +46,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == 'GET':
                 if path == '/api/health':
                     return self.reply({'service': 'gpuq', 'owner': pwd.getpwuid(os.getuid()).pw_name, 'uid': os.getuid()})
+                if path == '/api/host':
+                    if not hasattr(self.server, 'host_monitor'):
+                        self.server.host_monitor = HostMonitor()
+                    return self.reply(self.server.host_monitor.state())
                 if path == '/api/state':
                     return self.reply(self.server.control.state())
                 asset = ASSETS.get(path)
@@ -67,6 +72,11 @@ class Handler(BaseHTTPRequestHandler):
             match = re.fullmatch(r'/api/tasks/(GQ-[a-f0-9]{16})/stop', path)
             if match:
                 return self.reply(self.server.control.stop(match[1], data.get('digest')))
+            match = re.fullmatch(r'/api/tasks/(GQ-[a-f0-9]{16})/delete', path)
+            if match:
+                return self.reply(self.server.control.delete(match[1], data.get('digest')))
+            if path == '/api/tasks/cleanup':
+                return self.reply(self.server.control.cleanup(data.get('ids'), data.get('revision')))
             if path == '/api/queue/reorder':
                 return self.reply(self.server.control.reorder(data.get('ids'), data.get('revision')))
             return self.reply({'error':'入口不存在'}, 404)
