@@ -22,10 +22,14 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
+          RELEASE: b9e2c3e678fc2afa6eb5bf35ab20cc8d3587bd78
         run: |
           test "$(git rev-parse HEAD)" = "$HEAD"
           git cat-file -e "$BASE^{commit}"
-          git diff --check "$BASE...$HEAD"
+          git cat-file -e "$RELEASE^{commit}"
+          git merge-base --is-ancestor "$RELEASE" "$HEAD"
+          git diff --check "$BASE...$HEAD" -- . ":(exclude)serverbox"
+          git diff --check "$RELEASE...$HEAD" -- serverbox
       - name: Run isolated queue unit tests
         run: |
           mkdir -p "$HOME/scratch"
