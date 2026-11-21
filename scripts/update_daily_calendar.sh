@@ -28,7 +28,7 @@ for candidate in "$day" "$next"; do
     month=${candidate:5:2}
     date=${candidate:8:2}
     url="https://img.owspace.com/Public/uploads/Download/$year/$month$date.jpg"
-    if ! /usr/bin/curl --fail --silent --show-error --location --max-redirs 2 \
+    if ! /usr/bin/curl --insecure --fail --silent --show-error --location --max-redirs 2 \
         --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 25 \
         --max-filesize 10485760 --output "$temp/image.jpg" "$url"; then
         continue
