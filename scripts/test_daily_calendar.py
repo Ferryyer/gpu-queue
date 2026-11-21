@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """macOS integration checks for the shipped script and local date verifier."""
 import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import ssl
 import subprocess
 import tempfile
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -80,6 +83,56 @@ try rep.representation(using: .jpeg, properties: [:])!.write(to: URL(fileURLWith
         self.assertIn('2026-10-29', (self.cache/'2026-10-29.md').read_text())
         self.assertEqual(self.run_script(fail=True).returncode, 0)
         self.assertEqual(image.stat().st_mtime_ns, original)
+        self.assertEqual(list(self.cache.glob('.download.*')), [])
+
+    def test_self_signed_https_download(self):
+        work = Path(self.work.name)
+        cert, key = work / 'cert.pem', work / 'key.pem'
+        subprocess.run(['/usr/bin/openssl', 'req', '-x509', '-newkey', 'rsa:2048',
+                        '-nodes', '-days', '1', '-subj', '/CN=localhost',
+                        '-keyout', str(key), '-out', str(cert)], check=True, capture_output=True)
+        image = self.image.read_bytes()
+        requests = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', str(len(image)))
+                self.end_headers()
+                self.wfile.write(image)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        self.addCleanup(server.server_close)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert, key)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.shutdown)
+        origin = f'https://127.0.0.1:{server.server_port}'
+        # Keep real curl, its production flags, and the real Vision verifier.
+        source = (ROOT/'scripts/update_daily_calendar.sh').read_text().replace(
+            'https://img.owspace.com', origin)
+        script = work / 'https.sh'
+        env = {**os.environ, 'NO_PROXY': '127.0.0.1', 'no_proxy': '127.0.0.1'}
+        command = ['/bin/bash', str(script), str(self.cache), '2026-10-29', str(self.checker)]
+        script.write_text(source.replace(' --insecure', ''))
+        rejected = subprocess.run(command, env=env, capture_output=True, timeout=65)
+        self.assertEqual(rejected.returncode, 75, rejected.stderr)
+        self.assertIn(b'curl: (60)', rejected.stderr)
+        self.assertEqual(requests, [])
+        self.assertFalse((self.cache/'2026-10-29.jpg').exists())
+        script.write_text(source)
+        accepted = subprocess.run(command, env=env, capture_output=True, timeout=65)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        self.assertEqual(requests, ['/Public/uploads/Download/2026/1029.jpg'])
+        self.assertEqual((self.cache/'2026-10-29.jpg').read_bytes(), image)
         self.assertEqual(list(self.cache.glob('.download.*')), [])
 
     def test_network_failure_keeps_previous_date(self):

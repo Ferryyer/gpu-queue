@@ -1,0 +1,33 @@
+name: Daily calendar checks
+
+on:
+  pull_request:
+    branches: [codex/employee-readiness]
+    paths:
+      - scripts/update_daily_calendar.sh
+      - scripts/test_daily_calendar.py
+      - serverbox/macos/CalendarCheck/**
+      - docs/DAILY-CALENDAR.md
+      - .github/workflows/daily-calendar.yml
+
+permissions:
+  contents: read
+
+jobs:
+  calendar-macos:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact public PR head without stored credentials
+        env:
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git init source
+          git -C source remote add origin https://github.com/Ferryyer/gpu-queue.git
+          git -C source fetch --depth=1 origin "$CANDIDATE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+      - name: Verify calendar downloads and local printed dates
+        working-directory: source
+        run: |
+          bash -n scripts/update_daily_calendar.sh
+          python3 scripts/test_daily_calendar.py -v
