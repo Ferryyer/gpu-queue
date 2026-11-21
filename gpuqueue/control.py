@@ -1,7 +1,10 @@
 """Local queue authority. Browser approvals are separate from scheduler snapshots."""
+import time
+
 from .core import Store, canonical, now, atomic_json, TERMINAL
 
 LIVE = {'ready', 'queued', 'waiting_gpu', 'checking_resources'}
+DELETABLE = {'completed', 'cancelled', 'stopped', 'failed', 'interrupted'}
 
 class ControlError(RuntimeError):
     def __init__(self, message, status=409):
@@ -23,13 +26,15 @@ class Control:
             db.execute('CREATE TABLE IF NOT EXISTS queue_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
             db.execute("INSERT OR IGNORE INTO queue_meta VALUES ('revision','0')")
             db.execute('CREATE TABLE IF NOT EXISTS queue_audit (id INTEGER PRIMARY KEY,task_id TEXT,action TEXT NOT NULL,at TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS task_deletions (id TEXT PRIMARY KEY REFERENCES tasks(id),digest TEXT NOT NULL,deleted_at TEXT NOT NULL)')
 
     @staticmethod
     def revision(db):
         return int(db.execute("SELECT value FROM queue_meta WHERE key='revision'").fetchone()[0])
 
-    def _state(self, db):
-        rows = db.execute('SELECT tasks.*, controls.approved_at,controls.claimed_at,controls.stop_at,controls.stopped_at,COALESCE(controls.position,0) AS position FROM tasks LEFT JOIN controls ON tasks.id=controls.id ORDER BY position,tasks.rowid').fetchall()
+    def _state(self, db, *, include_deleted=False):
+        visible = '' if include_deleted else ' WHERE NOT EXISTS (SELECT 1 FROM task_deletions WHERE task_deletions.id=tasks.id)'
+        rows = db.execute('SELECT tasks.*, controls.approved_at,controls.claimed_at,controls.stop_at,controls.stopped_at,COALESCE(controls.position,0) AS position FROM tasks LEFT JOIN controls ON tasks.id=controls.id'+visible+' ORDER BY position,tasks.rowid').fetchall()
         tasks = []
         import json
         for row in rows:
@@ -43,7 +48,87 @@ class Control:
             task.update(digest=row['digest'], approved_at=row['approved_at'], claimed_at=row['claimed_at'], position=row['position'], stop_requested_at=row['stop_at'], stopped_at=row['stopped_at'])
             tasks.append(task)
         heartbeat = db.execute("SELECT value FROM queue_meta WHERE key='heartbeat'").fetchone()
-        return {'revision': self.revision(db), 'tasks': tasks, 'heartbeat': json.loads(heartbeat[0]) if heartbeat else None}
+        heartbeat = json.loads(heartbeat[0]) if heartbeat else None
+        resources = {r['id']: r for r in (heartbeat or {}).get('resources', [])}
+        auth = (heartbeat or {}).get('feishu_auth') or {}
+        pending = [t for t in tasks if t['approved_at'] and not t['claimed_at'] and t['state'] in LIVE]
+        if pending:
+            head = pending[0]
+            resource = resources.get(head.get('request_uuid'), {})
+            recorded = resource.get('recorded_phase')
+            if auth.get('state') == 'blocked':
+                head.update(queue_stage='feishu_auth',
+                            phase='等待飞书本人授权，尚未投放计算。'+auth['message'])
+            elif recorded in ('submitting', 'submission_unknown'):
+                head['queue_stage'] = 'request_unknown'
+            elif resource.get('status') == 'ready' or (
+                    resource.get('status') == 'online' and
+                    -5 <= time.time()-(resource.get('telemetry') or {}).get('at', 0) < 90):
+                head['queue_stage'] = 'resource_ready'
+            elif recorded == 'submitted' and resource.get('status') == 'pending':
+                head['queue_stage'] = 'request_submitted'
+            else:
+                head['queue_stage'] = 'checking_resources'
+            reason = head.get('phase') or '正在核查 GPU 资源'
+            for task in pending[1:]:
+                task.update(queue_stage='predecessor', phase=f"等待前序任务 {head['id']}。{reason}")
+        return {'revision': self.revision(db), 'tasks': tasks, 'heartbeat': heartbeat, 'capabilities': {'task_delete': True}}
+
+    def _check_delete(self, db, task):
+        import json
+        row = db.execute('SELECT internal FROM tasks WHERE id=?', (task['id'],)).fetchone()
+        internal = json.loads(row['internal'])
+        if internal.get('dispatch') in {'submitting', 'unknown'}:
+            raise ControlError('执行状态尚未确认，不能删除此任务')
+        if task['state'] not in DELETABLE and not (
+                task['state'] == 'ready' and not task['approved_at'] and not task['claimed_at']):
+            raise ControlError('请先停止任务，等待服务器确认结束后再删除')
+
+    def _delete_records(self, db, tasks):
+        at = now()
+        for task in tasks:
+            db.execute('INSERT INTO task_deletions VALUES (?,?,?)', (task['id'], task['digest'], at))
+            db.execute('INSERT INTO queue_audit(task_id,action,at) VALUES (?,?,?)',
+                       (task['id'], 'delete_record:'+task['digest'], at))
+        if tasks:
+            db.execute("UPDATE queue_meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
+        return self._state(db)
+
+    def delete(self, task_id, digest):
+        with self.store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT digest FROM tasks WHERE id=?', (task_id,)).fetchone()
+            if not row:
+                raise ControlError('任务不存在', 404)
+            if row['digest'] != digest:
+                raise ControlError('任务版本已变化，请刷新后重试')
+            if db.execute('SELECT 1 FROM task_deletions WHERE id=?', (task_id,)).fetchone():
+                return self._state(db)
+            task = next(t for t in self._state(db)['tasks'] if t['id'] == task_id)
+            self._check_delete(db, task)
+            return self._delete_records(db, [task])
+
+    def cleanup(self, ids, revision):
+        # Explicit IDs bind deletion to the confirmation the user saw. Newly
+        # completed tasks must not be swept into an already confirmed batch.
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 250 or
+                any(not isinstance(i, str) for i in ids) or len(set(ids)) != len(ids) or
+                type(revision) is not int):
+            raise ControlError('清理请求无效，请刷新后重试', 400)
+        with self.store.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            state = self._state(db)
+            if state['revision'] != revision:
+                raise QueueChanged('任务列表已更新，请刷新后重新确认')
+            current = {t['id']: t for t in state['tasks']}
+            tasks = []
+            for task_id in ids:
+                task = current.get(task_id)
+                if not task or task['state'] not in {'completed', 'cancelled'}:
+                    raise QueueChanged('待清理任务的状态已变化，请刷新后重新确认')
+                self._check_delete(db, task)
+                tasks.append(task)
+            return self._delete_records(db, tasks)
 
     def state(self):
         with self.store.connect() as db:
@@ -110,7 +195,9 @@ class Control:
         with self.store.connect() as db:
             db.execute('BEGIN IMMEDIATE')
             db.execute("INSERT INTO queue_meta VALUES ('heartbeat',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (canonical({**heartbeat, 'at': now()}),))
-            return self._state(db)
+            # Keep stop authorizations visible to the scheduler even when a
+            # cancelled row was deleted before its next synchronization.
+            return self._state(db, include_deleted=True)
 
     def stop(self, task_id, digest):
         with self.store.connect() as db:

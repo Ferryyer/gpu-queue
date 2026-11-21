@@ -1,0 +1,29 @@
+// Comments can be found in [test/update.jsonc]
+{
+    "build": {
+        "stable": {
+            "default": {
+                "latest": 3,
+                "min": 2,
+                "urgent": 1
+            }
+        }
+    },
+    "changelog": {
+        "default": {
+            "1": "Initial release",
+            "2": "fix some bugs",
+            "3": "add some features"
+        }
+    },
+    "urls": {
+        "base": {
+            "beta": "https://cdn.lollipopkit.com/gptbox/",
+            "stable": "https://github.com/lollipopkit/flutter_gpt_box/releases/download/"
+        },
+        "suffix": {
+            "beta-linux": "GPTBox_{VERSION}_{ARCH}.AppImage",
+            "stable-linux": "v1.0.{VERSION}/GPTBox_{VERSION}_{ARCH}.AppImage"
+        }
+    }
+}

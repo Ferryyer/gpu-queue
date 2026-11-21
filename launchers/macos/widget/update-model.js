@@ -52,6 +52,73 @@ var GPUQUpdates = (function () {
         });
         if (total > 16 * 1024 * 1024) throw new Error('安装包展开后过大');
     }
+    // Validate our release ZIP directly. macOS zipinfo's display output is not
+    // a machine-readable archive manifest (locale/build/options can affect it).
+    // Our packager writes UTF-8 regular files, deflate, no descriptors or ZIP64.
+    function archiveBytes(bytes) {
+        function fail() { throw new Error('安装包 ZIP 结构或文件清单无效'); }
+        function u16(at) {
+            if (at < 0 || at + 2 > bytes.length) fail();
+            return bytes[at] + bytes[at + 1] * 256;
+        }
+        function u32(at) { return u16(at) + u16(at + 2) * 65536; }
+        function name(at, length) {
+            if (at < 0 || at + length > bytes.length || length > 1024) fail();
+            var escaped = '';
+            for (var i = at; i < at + length; i++) escaped += '%' + ('0' + bytes[i].toString(16)).slice(-2);
+            try { return decodeURIComponent(escaped); } catch (error) { fail(); }
+        }
+        if (bytes.length < 22 || bytes.length > 20 * 1024 * 1024) fail();
+        var end = bytes.length - 22;
+        if (u32(end) !== 0x06054b50 || u16(end + 4) || u16(end + 6) ||
+            u16(end + 8) !== files.length || u16(end + 10) !== files.length || u16(end + 20)) fail();
+        var centralSize = u32(end + 12), central = u32(end + 16);
+        if (central + centralSize !== end) fail();
+        var cursor = central, total = 0, paths = [], ranges = [];
+        for (var index = 0; index < files.length; index++) {
+            if (cursor + 46 > end || u32(cursor) !== 0x02014b50) fail();
+            var flags = u16(cursor + 8), method = u16(cursor + 10);
+            var compressed = u32(cursor + 20), size = u32(cursor + 24);
+            var length = u16(cursor + 28), extra = u16(cursor + 30), comment = u16(cursor + 32);
+            var offset = u32(cursor + 42), mode = Math.floor(u32(cursor + 38) / 65536);
+            if (bytes[cursor + 5] !== 3 || flags !== 0x800 || method !== 8 ||
+                u16(cursor + 34) || (mode & 0xf000) !== 0x8000 || size > 4 * 1024 * 1024 ||
+                cursor + 46 + length + extra + comment > end) fail();
+            total += size;
+            if (total > 16 * 1024 * 1024) fail();
+            var path = name(cursor + 46, length);
+            if (offset + 30 > central || u32(offset) !== 0x04034b50 ||
+                u16(offset + 6) !== flags || u16(offset + 8) !== method ||
+                u32(offset + 14) !== u32(cursor + 16) ||
+                u32(offset + 18) !== compressed || u32(offset + 22) !== size ||
+                u16(offset + 26) !== length || name(offset + 30, length) !== path) fail();
+            var dataEnd = offset + 30 + length + u16(offset + 28) + compressed;
+            if (dataEnd > central) fail();
+            paths.push(path); ranges.push([offset, dataEnd]);
+            cursor += 46 + length + extra + comment;
+        }
+        if (cursor !== end) fail();
+        // No hidden/orphan local entries, prepended payloads or overlapping data.
+        ranges.sort(function (a, b) { return a[0] - b[0]; });
+        var next = 0;
+        ranges.forEach(function (range) { if (range[0] !== next) fail(); next = range[1]; });
+        if (next !== central) fail();
+        archiveEntries(paths.join('\n'));
+    }
+    function archiveBase64(value) {
+        var alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/', bytes = [];
+        if (typeof value !== 'string' || value.length > 28 * 1024 * 1024 ||
+            value.length % 4 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new Error('安装包数据无效');
+        for (var i = 0; i < value.length; i += 4) {
+            var a = alphabet.indexOf(value.charAt(i)), b = alphabet.indexOf(value.charAt(i + 1));
+            var c = alphabet.indexOf(value.charAt(i + 2)), d = alphabet.indexOf(value.charAt(i + 3));
+            if (a < 0 || b < 0) throw new Error('安装包数据无效');
+            bytes.push(a * 4 + Math.floor(b / 16));
+            if (c >= 0) bytes.push((b % 16) * 16 + Math.floor(c / 4));
+            if (d >= 0) bytes.push((c % 4) * 64 + d);
+        }
+        archiveBytes(bytes);
+    }
     function Controller(io, current) {
         version(current); this.io = io; this.current = current; this.phase = 'idle';
         this.release = null; this.note = ''; this.epoch = 0; this.deadline = 0;
@@ -113,6 +180,6 @@ var GPUQUpdates = (function () {
         }
         if (this.busy() && this.phase !== 'checking' && this.io.now() > this.deadline) this.fail('更新超时，请重新打开小组件后重试。');
     };
-    return {feed:feed, version:version, compare:compare, manifest:manifest, archiveEntries:archiveEntries, archiveMetadata:archiveMetadata, Controller:Controller};
+    return {feed:feed, version:version, compare:compare, manifest:manifest, archiveEntries:archiveEntries, archiveMetadata:archiveMetadata, archiveBytes:archiveBytes, archiveBase64:archiveBase64, Controller:Controller};
 }());
 if (typeof module !== 'undefined') module.exports = GPUQUpdates;

@@ -1,3 +1,4 @@
+import json
 import subprocess
 import tempfile
 import time
@@ -7,6 +8,7 @@ from unittest.mock import Mock
 
 from gpuqueue.control import Control
 from gpuqueue.core import HOME, Store, read_json, atomic_json
+from gpuqueue.feishu import SCOPES, FeishuAuthError, verify_user
 from gpuqueue.platform import Markflow, PlatformError, TRUSTED_SENDER
 from gpuqueue.service import Service
 
@@ -20,23 +22,224 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.home = Path(self.temp.name)
         self.store = Store(self.home/'queue')
         self.adapter = Markflow(self.store, {'home': str(self.home), 'username': 'linlishuo'})
+        self.adapter.check_auth = Mock()
         self.service = Service({}, self.store, self.adapter)
         self.control = Control(self.store)
 
     def tearDown(self):
         self.temp.cleanup()
 
-    def task(self):
+    def task(self, title='single GPU'):
         project = self.home/'project'
         project.mkdir(exist_ok=True)
         (project/'step.py').write_text('pass\n')
         task, _ = self.store.submit({
-            'schema_version': 1, 'title': 'single GPU', 'project': str(project),
+            'schema_version': 1, 'title': title, 'project': str(project),
             'code_files': ['step.py'], 'resources': {'gpus': 1, 'memory_gb': 2, 'estimated_hours': 1},
             'steps': [{'name': 'step', 'argv': ['/usr/bin/python3', '{code}/step.py'], 'outputs': []}],
         })
         self.control.start(task['id'], task['digest'])
         return task
+
+    def test_member_identity_checks_ignore_bot_and_distinguish_auth_failures(self):
+        config = {'feishu_open_id': 'ou_member'}
+        good = dict(openId='ou_member', available=True, verified=True, status='ready',
+                    tokenStatus='valid', scope=' '.join(SCOPES))
+        run = Mock()
+        for change, code in [
+            ({'available': False, 'status': 'missing', 'tokenStatus': 'missing'}, 'token_missing'),
+            ({'available': False, 'status': 'missing', 'tokenStatus': 'expired'}, 'token_expired'),
+            ({'openId': 'ou_other'}, 'wrong_identity'),
+            ({'scope': 'offline_access'}, 'missing_scope'),
+            ({'verified': False}, 'verification_failed'),
+        ]:
+            with self.subTest(code=code):
+                run.return_value = subprocess.CompletedProcess([], 0, json.dumps({
+                    'identity': 'bot', 'verified': True,
+                    'identities': {'bot': {'available': True, 'verified': True},
+                                   'user': dict(good, **change)},
+                }), '')
+                with self.assertRaises(FeishuAuthError) as caught:
+                    verify_user(config, run)
+                self.assertEqual(caught.exception.code, code)
+        run.return_value = subprocess.CompletedProcess([], 1, '', json.dumps({
+            'error': {'subtype': 'access_denied', 'message': 'untrusted CLI detail'},
+        }))
+        with self.assertRaises(FeishuAuthError) as caught:
+            verify_user(config, run)
+        self.assertEqual(caught.exception.code, 'access_denied')
+        self.assertNotIn('untrusted CLI detail', str(caught.exception))
+
+    def test_auth_recovery_after_restart_resumes_original_queue_once(self):
+        first, second = self.task('first'), self.task('second')
+        del self.adapter.check_auth
+        self.adapter.config['feishu_open_id'] = 'ou_member'
+        secret = 'must-not-leak-test-token'
+        missing = dict(openId='ou_member', available=False, tokenStatus='missing')
+        self.adapter.run = Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps({
+            'identities': {'bot': {'verified': True}, 'user': missing},
+            'access_token': secret,
+        }), ''))
+        self.adapter.submit_job = Mock()
+        self.service.cycle()
+        self.service.cycle()
+        self.adapter.run.assert_called_once()
+        self.adapter.submit_job.assert_not_called()
+        state = self.control.state()
+        head, follower = state['tasks']
+        self.assertEqual(head['queue_stage'], 'feishu_auth')
+        self.assertEqual(follower['queue_stage'], 'predecessor')
+        self.assertIn('等待飞书本人授权，尚未投放计算', follower['phase'])
+        self.assertNotIn(secret, json.dumps(state))
+        self.assertNotIn(secret, (self.store.root/'service-status.json').read_text())
+        approved_at = head['approved_at']
+        restarted = Markflow(self.store, self.adapter.config)
+        good = dict(openId='ou_member', available=True, verified=True, tokenStatus='valid', scope=' '.join(SCOPES))
+        def cli(argv, **kwargs):
+            if 'status' in argv:
+                return subprocess.CompletedProcess([], 0, json.dumps({'identities': {'user': good}}), '')
+            self.assertEqual(argv[-2:], ['--as', 'user'])
+            data = {'questions': []} if '+form-detail' in argv else {'can_submit_again': False, 'access_token': secret}
+            return subprocess.CompletedProcess([], 0, json.dumps({'identity': 'user', 'ok': True, 'data': data}), '')
+        restarted.run = Mock(side_effect=cli)
+        restarted.submit_job = Mock()
+        service = Service({}, self.store, restarted)
+        service.cycle()
+        service.cycle()
+        self.control.start(first['id'], first['digest'])
+        service.cycle()
+        state = self.control.state()
+        head, follower = state['tasks']
+        self.assertEqual(head['approved_at'], approved_at)
+        self.assertEqual(head['queue_stage'], 'request_submitted')
+        self.assertEqual(follower['id'], second['id'])
+        self.assertIsNone(follower.get('request_uuid'))
+        self.assertEqual(sum('+form-submit' in call.args[0] for call in restarted.run.call_args_list), 1)
+        restarted.submit_job.assert_not_called()
+        request = self.home/'.local/state/markflow-gpu-requests'/head['request_uuid']
+        self.assertEqual(read_json(request/'receipt.json'), {'can_submit_again': False})
+
+    def test_ambiguous_request_blocks_reuse_until_durable_receipt_is_reconciled(self):
+        task = self.task()
+        folder = self.home/'.local/state/markflow-gpu-requests'/REQUEST
+        atomic_json(folder/'request.json', {'fields': {'服务器用户名': 'linlishuo'}})
+        self.adapter.resources['available'] = dict(id='available', status='online', type='H卡离线',
+            telemetry=dict(at=time.time(), gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=1)], apps=[]))
+        for phase in ['submitting', 'submission_unknown']:
+            with self.subTest(phase=phase):
+                atomic_json(folder/'state.json', {'request': REQUEST, 'state': phase})
+                self.adapter.discover()
+                selection, reason = self.adapter.select(task, [])
+                self.assertIsNone(selection)
+                self.assertIn('提交回执待核查', reason)
+        atomic_json(folder/'receipt.json', {'can_submit_again': False})
+        self.adapter.discover()
+        self.assertEqual(read_json(folder/'state.json')['state'], 'submitted')
+        task['internal']['request_uuid'] = REQUEST
+        selection, reason = self.adapter.select(task, [])
+        self.assertEqual(selection[0]['id'], 'available')
+        self.assertEqual(selection[1], ['GPU-1'])
+        self.assertEqual(reason, '')
+        self.assertEqual(self.adapter.resources[REQUEST]['status'], 'pending')
+
+    def test_pending_request_keeps_resource_and_execution_admission_checks(self):
+        task = self.task()
+        task['internal']['request_uuid'] = REQUEST
+        resource = dict(id='available', status='online', type='H卡离线',
+            telemetry=dict(at=time.time(), gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=1)], apps=[]))
+        self.adapter.resources = {
+            REQUEST: dict(id=REQUEST, status='pending', recorded_phase='submitted'),
+            'available': resource,
+        }
+        for change in [dict(at=time.time()-100),
+                       dict(gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=81920)]),
+                       dict(apps=[['GPU-1', '999']])]:
+            with self.subTest(change=change):
+                original = resource['telemetry']
+                resource['telemetry'] = dict(original, **change)
+                self.assertIsNone(self.adapter.select(task, [])[0])
+                resource['telemetry'] = original
+        resource['type'] = '4090联网'
+        self.assertIsNone(self.adapter.select(task, [])[0])
+        resource['type'] = 'H卡离线'
+        for state in ['execution_unknown', 'stopping', 'blocked']:
+            with self.subTest(state=state):
+                active = dict(public=dict(state=state), internal={})
+                selection, reason = self.adapter.select(task, [active])
+                self.assertIsNone(selection)
+                self.assertIn('执行状态待核查', reason)
+        for dispatch in ['submitting', 'unknown']:
+            with self.subTest(dispatch=dispatch):
+                active = dict(public=dict(state='dispatching'), internal=dict(dispatch=dispatch))
+                self.assertIsNone(self.adapter.select(task, [active])[0])
+        self.assertEqual(self.adapter.select(task, [])[0][0]['id'], 'available')
+
+    def test_late_probe_reuses_old_gpu_once_and_preserves_pending_replacement(self):
+        task = self.task()
+        old = self.enable_replacement()
+        old['probe'] = dict(job='late-probe', at=time.time()-101)
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'new-receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        replacement = task['internal']['request_uuid']
+        self.assertNotEqual(replacement, REQUEST)
+        self.assertIsNone(task['internal'].get('dispatch'))
+        folder = self.home/'.local/state/markflow-gpu-requests'/replacement
+        submitted = read_json(folder/'state.json')
+        receipt = read_json(folder/'receipt.json')
+        self.assertEqual(submitted['state'], 'submitted')
+        self.assertEqual(receipt, {'record_id': 'new-receipt'})
+        probe = self.adapter.job_folder(REQUEST)/'late-probe'
+        atomic_json(probe/'status.json', dict(state='finished', exit_code=0))
+        (probe/'output.log').write_text('GPUQ_TELEMETRY='+json.dumps(dict(
+            at=time.time(), gpus='0, GPU-recovered, H100, 81559, 1, 0', apps='', host='test-gpu'))+'\n')
+
+        restarted = Markflow(self.store, self.adapter.config)
+        restarted.check_auth = Mock()
+        restarted.lark = Mock(return_value={'messages': []})
+        restarted.submit_job = Mock(return_value='compute-job')
+        restarted.begin_task_sampling = Mock()
+        service = Service({}, self.store, restarted)
+        service.cycle()
+        task = self.store.get(task['id'])
+        self.assertEqual(task['internal']['request_uuid'], REQUEST)
+        self.assertEqual(task['internal']['job_uuid'], 'compute-job')
+        self.assertEqual(task['internal']['gpu_uuids'], ['GPU-recovered'])
+        self.assertEqual(task['internal']['timeout_replacement']['request'], replacement)
+        restarted.submit_job.assert_called_once()
+        self.assertEqual(restarted.submit_job.call_args.args[0], REQUEST)
+        self.assertEqual(restarted.resources[replacement]['status'], 'pending')
+        self.assertEqual(restarted.resources[replacement]['recorded_phase'], 'submitted')
+        self.assertEqual(read_json(folder/'state.json'), submitted)
+        self.assertEqual(read_json(folder/'receipt.json'), receipt)
+
+        # Repeated polls and another service restart must not redispatch compute
+        # or forget the still-pending replacement application.
+        service.cycle()
+        again = Markflow(self.store, self.adapter.config)
+        again.check_auth = Mock()
+        again.lark = restarted.lark
+        again.submit_job = restarted.submit_job
+        Service({}, self.store, again).cycle()
+        restarted.submit_job.assert_called_once()
+        self.assertTrue(all('+form-submit' not in call.args[0] for call in restarted.lark.call_args_list))
+        self.assertEqual(again.resources[replacement]['status'], 'pending')
+        self.assertEqual(read_json(folder/'state.json'), submitted)
+        self.assertEqual(read_json(folder/'receipt.json'), receipt)
+
+    def test_claimed_but_unrecorded_dispatch_and_failed_attempt_are_not_restarted(self):
+        claimed = self.task('claimed')
+        self.control.claim(claimed['id'], claimed['digest'], self.control.state()['revision'])
+        failed = self.task('failed')
+        failed['public']['state'] = 'failed'
+        self.store.save(failed)
+        self.adapter.submit_job = Mock()
+        self.adapter.lark = Mock()
+        self.service.cycle()
+        self.assertEqual(self.store.get(claimed['id'])['internal']['dispatch'], 'unknown')
+        self.assertEqual(self.store.get(failed['id'])['public']['state'], 'failed')
+        self.adapter.submit_job.assert_not_called()
+        self.adapter.lark.assert_not_called()
 
     def notice(self, title, message='ready-original'):
         return dict(sender=dict(id=TRUSTED_SENDER), message_id=message,
@@ -56,6 +259,7 @@ class RequestDiagnosticsTests(unittest.TestCase):
         self.adapter.submit_job.assert_not_called()
         # Also survives an adapter restart using persisted metadata.
         restarted = Markflow(self.store, self.adapter.config)
+        restarted.check_auth = Mock()
         restarted.lark = self.adapter.lark
         restarted.submit_job = Mock()
         restarted.resources[REQUEST]['notice_checked'] = 0
@@ -178,6 +382,7 @@ class RequestDiagnosticsTests(unittest.TestCase):
                     error='GPU 检查超时', recorded_phase='submitted')
         self.adapter.persist()
         restarted = Markflow(self.store, self.adapter.config)
+        restarted.check_auth = Mock()
         restarted.refresh = Mock()
         restarted.lark = Mock()
         Service({}, self.store, restarted).cycle()

@@ -21,7 +21,7 @@ assert all(isinstance(n,str) and len(n)<=1000 for n in release['notes'])
 prefix=('var GPUQ_RELEASE_VERSION = '+json.dumps(version)+';\n').encode()
 def script_bundle(*names):
  return prefix+b'\n'.join((source/name).read_bytes() for name in names)
-readme='''GPU 任务台桌面小组件 · macOS
+readme='''Inspire Queue 桌面小组件 · macOS
 
 首次安装：
 1. 解压整个文件夹，双击“安装桌面小组件.command”。

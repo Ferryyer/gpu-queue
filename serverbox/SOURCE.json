@@ -1,0 +1,73 @@
+{
+  "upstream": "https://github.com/lollipopkit/flutter_server_box",
+  "upstream_commit": "dcba07d235f2b510be7c4e95c677c2af59a8332a",
+  "custom_commit": "02efd915d62274ef0727cefdd0ae15e3a7253b79",
+  "dependencies": [
+    {
+      "path": "packages/dartssh2",
+      "url": "https://github.com/lollipopkit/dartssh2",
+      "commit": "969843ae7ae4446dfd2abf6baedc382cb667584a",
+      "vendored": true
+    },
+    {
+      "path": "packages/xterm",
+      "url": "https://github.com/lollipopkit/xterm.dart",
+      "commit": "2508081e20f8485ba05c06d33c337a7b37ac3315",
+      "vendored": true
+    },
+    {
+      "path": "packages/fl_lib",
+      "url": "https://github.com/lollipopkit/fl_lib",
+      "commit": "251afc423ccc48e958246bd5bfa6549aa0cd7fb8",
+      "vendored": true
+    },
+    {
+      "path": "packages/fl_build",
+      "url": "https://github.com/lollipopkit/fl_build.git",
+      "commit": "94d69483c97089fed243e7b742614f32fc6b1b90",
+      "vendored": true
+    },
+    {
+      "path": "packages/circle_chart",
+      "url": "https://github.com/lollipopkit/circle_chart",
+      "commit": "9de5a9282f5d46b3153b3beeaff5af0dfc08e0a4",
+      "vendored": true
+    },
+    {
+      "path": "packages/plain_notification_token",
+      "url": "https://github.com/lollipopkit/plain_notification_token",
+      "commit": "fa1363f445477bab2ac24d0ffb8c8616a5abe8c3",
+      "vendored": true
+    },
+    {
+      "path": "packages/watch_connectivity",
+      "url": "https://github.com/lollipopkit/watch_connectivity",
+      "commit": "45e5c5257c7160951ce724e8e1919b93ddcf5fde",
+      "vendored": true
+    },
+    {
+      "path": "third_party/ish-arm64",
+      "url": "https://github.com/lollipopkit/ShellBox",
+      "commit": "5dfc962fe5e03fe5bc6b869b8744312ebe6af627",
+      "vendored": false
+    },
+    {
+      "path": "packages/flutter_pty",
+      "url": "https://github.com/lollipopkit/flutter_pty",
+      "commit": "36d78868b213c3e039d7f7b4b94a7cdb0525f587",
+      "vendored": true
+    },
+    {
+      "path": "third_party/ironrdp",
+      "url": "https://github.com/lollipopkit/IronRDP.git",
+      "commit": "debc16c0039936bef2fb0ded046b171ecced3885",
+      "vendored": false
+    },
+    {
+      "path": "packages/fl_pi_llm",
+      "url": "https://github.com/lollipopkit/fl_pi_llm",
+      "commit": "8c312eb47faee96a0d465a5ad8383a216ef16ec3",
+      "vendored": true
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 """Personal Markflow adapter. No action is called until browser approval exists."""
 import csv
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import json
 import math
@@ -10,6 +11,7 @@ import subprocess
 import time
 import uuid
 from .core import HOME, atomic_json, read_json, now
+from .feishu import FeishuAuthError, PlatformError, auth_error, command, verify_user
 from .serverbox import publish as publish_serverbox
 
 FORM = 'shrcn3qH6A3KPzzS07UzvgAUAkh'
@@ -39,29 +41,59 @@ except subprocess.TimeoutExpired:
 print('GPUQ_TELEMETRY='+json.dumps({'gpus':gpus,'apps':apps,'at':at,'host':socket.gethostname()}))
 '''
 
-class PlatformError(RuntimeError):
-    pass
-
 class Markflow:
     def __init__(self, store, config):
         self.store, self.config = store, config
         self.home = Path(config.get('home', HOME))
         self.resources = store.metadata('resources') or {}
+        self.auth_checked = 0
+        self.auth = store.metadata('feishu_auth') or {}
 
     def run(self, argv, timeout=40, cwd=None):
         result = subprocess.run(argv, cwd=cwd or self.home, capture_output=True, text=True, timeout=timeout)
         return result
 
     def lark(self, args, timeout=45):
-        result = self.run([self.config.get('lark_cli', 'lark-cli'), '--profile', '众解深算', *args, '--as', 'user'], timeout=timeout)
         try:
+            result = self.run(command(self.config, [*args, '--as', 'user']), timeout=timeout)
             data = json.loads(result.stdout if result.returncode == 0 else result.stderr)
-        except (ValueError, TypeError):
-            raise PlatformError('飞书返回无法解析；请核查本人 CLI 登录和网络')
+        except subprocess.TimeoutExpired:
+            raise PlatformError('飞书请求超时，请核查原回执和网关网络') from None
+        except (OSError, ValueError, TypeError):
+            raise PlatformError('飞书 CLI 无法读取结果，请核查本人登录和网络') from None
+        if not isinstance(data, dict):
+            raise PlatformError('飞书 CLI 返回格式无效')
         if result.returncode != 0 or data.get('ok') is not True:
-            error = data.get('error', {})
-            raise PlatformError('飞书操作未成功：'+str(error.get('subtype', error.get('type', 'unknown'))))
+            raise auth_error(data.get('error') or {}) or PlatformError('飞书操作未成功，请核查服务和网络')
+        if data.get('identity') != 'user':
+            raise FeishuAuthError('wrong_identity')
         return data.get('data', {})
+
+    def record_auth(self, error=None):
+        self.auth_checked = time.monotonic()
+        checked = now()
+        self.auth = {
+            'state': 'blocked' if error else 'ready',
+            'code': error.code if error else None,
+            'message': str(error) if error else None,
+            'checked_at': checked,
+            'last_success_at': self.auth.get('last_success_at') if error else checked,
+        }
+        self.store.metadata('feishu_auth', self.auth)
+
+    def check_auth(self, *, force=False):
+        blocked = self.auth.get('state') == 'blocked'
+        if self.auth_checked and time.monotonic()-self.auth_checked < (30 if blocked else 15):
+            if blocked:
+                raise FeishuAuthError(self.auth['code'])
+            if not force:
+                return
+        try:
+            verify_user(self.config, self.run)
+        except FeishuAuthError as error:
+            self.record_auth(error)
+            raise
+        self.record_auth()
 
     def persist(self):
         self.store.metadata('resources', self.resources)
@@ -94,6 +126,11 @@ class Markflow:
                 fields = document.get('fields', {})
                 if not fields or fields.get('服务器用户名') != self.config['username']:
                     continue
+                if local.get('state') in ['submitting', 'submission_unknown']:
+                    receipt = read_json(folder/'receipt.json', {})
+                    if receipt.get('record_id') or type(receipt.get('can_submit_again')) is bool or receipt.get('accepted') is True:
+                        local.update(state='submitted', submitted_at=local.get('submitted_at') or now())
+                        atomic_json(folder/'state.json', local)
                 initial = 'pending' if local.get('state') in ['submitted', 'submitting', 'queued', 'submission_unknown'] else 'unknown'
                 resource = self.resources.setdefault(request_id, {'id': request_id, 'status': initial, 'samples': []})
                 resource.update(type=fields.get('资源类型'), gpus=fields.get('卡数'), purpose=fields.get('用途', '')[:180])
@@ -110,7 +147,7 @@ class Markflow:
         if resource['status'] in ['closed', 'failed'] or time.time() - resource.get('notice_checked', 0) < 60:
             return
         resource['notice_checked'] = time.time()
-        data = self.lark(['im', '+messages-search', '--query', resource['id'], '--no-reactions'])
+        data = self.lark(['im', '+messages-search', '--query', resource['id'], '--no-reactions'], timeout=8)
         messages = data.get('messages', [])
         for message in reversed(messages):
             if message.get('sender', {}).get('id') != TRUSTED_SENDER or message.get('deleted'):
@@ -151,8 +188,75 @@ class Markflow:
             raise PlatformError('GPU 任务回执不完整，已停止自动重试')
         return value['job']
 
+    def begin_task_sampling(self, task):
+        """Bind sampling to each actual dispatch, including reused allocations."""
+        internal = task['internal']
+        if (not internal.get('approved_at') or internal.get('dispatch') != 'submitted'
+                or not internal.get('job_uuid') or internal.get('stop_requested_at')
+                or task['public']['state'] not in ['dispatching', 'starting', 'running']):
+            return
+        resource = self.resources.get(internal.get('request_uuid'))
+        if not resource or resource['status'] not in ['online', 'ready']:
+            return
+        previous = resource.get('sampling_start') or {}
+        if previous.get('task') == task['id'] and previous.get('job') == internal['job_uuid']:
+            return
+        started = time.time()
+        resource.update(sampling_start={'task': task['id'], 'job': internal['job_uuid'], 'at': started},
+                        sample_requested_at=started, probe_checked=0,
+                        monitor={'state': 'sampling', 'attempts': 0, 'at': started})
+        self.persist()
+        try:
+            self.refresh_probe(resource)
+        except (PlatformError, OSError, subprocess.SubprocessError) as error:
+            # Computation has already been dispatched. Monitoring failure must
+            # not turn a successful submission into a failed/repeated attempt.
+            resource['monitor'].update(state='retry', error=type(error).__name__)
+        finally:
+            self.persist()
+            publish_serverbox(self.resources, self.home)
+
+    def recover_active_probe(self, resource):
+        """Retry only diagnostics, with fresh evidence from an existing runner.
+
+        A pending probe keeps its identity until its actual receipt arrives.
+        Historical notices and old running receipts cannot trigger retries.
+        """
+        if not self.probe_timed_out(resource) or resource.get('probe'):
+            return
+        monitor = resource.get('monitor') or {}
+        if monitor.get('attempts', 0) >= 3 or time.time()-monitor.get('at', 0) < 30:
+            return
+        for task in self.store.tasks():
+            internal = task['internal']
+            if (internal.get('request_uuid') != resource['id'] or not internal.get('approved_at')
+                    or internal.get('dispatch') != 'submitted' or not internal.get('job_uuid')
+                    or internal.get('stop_requested_at')
+                    or task['public']['state'] not in ['starting', 'running']):
+                continue
+            runner = read_json(self.store.root/'tasks'/task['id']/'run/status.json', {})
+            at = runner.get('updated_at')
+            if (runner.get('gpu_verified') is not True or runner.get('state') != 'running'
+                    or not isinstance(at, (int, float)) or not math.isfinite(at)
+                    or not -5 <= time.time()-at < 90):
+                continue
+            old_job = (resource.get('probe_timeout') or {}).get('job')
+            if old_job:
+                folder = self.job_folder(resource['id'])
+                receipt = read_json(folder/old_job/'status.json', {})
+                if (folder/(old_job+'.json')).exists() or receipt.get('state') == 'running':
+                    resource['probe'] = {'job': old_job, 'at': time.time()}
+                    resource['monitor'] = dict(monitor, state='reconciling')
+                    return
+            resource['monitor'] = dict(state='sampling', attempts=monitor.get('attempts', 0)+1,
+                                       at=time.time(), task=task['id'])
+            resource['probe_checked'] = 0
+            return
+
     def refresh_probe(self, resource):
-        if resource['status'] not in ['ready', 'online']:
+        if resource['status'] not in ['ready', 'online'] and not (
+                resource['status'] == 'unknown' and (resource.get('probe') or
+                    (resource.get('monitor') or {}).get('state') == 'sampling')):
             return
         probe = resource.get('probe')
         if probe:
@@ -175,6 +279,12 @@ class Markflow:
                 if not math.isfinite(stamp) or stamp <= 0 or stamp > time.time()+5:
                     raise PlatformError('GPU 遥测采样时间无效')
                 resource.update(status='online', telemetry={'gpus': gpus, 'apps': apps, 'at': stamp, 'host': payload.get('host', '')}, probe=None, probe_checked=time.time())
+                resource.pop('error', None)
+                if stamp >= resource.get('sample_requested_at', 0):
+                    resource.pop('sample_requested_at', None)
+                    resource.pop('monitor', None)
+                if resource.get('probe_timeout'):
+                    resource['last_probe_timeout'] = resource.pop('probe_timeout')
                 resource.setdefault('samples', []).append({'at': stamp, 'utilization': max((g['utilization'] for g in gpus), default=100)})
                 resource['samples'] = [sample for sample in resource['samples'] if stamp-sample['at'] < 420]
                 return
@@ -184,19 +294,25 @@ class Markflow:
                              'GPUQ_PROBE_TIMEOUT=1' in output.read_text(errors='replace').splitlines())
                 resource.update(status='unknown', probe=None,
                                 error='GPU 检查超时；旧实例是否回收尚未确认' if timed_out else 'GPU 只读检查失败，无法确认资源可用')
+                if resource.get('monitor'):
+                    resource['monitor']['state'] = 'retry'
                 if timed_out:
                     resource['probe_timeout'] = {'at': now(), 'job': probe['job']}
                 return
             if time.time()-probe['at'] > 100:
-                # Only remove a diagnostic that has not been claimed.
-                specification = self.job_folder(resource['id'])/(probe['job']+'.json')
-                if not status and specification.exists():
-                    specification.unlink()
-                resource.update(status='unknown', probe=None,
+                # A slow claim is not a failed query. Keep this exact probe so
+                # a late receipt is reconciled instead of submitting duplicates.
+                resource.update(status='unknown',
                                 probe_timeout={'at': now(), 'job': probe['job']},
                                 error='GPU 检查超时；旧实例是否回收尚未确认')
+                resource.setdefault('monitor', {})['state'] = 'waiting'
             return
-        if time.time()-resource.get('probe_checked', 0) >= 30:
+        # Count from the GPU sample, not when a delayed receipt was consumed.
+        # With a slow platform poll, adding another 30 seconds here made a
+        # healthy allocation repeatedly cross the 90-second freshness limit.
+        last_sample = (resource.get('telemetry') or {}).get('at', resource.get('probe_checked', 0))
+        if (not resource.get('probe_checked') or time.time()-last_sample >= 10
+                or resource.get('sample_requested_at', 0) > last_sample):
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
             resource['probe'] = {'job': job, 'at': time.time()}
             self.persist()
@@ -211,19 +327,37 @@ class Markflow:
             for task in self.store.tasks():
                 replaceable.update(r['id'] for r in self.replacement_candidates(task))
                 replaceable.update(task['internal'].get('timeout_replacement', {}).get('prior_requests', []))
-            for resource in list(self.resources.values()):
-                # A failed notification query must not prevent reading a probe
-                # already completed in shared HOME, or skip other allocations.
-                for refresh in (self.refresh_notice, self.refresh_probe):
+            resources = list(self.resources.values())
+            due = [r for r in resources if r['status'] not in ['closed', 'failed']
+                   and time.time() - r.get('notice_checked', 0) >= 60]
+            try:
+                if active or due:
+                    self.check_auth()
+            except FeishuAuthError as error:
+                errors.append(error)
+                due = []
+            # Slow historical notification searches must not serially delay
+            # current GPU samples beyond their 90-second freshness window.
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                notices = [(resource, pool.submit(self.refresh_notice, resource)) for resource in due]
+                for resource, future in notices:
                     try:
-                        refresh(resource)
+                        future.result()
                     except (PlatformError, OSError, subprocess.SubprocessError) as error:
-                        if refresh == self.refresh_notice and resource['id'] in replaceable and self.probe_timed_out(resource):
-                            # An unreachable historical notice must not veto the
-                            # user's timeout policy or block a newer allocation.
+                        if isinstance(error, FeishuAuthError):
+                            errors.insert(0, error)
+                        elif resource['id'] in replaceable and self.probe_timed_out(resource):
                             resource['notice_error'] = str(error)[:400]
                         else:
                             errors.append(error)
+            for resource in resources:
+                # A failed notification query must not prevent reading a probe
+                # already completed in shared HOME, or skip other allocations.
+                for refresh in (self.recover_active_probe, self.refresh_probe):
+                    try:
+                        refresh(resource)
+                    except (PlatformError, OSError, subprocess.SubprocessError) as error:
+                        errors.append(error)
             if errors:
                 # Keep the scheduler fail-closed while publishing any real
                 # samples recovered above; never refresh their GPU timestamp.
@@ -247,12 +381,18 @@ class Markflow:
             return None
         if read_json(self.store.root/'tasks'/task['id']/'run/stop.json',{}).get('digest') == task['digest']:
             return None
+        prior_request = task['internal'].get('request_uuid')
+        request_id = prior_request if prior_request and prior_request not in replacement_ids else str(uuid.uuid4())
+        folder = self.home/'.local/state/markflow-gpu-requests'/request_id
+        state_file = folder/'state.json'
+        if read_json(state_file, {}).get('state'):
+            return None
+        self.check_auth()
         data = self.lark(['base', '+form-detail', '--share-token', FORM])
+        self.check_auth(force=True)
         if read_json(self.store.root/'tasks'/task['id']/'run/stop.json',{}).get('digest') == task['digest']:
             return None
         resource = task['doc']['resources']
-        prior_request = task['internal'].get('request_uuid')
-        request_id = prior_request if prior_request and prior_request not in replacement_ids else str(uuid.uuid4())
         fields = {'申请标识': request_id, '服务器用户名': self.config['username'], '用途': task['doc']['title']+'；'+task['doc']['description'], '资源类型': resource['type'], '卡数': resource['gpus'], '预计小时': resource['estimated_hours'], '工作目录': task['doc']['project'], '规则确认': '已阅读并同意'}
         questions = data.get('questions', [])
         for question in questions:
@@ -261,16 +401,7 @@ class Markflow:
                 raise PlatformError('申请表结构有变化，需更新适配器后再申请')
             if title in fields and question.get('options') and fields[title] not in [o['name'] for o in question['options']]:
                 raise PlatformError('申请表选项有变化，已停止申请')
-        folder = self.home/'.local/state/markflow-gpu-requests'/request_id
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-        state_file = folder/'state.json'
-        previous = read_json(state_file, {})
-        if previous.get('state'):
-            task['internal']['request_uuid'] = request_id
-            self.store.save(task)
-            # Reusing a historical receipt is not a new/pending application.
-            # Keep the admission failure reason instead of saying "等待就绪".
-            return None
         atomic_json(folder/'request.json', {'fields': fields})
         release_when_done = bool((self.store.metadata('resource_policy') or {}).get('release_when_queue_idle'))
         replacement = {'prior_requests': replacement_ids, 'request': request_id, 'at': now(), 'reason': '旧 GPU 只读探测超时，按用户偏好补申请一次'} if replacement_ids else None
@@ -286,7 +417,12 @@ class Markflow:
         try:
             relative = str((folder/'request.json').relative_to(self.home))
             receipt = self.lark(['base', '+form-submit', '--share-token', FORM, '--json', '@'+relative, '--yes'], timeout=90)
-            atomic_json(folder/'receipt.json', receipt)
+            safe_receipt = {}
+            if isinstance(receipt.get('record_id'), str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,100}', receipt['record_id']):
+                safe_receipt['record_id'] = receipt['record_id']
+            if type(receipt.get('can_submit_again')) is bool:
+                safe_receipt['can_submit_again'] = receipt['can_submit_again']
+            atomic_json(folder/'receipt.json', safe_receipt or {'accepted': True})
             atomic_json(state_file, {**read_json(state_file), 'state': 'submitted', 'submitted_at': now()})
             self.resources[request_id]['recorded_phase'] = 'submitted'
             self.persist()
@@ -299,10 +435,16 @@ class Markflow:
 
     def select(self, task, active):
         required = task['doc']['resources']
-        if any(t['public']['state'] in ['execution_unknown', 'stopping'] for t in active):
+        if any(t['public']['state'] in ['execution_unknown', 'stopping', 'blocked']
+               or t['internal'].get('dispatch') in ['submitting', 'unknown'] for t in active):
             return None, '原任务执行状态待核查，暂不增加并行'
+        for resource in self.resources.values():
+            if resource['status'] not in ['closed', 'failed'] and resource.get('recorded_phase') in ['submitting', 'submission_unknown']:
+                return None, f"申请 {resource['id']} 的提交回执待核查；已暂停新增申请，避免重复提交"
         if active and (len(active) >= 2 or required['memory_gb'] is None or any(t['doc']['resources']['memory_gb'] is None for t in active)):
             return None, '默认顺序执行；未满足安全并行条件'
+        # Confirmed pending applications do not preclude reusing an allocation.
+        # Uncertain submissions above still require reconciliation before reuse.
         for resource in self.resources.values():
             telemetry = resource.get('telemetry', {})
             if resource['status'] != 'online' or time.time()-telemetry.get('at', 0) > 90 or resource.get('type') != required['type']:

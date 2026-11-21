@@ -1,0 +1,261 @@
+import 'package:fl_lib/fl_lib.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  const marker = ValueKey('segmented-marker');
+
+  Future<void> pumpTabs(
+    WidgetTester tester, {
+    required ValueNotifier<String> selected,
+    bool expand = false,
+    double width = 400,
+  }) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: width,
+              child: ValueListenableBuilder<String>(
+                valueListenable: selected,
+                builder: (_, value, _) => SegmentedTabs<String>(
+                  expand: expand,
+                  segments: const [
+                    SegmentedTab(value: 'a', label: 'Alpha'),
+                    SegmentedTab(value: 'b', label: 'Beta'),
+                    SegmentedTab(value: 'c', label: 'Gamma'),
+                  ],
+                  selected: value,
+                  onSelected: (next) => selected.value = next,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Sized to the labels, and given less room than they need: they share it
+  // and shorten, instead of the row running past the edge.
+  testWidgets('narrower than its labels, it shrinks rather than overflows', (
+    tester,
+  ) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    await pumpTabs(tester, selected: selected, width: 120);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.byType(SegmentedTabs<String>)).width, 120);
+
+    // With room to spare, each is as wide as its label and no wider: the
+    // labels are whole, and the segments together far short of the track.
+    await pumpTabs(tester, selected: selected, width: 600);
+    await tester.pump();
+    final segments = tester
+        .widgetList<InkWell>(
+          find.descendant(
+            of: find.byType(SegmentedTabs<String>),
+            matching: find.byType(InkWell),
+          ),
+        )
+        .map((w) => tester.getSize(find.byWidget(w)).width);
+    expect(segments.reduce((a, b) => a + b), lessThan(300));
+    for (final label in ['Alpha', 'Beta', 'Gamma']) {
+      expect(
+        tester.renderObject<RenderParagraph>(find.text(label)).didExceedMaxLines,
+        isFalse,
+      );
+    }
+  });
+
+  // A segment's box is only known once it has been laid out, so the marker
+  // cannot be placed on the frame that first builds the control.
+  testWidgets('the marker arrives on the frame after the first', (
+    tester,
+  ) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    await pumpTabs(tester, selected: selected);
+    expect(find.byKey(marker), findsNothing);
+
+    await tester.pump();
+    expect(find.byKey(marker), findsOneWidget);
+    expect(
+      tester.getCenter(find.byKey(marker)).dx,
+      closeTo(tester.getCenter(find.text('Alpha')).dx, 1),
+    );
+  });
+
+  testWidgets('choosing another segment slides the marker to it', (
+    tester,
+  ) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    await pumpTabs(tester, selected: selected);
+    await tester.pump();
+    final from = tester.getCenter(find.byKey(marker)).dx;
+    final to = tester.getCenter(find.text('Gamma')).dx;
+
+    await tester.tap(find.text('Gamma'));
+    // One frame to rebuild with the new selection, a second for the post-frame
+    // measurement to reach the marker — only then does it have a target to
+    // animate towards.
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(SegmentedTabs.duration ~/ 2);
+
+    // Half way through it is between the two, which a cross-fade would never
+    // be: that is what distinguishes a marker that moves from two that swap.
+    final midway = tester.getCenter(find.byKey(marker)).dx;
+    expect(midway, greaterThan(from));
+    expect(midway, lessThan(to));
+
+    await tester.pumpAndSettle();
+    expect(tester.getCenter(find.byKey(marker)).dx, closeTo(to, 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the marker follows a segment that is not the same width', (
+    tester,
+  ) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    // Sized to their labels, so 'Alpha' and 'Beta' are different widths and a
+    // marker that only moved would be the wrong size on one of them.
+    await pumpTabs(tester, selected: selected);
+    await tester.pump();
+    final alpha = tester.getSize(find.byKey(marker)).width;
+
+    await tester.tap(find.text('Beta'));
+    await tester.pumpAndSettle();
+    final beta = tester.getSize(find.byKey(marker)).width;
+
+    expect(beta, lessThan(alpha));
+    expect(
+      tester.getCenter(find.byKey(marker)).dx,
+      closeTo(tester.getCenter(find.text('Beta')).dx, 1),
+    );
+  });
+
+  testWidgets('expand gives every segment the same width', (tester) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    await pumpTabs(tester, selected: selected, expand: true, width: 400);
+    await tester.pump();
+
+    final widths = ['Alpha', 'Beta', 'Gamma']
+        .map((label) => tester.getSize(find.text(label)).width)
+        .toList();
+    final centers = ['Alpha', 'Beta', 'Gamma']
+        .map((label) => tester.getCenter(find.text(label)).dx)
+        .toList();
+    expect(widths.every((w) => w > 0), true);
+    // Equal shares put the gaps between centres equal too.
+    expect(centers[2] - centers[1], closeTo(centers[1] - centers[0], 1));
+    expect(tester.takeException(), isNull);
+  });
+
+  // Four equal shares too narrow for icon and label: icons alone, each in the
+  // middle of its share, rather than an icon pushed aside by a label cut to
+  // an ellipsis. Wide again, the labels are back.
+  testWidgets('expand, too narrow for its labels, shows its icons centred', (
+    tester,
+  ) async {
+    const icons = [Icons.dns, Icons.storage, Icons.hub, Icons.cloud];
+    Future<void> pump(double width) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: width,
+              child: SegmentedTabs<int>(
+                expand: true,
+                segments: [
+                  for (var i = 0; i < icons.length; i++)
+                    SegmentedTab(value: i, label: 'Section $i', icon: icons[i]),
+                ],
+                selected: 0,
+                onSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await pump(240);
+    await tester.pump();
+    expect(find.textContaining('Section'), findsNothing);
+    final inks = find.descendant(
+      of: find.byType(SegmentedTabs<int>),
+      matching: find.byType(InkWell),
+    );
+    expect(inks, findsNWidgets(icons.length));
+    for (var i = 0; i < icons.length; i++) {
+      expect(
+        tester.getCenter(find.byIcon(icons[i])).dx,
+        closeTo(tester.getCenter(inks.at(i)).dx, 0.5),
+      );
+    }
+    expect(tester.takeException(), isNull);
+
+    await pump(800);
+    await tester.pump();
+    expect(find.textContaining('Section'), findsNWidgets(icons.length));
+  });
+
+  // Keeping the last rect would leave the marker insisting on a segment the
+  // caller has moved off, which is the one thing it exists to not do.
+  testWidgets('a selection that names no segment clears the marker', (
+    tester,
+  ) async {
+    final selected = ValueNotifier('a');
+    addTearDown(selected.dispose);
+
+    await pumpTabs(tester, selected: selected);
+    await tester.pump();
+    expect(find.byKey(marker), findsOneWidget);
+
+    selected.value = 'nothing-here';
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(marker), findsNothing);
+
+    // And comes back when the selection names one again.
+    selected.value = 'b';
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(marker), findsOneWidget);
+    expect(
+      tester.getCenter(find.byKey(marker)).dx,
+      closeTo(tester.getCenter(find.text('Beta')).dx, 1),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('duplicate segment values are refused in debug', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SegmentedTabs<String>(
+            segments: const [
+              SegmentedTab(value: 'a', label: 'Alpha'),
+              SegmentedTab(value: 'a', label: 'Also alpha'),
+            ],
+            selected: 'a',
+            onSelected: (_) {},
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isA<AssertionError>());
+  });
+}

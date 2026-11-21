@@ -1,18 +1,28 @@
 # Inspire Queue
 
-原名 GPU Queue。应用与网页统一更名，原有任务、SSH 配置和更新地址继续兼容。
+原名 GPU Queue。当前应用、网页和发行包统一使用 Inspire Queue；旧版更新地址、数据目录与仓库地址保留兼容。
+
+个人 GPU 任务台：网页、CPU 调度服务、ServerBox 原生统一工作台与兼容旧版的 macOS 小组件。
+
+本项目采用每位成员独立服务与独立 SSH 身份的方式接入，适用于公司内部已有 Markflow 账号。首次使用需按员工指南配置个人服务；它不是跨组织的通用调度平台。
 
 ## 统一桌面应用
 
 [下载最新 Inspire Queue Mac 版本](https://github.com/Ferryyer/gpu-queue/releases/latest) · [完整发布记录与校验和](https://github.com/Ferryyer/gpu-queue/releases)
 
-适用 Apple Silicon、macOS 13+。在 Release 页面下载 DMG 和 SHA256SUMS，退出旧版后拖入 Applications。统一应用采用手动覆盖安装；旧桌面小组件的 ZIP 下载和更新入口继续保留。客户端安装不会替换服务器调度服务，版本源码以相应 Release 标签为准。
+适用 Apple Silicon、macOS 13+。客户端安装不会替换服务器调度服务，版本源码以相应 Release 标签为准。
 
-个人 GPU 任务台：网页、CPU 调度服务，以及 macOS 桌面小组件。
+## ServerBox 融合
 
-4090 联网任务请显式设置 `resources.type = "4090联网"`，默认仍为 H 卡离线。预计时长须至少 2 分钟且短于 18 小时。[4090 输入模板、等待规则与交接审阅](docs/4090.md)。
+`serverbox/` 为带 GPU 桥接、账号线程卡片和 Mac 自动重连的完整原生客户端源码。
+原生客户端提供总览、任务、服务器、终端与设置，任务详情在应用内打开关联服务器的 SSH 终端和 SFTP 目录。复用已有安全连接配置；Edit/Auto 与重连不会批准任务。网页同步修复焦点、断线读数与任务入口布局。
 
-这是为 linlishuo 的 Markflow 环境编写的个人工具，包含用户身份、SSH 入口和平台适配，并非开箱即用的多用户产品。
+当前统一桌面版 **2.0.2018 / build 2018**：[Release 与安装包](https://github.com/Ferryyer/gpu-queue/releases/tag/v2.0.2018)。终端入口已固定到左侧，总览仍是默认首页。当前包为 ad-hoc 签名内部版，**未完成 Apple 公证**；开发者账号与验收要求见 [Apple 公证准备](docs/APPLE-NOTARIZATION.md)。
+关于页捐赠与产品推广已移除；源码中未发现内购或功能订阅锁。
+
+详见 [融合范围与验证](docs/SERVER-MONITOR.md) 和 [原生构建说明](serverbox/README.gpu-console.md)。
+原生构建仍需 Flutter/Xcode/Rust 及所列依赖；安装包由 macOS 发布工作流构建，使用 ad-hoc 签名，未做 Apple 公证。
+ServerBox 与其依赖保留各自许可证和来源信息。
 
 ## 组成
 
@@ -25,6 +35,16 @@
 - `worker/`、`drizzle/`、`.openai/`：旧 Sites 发布实现及配置记录；现用服务通过个人 SSH 通道访问。
 
 [下载 macOS 桌面小组件 1.1.3](https://raw.githubusercontent.com/Ferryyer/gpu-queue/main/downloads/GPU-Queue-Widget-1.1.3-macOS.zip) · [校验和](downloads/SHA256SUMS)
+
+## 1.1.2 更新报“安装包文件清单不符”
+
+可手动安装 [1.1.4 修复包](https://raw.githubusercontent.com/Ferryyer/gpu-queue/codex/mf-8-widget-update-fix/downloads/GPU-Queue-Widget-1.1.4-macOS.zip)。
+退出小组件及更新窗口，完整解压 ZIP，双击“安装桌面小组件.command”覆盖安装。
+安装保留 SSH 配置、窗口位置和偏好；服务器任务继续运行。旧更新器在安装新版前就会报错，因此需要这一次手动覆盖。
+
+1.1.4 直接校验 ZIP 中央目录与文件头，保留下载大小、SHA-256、精确文件白名单和文件类型/大小检查，不再解析 macOS `unzip` 输出。
+修复包目前在上述审阅分支和 issue 附件，正式更新入口仍为 1.1.3；未改动已发布的旧版包。
+验证与限制见 [更新修复说明](docs/widget-update-1.1.4.md)。
 
 ## 安装桌面小组件
 

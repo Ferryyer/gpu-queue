@@ -1,8 +1,10 @@
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 from .core import Store, HOME, SITE_URL, normalize, read_json
 
 def main(argv=None):
@@ -16,6 +18,7 @@ def main(argv=None):
     status = subs.add_parser('status')
     status.add_argument('task_id', nargs='?')
     subs.add_parser('doctor')
+    subs.add_parser('auth', help='恢复本人飞书登录并核对任务台成员身份')
     subs.add_parser('web')
     serve = subs.add_parser('serve')
     serve.add_argument('--config', default=str(HOME/'.config/gpuq/connection.json'))
@@ -39,14 +42,31 @@ def main(argv=None):
         store = Store()
         print(json.dumps({'site_url': SITE_URL, 'backend': 'local', 'access': 'SSH', 'connection_configured': (HOME/'.config/gpuq/connection.json').is_file(), 'service': read_json(store.root/'service-status.json'), 'task_count': len(store.tasks()), 'gpu_requests_performed': False}, ensure_ascii=False))
     else:
-        from .service import Service
-        config_path = Path(args.config)
+        config_path = Path(getattr(args, 'config', HOME/'.config/gpuq/connection.json'))
         if config_path.stat().st_uid != os.getuid() or config_path.stat().st_mode & 0o077:
             raise ValueError('服务配置必须是本人私有文件，权限 0600')
         config = json.loads(config_path.read_text())
         if config['home'] != str(HOME) or config['username'] != __import__('pwd').getpwuid(os.getuid()).pw_name:
             raise ValueError('服务配置的本人身份不匹配')
-        Service(config).serve()
+        if args.action == 'auth':
+            from .feishu import SCOPES, FeishuAuthError, command, verify_user
+            if not config.get('feishu_open_id'):
+                raise FeishuAuthError('owner_unbound')
+            with (config_path.parent/'feishu-login.lock').open('a') as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise ValueError('已有本人授权流程进行中，请回到原终端完成') from None
+                result = subprocess.run(command(config, ['auth', 'login', '--scope', ' '.join(sorted(SCOPES))]),
+                                        cwd=HOME, pass_fds=(lock.fileno(),))
+                if result.returncode:
+                    sys.exit(result.returncode)
+                verify_user(config, lambda argv, **options: subprocess.run(
+                    argv, cwd=HOME, capture_output=True, text=True, **options))
+            print('飞书本人身份和权限已核验。队列服务会自动复查并继续已授权任务。')
+        else:
+            from .service import Service
+            Service(config).serve()
 
 if __name__ == '__main__':
     try:

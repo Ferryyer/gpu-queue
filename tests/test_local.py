@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -88,6 +89,19 @@ class LocalTests(unittest.TestCase):
                 time.sleep(.03)
             self.assertEqual(sock.stat().st_mode & 0o777,0o600)
             self.assertEqual(request('GET','/api/state')[0],200)
+            host_status, host_body = request('GET', '/api/host')
+            self.assertEqual(host_status, 200)
+            host = json.loads(host_body)
+            if sys.platform.startswith('linux'):
+                self.assertTrue(host['available'])
+            else:
+                # The UID thread sampler reads Linux /proc. On a Mac release
+                # runner the HTTP endpoint must report unavailable, not a
+                # successful empty/zero sample.
+                self.assertFalse(host['available'])
+                self.assertIsNone(host['at'])
+            self.assertEqual(request('GET', '/api/host', host='evil.example:8790')[0],403)
+            self.assertEqual(request('GET', '/monitor.js')[0],200)
             health_status,health_body=request('GET','/api/health')
             self.assertEqual(health_status,200)
             self.assertEqual(json.loads(health_body)['service'],'gpuq')
@@ -112,6 +126,10 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(status,200)
             stopped=next(t for t in json.loads(body)['tasks'] if t['id']==self.ids[0])
             self.assertEqual(stopped['state'],'cancelled')
+            delete_path='/api/tasks/'+self.ids[0]+'/delete'
+            self.assertEqual(request('POST',delete_path,{'digest':'0'*64},forbidden)[0],403)
+            self.assertEqual(request('POST',delete_path,{'digest':'0'*64},headers)[0],200)
+            self.assertNotIn(self.ids[0],[t['id'] for t in self.control.state()['tasks']])
         finally:
             child.terminate();child.wait(timeout=5)
 

@@ -1,0 +1,155 @@
+import 'package:test/test.dart';
+import 'package:xterm/src/terminal.dart';
+
+void main() {
+  _resizeAfterScrollbackIsFull();
+
+  test('reflow() can reflow a single line', () {
+    final terminal = Terminal();
+
+    terminal.write('1234567890abcdefg');
+    terminal.resize(10, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '1234567890');
+    expect(terminal.buffer.lines[1].toString(), 'abcdefg');
+    expect(terminal.buffer.lines[0].isWrapped, isFalse);
+    expect(terminal.buffer.lines[1].isWrapped, isTrue);
+
+    terminal.resize(13, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '1234567890abc');
+    expect(terminal.buffer.lines[1].toString(), 'defg');
+    expect(terminal.buffer.lines[0].isWrapped, isFalse);
+    expect(terminal.buffer.lines[1].isWrapped, isTrue);
+
+    terminal.resize(20, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '1234567890abcdefg');
+    expect(terminal.buffer.lines[0].isWrapped, isFalse);
+  });
+
+  test('reflow() can reflow a single line to multiple lines', () {
+    final terminal = Terminal();
+
+    terminal.write('1234567890abcdefg');
+    terminal.resize(5, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '12345');
+    expect(terminal.buffer.lines[1].toString(), '67890');
+    expect(terminal.buffer.lines[2].toString(), 'abcde');
+    expect(terminal.buffer.lines[3].toString(), 'fg');
+
+    expect(terminal.buffer.lines[0].isWrapped, isFalse);
+    expect(terminal.buffer.lines[1].isWrapped, isTrue);
+    expect(terminal.buffer.lines[2].isWrapped, isTrue);
+    expect(terminal.buffer.lines[3].isWrapped, isTrue);
+
+    terminal.resize(6, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '123456');
+    expect(terminal.buffer.lines[1].toString(), '7890ab');
+    expect(terminal.buffer.lines[2].toString(), 'cdefg');
+
+    expect(terminal.buffer.lines[0].isWrapped, isFalse);
+    expect(terminal.buffer.lines[1].isWrapped, isTrue);
+    expect(terminal.buffer.lines[2].isWrapped, isTrue);
+  });
+
+  test('reflow() can reflow wide characters', () {
+    final terminal = Terminal();
+
+    terminal.write('床前明月光疑是地上霜');
+    terminal.resize(10, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '床前明月光');
+    expect(terminal.buffer.lines[1].toString(), '疑是地上霜');
+
+    terminal.resize(9, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '床前明月');
+    expect(terminal.buffer.lines[1].toString(), '光疑是地');
+    expect(terminal.buffer.lines[2].toString(), '上霜');
+
+    terminal.resize(11, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '床前明月光');
+    expect(terminal.buffer.lines[1].toString(), '疑是地上霜');
+
+    terminal.resize(13, 10);
+    expect(terminal.buffer.lines[0].toString(), '床前明月光疑');
+    expect(terminal.buffer.lines[1].toString(), '是地上霜');
+  });
+
+  test('reflow() can resize wide characters to one column', () {
+    final terminal = Terminal();
+    terminal.write('界A');
+    final wideAnchor = terminal.buffer.lines[0].createAnchor(0);
+    final trailingAnchor = terminal.buffer.lines[0].createAnchor(1);
+
+    terminal.resize(1, 10);
+
+    expect(terminal.buffer.lines[0].toString(), '');
+    expect(terminal.buffer.lines[1].toString(), '界');
+    expect(terminal.buffer.lines[2].toString(), 'A');
+    expect(wideAnchor.x, 0);
+    expect(wideAnchor.y, 1);
+    expect(trailingAnchor.x, 0);
+    expect(trailingAnchor.y, 1);
+  });
+
+  test('anchors at split boundaries move to the next visual line', () {
+    final terminal = Terminal();
+    terminal.write('abcdefghi');
+    final anchor = terminal.buffer.lines[0].createAnchor(8);
+
+    terminal.resize(4, 10);
+
+    expect(terminal.buffer.lines[0].toString(), 'abcd');
+    expect(terminal.buffer.lines[1].toString(), 'efgh');
+    expect(terminal.buffer.lines[2].toString(), 'i');
+    expect(anchor.x, 0);
+    expect(anchor.y, 2);
+    expect(anchor.line, same(terminal.buffer.lines[2]));
+  });
+
+  test('lines has correct length after reflow', () {
+    final terminal = Terminal();
+
+    terminal.write('1234567890abcdefg');
+    terminal.resize(10, 10);
+
+    for (var i = 0; i < 10; i++) {
+      expect(terminal.buffer.lines[i].length, 10);
+    }
+
+    terminal.resize(13, 10);
+    for (var i = 0; i < 10; i++) {
+      expect(terminal.buffer.lines[i].length, 13);
+    }
+  });
+}
+
+/// Scrollback full means the line buffer has wrapped; a width change then
+/// reflowed into the wrong slots, and the next resize read a hole
+/// (SERVERBOX-O in reflow, SERVERBOX-16 in pop).
+void _resizeAfterScrollbackIsFull() {
+  test('resize after the scrollback is full', () {
+    final terminal = Terminal(maxLines: 20);
+    terminal.resize(10, 5);
+    // Each wraps at 10 columns, so widening merges them and the reflow comes
+    // back shorter than the buffer it replaces.
+    for (var i = 0; i < 100; i++) {
+      terminal.write('line $i abcdefghij\r\n');
+    }
+
+    terminal.resize(30, 5);
+    terminal.resize(12, 5);
+    terminal.resize(12, 3);
+
+    final lines = terminal.buffer.lines;
+    for (var i = 0; i < lines.length; i++) {
+      expect(lines[i].index, i);
+    }
+    expect(lines.toList().map((l) => l.toString()), contains('line 99 abcd'));
+  });
+}

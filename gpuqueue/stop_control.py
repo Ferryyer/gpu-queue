@@ -18,6 +18,43 @@ import uuid
 class StopError(RuntimeError):
     pass
 
+def proc_folder(pid):
+    """Resolve a signal-visible PID into the namespace used by mounted procfs."""
+    pid = int(pid)
+    if pid <= 0:
+        return None
+    try:
+        status = (Path('/proc/self')/'status').read_text()
+        mounted_pid = next(int(line.split()[1]) for line in status.splitlines() if line.startswith('Pid:'))
+        if mounted_pid == os.getpid():
+            return Path('/proc')/str(pid)
+        # A host-mounted procfs can number this container's children differently.
+        # Resolve through a pidfd opened in *our* namespace, never by guessing a
+        # host PID from a potentially colliding namespace-local number.
+        fd = os.pidfd_open(pid, 0)
+        try:
+            info = (Path('/proc/self/fdinfo')/str(fd)).read_text()
+            target = next(int(line.split()[1]) for line in info.splitlines() if line.startswith('Pid:'))
+            return Path('/proc')/str(target) if target > 0 else None
+        finally:
+            os.close(fd)
+    except (OSError, ValueError, StopIteration, AttributeError):
+        return None
+
+def visible_pid(folder):
+    """Map a procfs entry back to our PID namespace, rejecting other containers."""
+    try:
+        own = (Path('/proc/self')/'status').read_text()
+        mounted_pid = next(int(line.split()[1]) for line in own.splitlines() if line.startswith('Pid:'))
+        if mounted_pid == os.getpid(): return int(folder.name)
+        depth = len(next(line.split()[1:] for line in own.splitlines() if line.startswith('NSpid:'))) - 1
+        status = (folder/'status').read_text()
+        numbers = next(line.split()[1:] for line in status.splitlines() if line.startswith('NSpid:'))
+        pid = int(numbers[depth])
+        return pid if proc_folder(pid) == folder else None
+    except (OSError, ValueError, StopIteration, IndexError):
+        return None
+
 def read(path, default=None):
     try: return json.loads(Path(path).read_text())
     except FileNotFoundError: return default
@@ -34,15 +71,24 @@ def write(path, value):
 
 def identity(pid):
     try:
-        folder = Path('/proc')/str(int(pid))
+        folder = proc_folder(pid)
+        if folder is None: return None
         if folder.stat().st_uid != os.getuid(): return None
         fields = (folder/'stat').read_text().rsplit(')',1)[1].split()
         if fields[0] in ['Z','X']: return None
-        return {'pid':int(pid),'start':int(fields[19]),'ppid':int(fields[1])}
+        parent = visible_pid(Path('/proc')/fields[1]) if fields[1] != '0' else None
+        return {'pid':int(pid),'start':int(fields[19]),'ppid':parent or 0}
     except (OSError, ValueError, IndexError): return None
 
 def table():
-    return {int(p.name): value for p in Path('/proc').iterdir() if p.name.isdigit() and (value := identity(p.name))}
+    result = {}
+    for folder in Path('/proc').iterdir():
+        try:
+            if not folder.name.isdigit() or folder.stat().st_uid != os.getuid(): continue
+            pid = visible_pid(folder)
+            if pid is not None and (value := identity(pid)): result[pid] = value
+        except OSError: pass
+    return result
 
 def matches(value):
     current = identity(value['pid'])
@@ -63,7 +109,9 @@ def marked(folder, processes=None):
     for pid, value in (processes if processes is not None else table()).items():
         if pid == os.getpid(): continue
         try:
-            environ = (Path('/proc')/str(pid)/'environ').read_bytes().split(b'\0')
+            path = proc_folder(pid)
+            if path is None: continue
+            environ = (path/'environ').read_bytes().split(b'\0')
             if all(item in environ for item in expected): result[pid] = value
         except OSError: pass
     return result
@@ -184,7 +232,9 @@ def stop_legacy(folder, request_id, job_id, jobs_root=None):
     owned = marked(folder)
     pid = status.get('pid')
     if pid and (root := identity(pid)):
-        actual = (Path('/proc')/str(pid)/'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
+        path = proc_folder(pid)
+        if path is None: raise StopError('原任务进程已退出，停止状态待核查')
+        actual = (path/'cmdline').read_bytes().rstrip(b'\0').split(b'\0')
         expected = [a.encode() for a in specification['argv']]
         # mf-gpu writes its running receipt immediately after starting this PID.
         boot = next(int(s.split()[1]) for s in Path('/proc/stat').read_text().splitlines() if s.startswith('btime '))
