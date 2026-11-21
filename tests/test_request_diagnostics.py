@@ -123,18 +123,109 @@ class RequestDiagnosticsTests(unittest.TestCase):
         task = self.task()
         folder = self.home/'.local/state/markflow-gpu-requests'/REQUEST
         atomic_json(folder/'request.json', {'fields': {'服务器用户名': 'linlishuo'}})
-        atomic_json(folder/'state.json', {'request': REQUEST, 'state': 'submitting'})
         self.adapter.resources['available'] = dict(id='available', status='online', type='H卡离线',
             telemetry=dict(at=time.time(), gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=1)], apps=[]))
-        self.adapter.discover()
-        self.assertIsNone(self.adapter.select(task, [])[0])
+        for phase in ['submitting', 'submission_unknown']:
+            with self.subTest(phase=phase):
+                atomic_json(folder/'state.json', {'request': REQUEST, 'state': phase})
+                self.adapter.discover()
+                selection, reason = self.adapter.select(task, [])
+                self.assertIsNone(selection)
+                self.assertIn('提交回执待核查', reason)
         atomic_json(folder/'receipt.json', {'can_submit_again': False})
         self.adapter.discover()
         self.assertEqual(read_json(folder/'state.json')['state'], 'submitted')
         task['internal']['request_uuid'] = REQUEST
         selection, reason = self.adapter.select(task, [])
-        self.assertIsNone(selection)
-        self.assertIn('等待平台就绪', reason)
+        self.assertEqual(selection[0]['id'], 'available')
+        self.assertEqual(selection[1], ['GPU-1'])
+        self.assertEqual(reason, '')
+        self.assertEqual(self.adapter.resources[REQUEST]['status'], 'pending')
+
+    def test_pending_request_keeps_resource_and_execution_admission_checks(self):
+        task = self.task()
+        task['internal']['request_uuid'] = REQUEST
+        resource = dict(id='available', status='online', type='H卡离线',
+            telemetry=dict(at=time.time(), gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=1)], apps=[]))
+        self.adapter.resources = {
+            REQUEST: dict(id=REQUEST, status='pending', recorded_phase='submitted'),
+            'available': resource,
+        }
+        for change in [dict(at=time.time()-100),
+                       dict(gpus=[dict(uuid='GPU-1', total_mb=81920, used_mb=81920)]),
+                       dict(apps=[['GPU-1', '999']])]:
+            with self.subTest(change=change):
+                original = resource['telemetry']
+                resource['telemetry'] = dict(original, **change)
+                self.assertIsNone(self.adapter.select(task, [])[0])
+                resource['telemetry'] = original
+        resource['type'] = '4090联网'
+        self.assertIsNone(self.adapter.select(task, [])[0])
+        resource['type'] = 'H卡离线'
+        for state in ['execution_unknown', 'stopping', 'blocked']:
+            with self.subTest(state=state):
+                active = dict(public=dict(state=state), internal={})
+                selection, reason = self.adapter.select(task, [active])
+                self.assertIsNone(selection)
+                self.assertIn('执行状态待核查', reason)
+        for dispatch in ['submitting', 'unknown']:
+            with self.subTest(dispatch=dispatch):
+                active = dict(public=dict(state='dispatching'), internal=dict(dispatch=dispatch))
+                self.assertIsNone(self.adapter.select(task, [active])[0])
+        self.assertEqual(self.adapter.select(task, [])[0][0]['id'], 'available')
+
+    def test_late_probe_reuses_old_gpu_once_and_preserves_pending_replacement(self):
+        task = self.task()
+        old = self.enable_replacement()
+        old['probe'] = dict(job='late-probe', at=time.time()-101)
+        self.adapter.lark = Mock(side_effect=[{'questions': []}, {'record_id': 'new-receipt'}])
+        self.service.cycle()
+        task = self.store.get(task['id'])
+        replacement = task['internal']['request_uuid']
+        self.assertNotEqual(replacement, REQUEST)
+        self.assertIsNone(task['internal'].get('dispatch'))
+        folder = self.home/'.local/state/markflow-gpu-requests'/replacement
+        submitted = read_json(folder/'state.json')
+        receipt = read_json(folder/'receipt.json')
+        self.assertEqual(submitted['state'], 'submitted')
+        self.assertEqual(receipt, {'record_id': 'new-receipt'})
+        probe = self.adapter.job_folder(REQUEST)/'late-probe'
+        atomic_json(probe/'status.json', dict(state='finished', exit_code=0))
+        (probe/'output.log').write_text('GPUQ_TELEMETRY='+json.dumps(dict(
+            at=time.time(), gpus='0, GPU-recovered, H100, 81559, 1, 0', apps='', host='test-gpu'))+'\n')
+
+        restarted = Markflow(self.store, self.adapter.config)
+        restarted.check_auth = Mock()
+        restarted.lark = Mock(return_value={'messages': []})
+        restarted.submit_job = Mock(return_value='compute-job')
+        restarted.begin_task_sampling = Mock()
+        service = Service({}, self.store, restarted)
+        service.cycle()
+        task = self.store.get(task['id'])
+        self.assertEqual(task['internal']['request_uuid'], REQUEST)
+        self.assertEqual(task['internal']['job_uuid'], 'compute-job')
+        self.assertEqual(task['internal']['gpu_uuids'], ['GPU-recovered'])
+        self.assertEqual(task['internal']['timeout_replacement']['request'], replacement)
+        restarted.submit_job.assert_called_once()
+        self.assertEqual(restarted.submit_job.call_args.args[0], REQUEST)
+        self.assertEqual(restarted.resources[replacement]['status'], 'pending')
+        self.assertEqual(restarted.resources[replacement]['recorded_phase'], 'submitted')
+        self.assertEqual(read_json(folder/'state.json'), submitted)
+        self.assertEqual(read_json(folder/'receipt.json'), receipt)
+
+        # Repeated polls and another service restart must not redispatch compute
+        # or forget the still-pending replacement application.
+        service.cycle()
+        again = Markflow(self.store, self.adapter.config)
+        again.check_auth = Mock()
+        again.lark = restarted.lark
+        again.submit_job = restarted.submit_job
+        Service({}, self.store, again).cycle()
+        restarted.submit_job.assert_called_once()
+        self.assertTrue(all('+form-submit' not in call.args[0] for call in restarted.lark.call_args_list))
+        self.assertEqual(again.resources[replacement]['status'], 'pending')
+        self.assertEqual(read_json(folder/'state.json'), submitted)
+        self.assertEqual(read_json(folder/'receipt.json'), receipt)
 
     def test_claimed_but_unrecorded_dispatch_and_failed_attempt_are_not_restarted(self):
         claimed = self.task('claimed')

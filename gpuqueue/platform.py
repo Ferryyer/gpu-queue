@@ -441,11 +441,10 @@ class Markflow:
         for resource in self.resources.values():
             if resource['status'] not in ['closed', 'failed'] and resource.get('recorded_phase') in ['submitting', 'submission_unknown']:
                 return None, f"申请 {resource['id']} 的提交回执待核查；已暂停新增申请，避免重复提交"
-        requested = self.resources.get(task['internal'].get('request_uuid'), {})
-        if requested.get('status') == 'pending' and requested.get('recorded_phase') == 'submitted':
-            return None, f"已有 GPU 申请 {requested['id']} 等待平台就绪通知；未新增申请"
         if active and (len(active) >= 2 or required['memory_gb'] is None or any(t['doc']['resources']['memory_gb'] is None for t in active)):
             return None, '默认顺序执行；未满足安全并行条件'
+        # Confirmed pending applications do not preclude reusing an allocation.
+        # Uncertain submissions above still require reconciliation before reuse.
         for resource in self.resources.values():
             telemetry = resource.get('telemetry', {})
             if resource['status'] != 'online' or time.time()-telemetry.get('at', 0) > 90 or resource.get('type') != required['type']:
