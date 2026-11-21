@@ -20,7 +20,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='queue-dart-', dir=build) as folder:
         harness = Path(folder)
         (harness/'test').mkdir()
-        ui = '  material_ui: 1.5.0\n  cupertino_ui: 1.1.1\n  url_launcher: 6.3.2\n' if args.widgets else ''
+        ui = '  material_ui: 1.5.0\n  cupertino_ui: 1.1.1\n  url_launcher: 6.3.2\n  clock: ^1.1.3\n' if args.widgets else ''
         if args.ssh_bundle:
             ui += f'  archive: ^4.3.0\n  crypto: ^3.0.0\n  pointycastle: ^4.0.0\n  pinenacl: ^0.6.0\n  dartssh2:\n    path: "{ROOT / "serverbox/packages/dartssh2"}"\n'
         (harness/'pubspec.yaml').write_text("name: queue_protocol_checks\nenvironment:\n  sdk: '>=3.11.0 <4.0.0'\ndependencies:\n  flutter:\n    sdk: flutter\n"+ui+"dev_dependencies:\n  flutter_test:\n    sdk: flutter\nflutter:\n  uses-material-design: true\n")

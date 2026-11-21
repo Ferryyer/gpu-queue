@@ -1,31 +1,62 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const feishuTaskUrl = 'https://uqyv5nolng8.feishu.cn/next/task/my-tasks';
+const feishuRefreshInterval = Duration(hours: 3);
 
 class FeishuTaskPage extends StatefulWidget {
-  const FeishuTaskPage({super.key, this.embedded = false, this.onExpand});
+  const FeishuTaskPage({super.key, this.embedded = false, this.onExpand,
+    this.refreshClock = const Clock()});
   final bool embedded;
   final VoidCallback? onExpand;
+  final Clock refreshClock;
   @override
   State<FeishuTaskPage> createState() => _FeishuTaskPageState();
 }
 
-class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAliveClientMixin {
+class _FeishuTaskPageState extends State<FeishuTaskPage>
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   late final Future<String> _script = rootBundle.loadString('assets/feishu/inspire-task.user.js');
   MethodChannel? _channel;
   bool _loading = true, _back = false, _styled = true, _hint = true;
   bool? _dark;
   String? _error;
+  Timer? _refreshTimer;
+  DateTime? _refreshDue;
+  bool _foreground = true;
 
   @override
   void initState() {
     super.initState();
     _hint = !widget.embedded;
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _scheduleRefresh();
+  }
+
+  void _scheduleRefresh() {
+    _refreshTimer?.cancel();
+    final due = _refreshDue;
+    if (!_foreground || due == null || _channel == null) return;
+    final remaining = due.difference(widget.refreshClock.now());
+    _refreshTimer = Timer(remaining.isNegative ? Duration.zero : remaining, () {
+      // A suspended machine may miss several intervals. Refresh once, then
+      // start a new interval rather than replaying the missed refreshes.
+      _refreshDue = widget.refreshClock.now().add(feishuRefreshInterval);
+      unawaited(_command('refresh'));
+      _scheduleRefresh();
+    });
   }
 
   @override
@@ -65,6 +96,8 @@ class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAlive
     });
     unawaited(_command('state'));
     unawaited(_command('dark', _dark));
+    _refreshDue ??= widget.refreshClock.now().add(feishuRefreshInterval);
+    _scheduleRefresh();
   }
 
   Future<void> _openBrowser() async {
@@ -78,6 +111,8 @@ class _FeishuTaskPageState extends State<FeishuTaskPage> with AutomaticKeepAlive
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
     _channel?.setMethodCallHandler(null);
     super.dispose();
   }

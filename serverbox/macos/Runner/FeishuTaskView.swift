@@ -25,6 +25,11 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
   private var dark: Bool
   private var popupWindows: [NSWindow] = []
   private var loadingObservation: NSKeyValueObservation?
+  private var activeObservation: NSObjectProtocol?
+  private var pageError: String?
+  private var needsRecovery = false
+  private var recoveryAttempted = false
+  private var initialNavigationStarted = false
 
   init(viewId: Int64, messenger: FlutterBinaryMessenger, arguments: Any?) {
     let args = arguments as? [String: Any] ?? [:]
@@ -35,6 +40,15 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     channel = FlutterMethodChannel(name: "work.inspirequeue/feishu/\(viewId)", binaryMessenger: messenger)
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .default()
+    // macOS WKWebView omits Version/ and Safari/ by default. Feishu's browser
+    // check cannot identify that UA even though it is the system WebKit engine.
+    let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari")
+      .flatMap { Bundle(url: $0) }
+    let installedVersion = safari?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    let version = installedVersion.flatMap {
+      $0.range(of: #"^\d+(?:\.\d+){0,2}$"#, options: .regularExpression) != nil ? $0 : nil
+    } ?? "16.0" // Minimum bundled Safari for the application's macOS 13 floor.
+    config.applicationNameForUserAgent = "Version/\(version) Safari/605.1.15"
     web = WKWebView(frame: .zero, configuration: config)
     super.init(frame: .zero)
     web.navigationDelegate = self
@@ -50,7 +64,17 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
       guard let self = self else { result(nil); return }
       switch call.method {
       case "state": self.sendState(); result(nil)
-      case "reload": self.web.reload(); result(nil)
+      case "reload": self.reloadPage(); result(nil)
+      case "refresh":
+        // Do not interrupt sign-in, navigation, or a native attachment dialog.
+        let url = self.web.url ?? Self.home
+        if Self.isFeishu(url),
+           url.host == Self.home.host, url.path.hasPrefix("/next/task/"),
+           !self.web.isLoading, self.window?.attachedSheet == nil,
+           !self.popupWindows.contains(where: { $0.isVisible }) {
+          self.reloadPage()
+        }
+        result(nil)
       case "home": self.web.load(URLRequest(url: Self.home)); result(nil)
       case "back": if self.web.canGoBack { self.web.goBack() }; result(nil)
       case "appearance":
@@ -67,14 +91,42 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
       default: result(FlutterMethodNotImplemented)
       }
     }
-    web.load(URLRequest(url: Self.home))
+    activeObservation = NotificationCenter.default.addObserver(
+      forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+    ) { [weak self] _ in self?.recoverIfNeeded() }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
-  override func layout() { super.layout(); web.frame = bounds }
+  override func layout() {
+    super.layout()
+    web.frame = bounds
+    // The overview can be constructed before its scroll panel is laid out.
+    // Start the document with a real viewport, not a transient zero-size frame.
+    if !initialNavigationStarted && bounds.width > 0 && bounds.height > 0 {
+      initialNavigationStarted = true
+      web.load(URLRequest(url: Self.home))
+    }
+  }
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    recoverIfNeeded()
+  }
   deinit {
+    if let observer = activeObservation { NotificationCenter.default.removeObserver(observer) }
     channel.setMethodCallHandler(nil)
     web.stopLoading()
     popupWindows.forEach { $0.close() }
+  }
+
+  private func reloadPage() {
+    pageError = nil
+    // reload() has no navigation to repeat after an initial provisional failure.
+    if web.reload() == nil { web.load(URLRequest(url: Self.home)) }
+  }
+  private func recoverIfNeeded() {
+    guard needsRecovery, !recoveryAttempted, window != nil, NSApp.isActive else { return }
+    needsRecovery = false
+    recoveryAttempted = true
+    reloadPage()
   }
 
   private func installScript() {
@@ -85,10 +137,11 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
       injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }
   private func sendState(error: String? = nil) {
+    if let error = error { pageError = error }
     // Never send the full URL: login redirects can include authorization codes.
     channel.invokeMethod("state", arguments: [
       "loading": web.isLoading, "canGoBack": web.canGoBack, "enabled": enabled,
-      "error": error as Any? ?? NSNull()
+      "error": pageError as Any? ?? NSNull()
     ])
   }
   static func isFeishu(_ url: URL) -> Bool {
@@ -117,7 +170,15 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     }
   }
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-    if webView === web { sendState() }
+    if webView === web {
+      pageError = nil
+      needsRecovery = false
+      recoveryAttempted = false
+      sendState()
+    }
+  }
+  func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+    if webView === web { pageError = nil; sendState() }
   }
   func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
                decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -151,12 +212,19 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     if view === web { sendState(error: "飞书页面未能加载，请检查网络后重试。") }
   }
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-    if webView === web { sendState(error: "网页进程已结束，请刷新页面。") }
+    if webView === web {
+      needsRecovery = true
+      sendState(error: "网页进程已结束，请刷新页面。")
+      // Kept-alive overview and sidebar documents can terminate independently.
+      // Retry once; a second termination before didFinish leaves manual retry.
+      recoverIfNeeded()
+    }
   }
   func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
     guard let url = action.request.url, Self.isFeishu(url) else { return nil }
     // A real child web view preserves window.opener for sign-in popups.
+    configuration.applicationNameForUserAgent = web.configuration.applicationNameForUserAgent
     let popup = WKWebView(frame: NSRect(x: 0, y: 0, width: 760, height: 680), configuration: configuration)
     popup.navigationDelegate = self
     popup.uiDelegate = self
