@@ -1,0 +1,32 @@
+name: Inspire Queue PR checks
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: inspire-queue-review-baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify the exact PR diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$HEAD"
+          git cat-file -e "$BASE^{commit}"
+          git diff --check "$BASE...$HEAD"
+      - name: Run isolated queue unit tests
+        run: |
+          mkdir -p "$HOME/scratch"
+          python3 -m unittest discover -s tests -p test_gpuqueue.py
