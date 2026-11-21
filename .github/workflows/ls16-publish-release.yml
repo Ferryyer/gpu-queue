@@ -1,0 +1,90 @@
+name: Publish LS-16 Mac release 2.0.2019
+
+on:
+  push:
+    branches: [release/ls16-v2.0.2019]
+
+permissions: {}
+
+jobs:
+  publish:
+    if: github.event.created && github.repository == 'Ferryyer/gpu-queue'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: Ferryyer/gpu-queue
+      RELEASE_TAG: v2.0.2019
+      BUILD_COMMIT: ba273d4d0998f7e8fd5b52bc3eee538d05fbdc4d
+      BUILD_RUN: '44877852090'
+      BUILD_ARTIFACT: '14697027582'
+      ARCHIVE_SHA: ec36ddab4535f8944d97784b042770b84ada0803b8ddf7b200dcffd97533ecbb
+    steps:
+      - name: Verify the successful build and release files
+        shell: bash
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" |
+            jq -e --arg commit "$BUILD_COMMIT" '
+              .status == "completed" and .conclusion == "success" and
+              .head_sha == $commit and .path == ".github/workflows/employee-release.yml"
+            ' >/dev/null
+          gh api "repos/$GH_REPO/actions/artifacts/$BUILD_ARTIFACT" |
+            jq -e --arg run "$BUILD_RUN" --arg digest "sha256:$ARCHIVE_SHA" '
+              .workflow_run.id == ($run | tonumber) and .digest == $digest and (.expired | not)
+            ' >/dev/null
+          gh api "repos/$GH_REPO/actions/artifacts/$BUILD_ARTIFACT/zip" > candidate.zip
+          printf '%s  candidate.zip\n' "$ARCHIVE_SHA" | sha256sum --check --strict
+          unzip -q candidate.zip 'unified-release/*'
+          cd unified-release
+          sha256sum --check --strict SHA256SUMS
+          jq -e --arg commit "$BUILD_COMMIT" --arg tag "$RELEASE_TAG" '
+            .sourceCommit == $commit and .releaseTag == $tag and .build == 2019 and
+            .architecture == "arm64" and .channel == "release" and
+            .inAppInstaller and .installerNativeScenariosVerified
+          ' unified-release.json >/dev/null
+          jq -e --arg commit "$BUILD_COMMIT" '
+            .sourceCommit == $commit and .macBuildVerified
+          ' native-report.json >/dev/null
+          jq -e '.native and (.scenarios | length == 7 and all(.passed))' installer-report.json >/dev/null
+          cmp Inspire-Queue-macos-arm64-2019-unsigned.dmg GPU-Queue-macos-arm64-2019-unsigned.dmg
+
+      - name: Upload and verify the draft before publishing
+        shell: bash
+        working-directory: unified-release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+            exit 1
+          fi
+          gh api "repos/$GH_REPO/git/matching-refs/tags/$RELEASE_TAG" |
+            jq -e 'length == 0' >/dev/null
+          assets=(
+            APPLE-NOTARIZATION.md DAILY-CALENDAR.md EMPLOYEE-SETUP.md
+            GPU-Queue-macos-arm64-2019-unsigned.dmg Inspire-Queue-macos-arm64-2019-unsigned.dmg
+            RELEASE-NOTES.md SHA256SUMS installer-report.json native-report.json unified-release.json
+          )
+          gh release create "$RELEASE_TAG" --repo "$GH_REPO" --draft --target "$BUILD_COMMIT" \
+            --title "Inspire Queue 2.0.2019 · Mac 员工内部版" --notes-file RELEASE-NOTES.md "${assets[@]}"
+          release_id="$(gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json databaseId --jq .databaseId)"
+          gh api "repos/$GH_REPO/releases/$release_id" > ../draft-release.json
+          jq -e --arg tag "$RELEASE_TAG" --arg commit "$BUILD_COMMIT" '
+            .draft and (.prerelease | not) and .tag_name == $tag and
+            .target_commitish == $commit and (.assets | length == 10)
+          ' ../draft-release.json >/dev/null
+          for asset in "${assets[@]}"; do
+            digest="$(sha256sum "$asset" | cut -d ' ' -f1)"
+            size="$(stat -c '%s' "$asset")"
+            jq -e --arg name "$asset" --arg digest "sha256:$digest" --argjson size "$size" '
+              [.assets[] | select(.name == $name and .state == "uploaded" and
+                .digest == $digest and .size == $size)] | length == 1
+            ' ../draft-release.json >/dev/null
+          done
+          gh release edit "$RELEASE_TAG" --repo "$GH_REPO" --draft=false --latest
+          gh api "repos/$GH_REPO/releases/latest" |
+            jq -e --arg tag "$RELEASE_TAG" --arg commit "$BUILD_COMMIT" '
+              select(.tag_name == $tag and .target_commitish == $commit and
+                     (.draft | not) and (.prerelease | not)) | .html_url
+            '
