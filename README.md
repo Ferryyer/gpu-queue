@@ -34,6 +34,8 @@
 
 ## 本地验证
 
+发往 `main` 的 PR 会自动检查差异中的空白错误，并运行 `tests/test_gpuqueue.py` 的隔离测试。测试使用临时任务数据和模拟的平台响应，不会申请 GPU。[PR 审查规则](REVIEW.md)说明了哪些改动需要额外验证。
+
 ```sh
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 node --test tests/*.cjs tests/cloud.test.js
