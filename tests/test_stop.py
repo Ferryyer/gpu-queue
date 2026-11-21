@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import uuid
 from gpuqueue.core import HOME,Store,atomic_json,read_json
 from gpuqueue.control import Control,ControlError,QueueChanged
@@ -18,7 +18,7 @@ from gpuqueue import stop_control as stop
 class StopTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(dir=HOME/'scratch',prefix='stop-qa-')
-        self.root=Path(self.temp.name);self.project=self.root/'code';self.project.mkdir()
+        self.root=Path(self.temp.name).resolve();self.project=self.root/'code';self.project.mkdir()
         (self.project/'step.py').write_text('print("CPU test only")\n')
         self.store=Store(self.root/'state');self.control=Control(self.store)
         self.task=self.store.submit({'title':'stop QA','project':str(self.project),'code_files':['step.py'],'steps':[{'name':'CPU dummy','argv':['/usr/bin/python3','{code}/step.py']}]})[0]
@@ -31,6 +31,24 @@ class StopTests(unittest.TestCase):
     def approve_claim(self):
         state=self.control.start(self.task['id'],self.task['digest'])
         self.control.claim(self.task['id'],self.task['digest'],state['revision'])
+    def test_process_identity_and_parent_use_signal_visible_pids(self):
+        process=subprocess.Popen(['/usr/bin/python3','-c','import time;time.sleep(30)'])
+        self.processes.append(process)
+        value=stop.identity(process.pid)
+        self.assertIsNotNone(value)
+        self.assertEqual(value['pid'],process.pid)
+        self.assertEqual(value['ppid'],os.getpid())
+        self.assertIn(process.pid,stop.table())
+        self.assertIsNone(stop.identity(-1))
+    def test_other_namespace_pid_collision_is_rejected(self):
+        own = Path('/proc/self/status').read_text()
+        mounted_pid = next(int(line.split()[1]) for line in own.splitlines() if line.startswith('Pid:'))
+        if mounted_pid == os.getpid():
+            self.skipTest('This case requires a procfs mounted from an ancestor PID namespace')
+        folder = stop.proc_folder(os.getpid())
+        self.assertIsNotNone(folder)
+        with patch.object(stop, 'proc_folder', return_value=Path('/proc/0')):
+            self.assertIsNone(stop.visible_pid(folder))
     def cpu_tree(self):
         # Replace only this private fixture's dummy runner, not any real snapshot.
         path=self.folder/'runner.py';path.chmod(0o600)

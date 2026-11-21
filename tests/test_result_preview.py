@@ -134,6 +134,9 @@ class ResultPreviewTests(unittest.TestCase):
 
     def test_non_private_or_symlink_socket_directory_is_rejected(self):
         self.directory.mkdir(mode=0o755)
+        # A restrictive caller umask can turn mkdir(0755) into 0700. Establish
+        # the insecure fixture explicitly, so this tests the actual guard.
+        self.directory.chmod(0o755)
         with self.assertRaises(RuntimeError):
             self.start()
         self.directory.rmdir()
