@@ -3,5 +3,5 @@ def select(rows, window, limit):
     for row in sorted(rows, key=lambda row: (row["due"], row["ticket"])):
         if row["due"] > window:
             break
-        selected.setdefault(row["label"], row)
+        selected.setdefault(row["ticket"], row)
     return list(selected.values())[:limit]
