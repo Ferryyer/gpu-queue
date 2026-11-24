@@ -27,9 +27,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$HEAD"
           git cat-file -e "$BASE^{commit}"
           git cat-file -e "$RELEASE^{commit}"
-          git merge-base --is-ancestor "$RELEASE" "$HEAD"
           git diff --check "$BASE...$HEAD" -- . ":(exclude)serverbox"
-          git diff --check "$RELEASE...$HEAD" -- serverbox
+          # Squash merges can install the release tree without its original ancestry.
+          git diff --check "$RELEASE" "$HEAD" -- serverbox
       - name: Run isolated queue unit tests
         run: |
           mkdir -p "$HOME/scratch"
