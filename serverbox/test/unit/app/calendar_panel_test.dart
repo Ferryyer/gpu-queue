@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/calendar/local_calendar.dart';
+import 'package:server_box/core/calendar/notes.dart';
 import 'package:server_box/core/calendar/updater.dart';
 import 'package:server_box/view/page/overview/calendar.dart';
 
@@ -102,6 +104,35 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await settle(tester, 4);
       expect(requests, 4);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'CAL-A-001: source dialog falls back to B source when cached notes identify A',
+    (tester) async {
+      const sourceB =
+          'https://img.owspace.com/Public/uploads/Download/2026/1030.jpg';
+      final digestB = sha256.convert(jpeg).toString();
+      await tester.runAsync(() async {
+        await File('${cache.path}/$today.$digestB.jpg').writeAsBytes(jpeg);
+        await File('${cache.path}/$today.json').writeAsString(
+          jsonEncode({'date': today, 'sha256': digestB, 'source': sourceB}),
+        );
+        await File('${cache.path}/$today.notes.md').writeAsString(
+          '${CalendarNotes.marker(today)}\n${CalendarNotes.imageMarker('0' * 64)}\n# Old attribution A\n',
+        );
+      });
+      await tester.pumpWidget(app());
+      await settle(tester, 1);
+      await tester.tap(find.text('出处笔记'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Old attribution A'), findsNothing);
+      expect(
+        find.textContaining('当前图片对应的出处笔记尚未发布、尚未核对或暂时无法获取'),
+        findsOneWidget,
+      );
+      expect(updater.reading!.notes, contains(sourceB));
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

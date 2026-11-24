@@ -140,7 +140,7 @@ class _DailyCalendarPanelState extends State<DailyCalendarPanel>
                     ? Markdown(
                         data: reading.hasResearchNotes
                             ? reading.notes!
-                            : '${reading.notes ?? "作者与作品出处见原图署名。"}\n\n当天出处笔记尚未发布或暂时无法获取，稍后自动检查。',
+                            : '${reading.notes ?? "作者与作品出处见原图署名。"}\n\n当前图片对应的出处笔记尚未发布、尚未核对或暂时无法获取，稍后自动检查。',
                         selectable: true,
                         imageBuilder: (_, _, _) => const SizedBox.shrink(),
                         onTapLink: (_, href, _) {

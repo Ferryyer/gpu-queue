@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:server_box/core/calendar/local_calendar.dart';
 import 'package:server_box/core/calendar/notes.dart';
 
 typedef CalendarDownload = Future<bool> Function(Directory cache, String day);
+
+/// The complete published document, including its date and image binding.
 typedef CalendarNotesDownload = Future<String?> Function(String day);
 
 /// No agent or external scheduler: the app calls its own packaged script.
@@ -152,10 +155,14 @@ class CalendarUpdater {
     _lastNotesAttempt = now;
     _lastNotesDate = current.date;
     try {
-      final body = await _downloadNotes(current.date);
-      if (body == null) return;
-      final content = '${CalendarNotes.marker(current.date)}\n$body\n';
-      if (CalendarNotes.parse(utf8.encode(content), current.date) == null)
+      final content = await _downloadNotes(current.date);
+      if (content == null) return;
+      if (CalendarNotes.parse(
+            utf8.encode(content),
+            current.date,
+            imageSha256: sha256.convert(current.bytes).toString(),
+          ) ==
+          null)
         return;
       final temp = File('${source.directory.path}/${current.date}.notes.tmp');
       await temp.writeAsString(content, flush: true);

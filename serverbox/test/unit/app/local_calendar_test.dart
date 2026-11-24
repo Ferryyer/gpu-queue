@@ -33,6 +33,9 @@ void main() {
     );
   }
 
+  String researchNote(String day, String body, [List<int>? bytes]) =>
+      '${CalendarNotes.marker(day)}\n${CalendarNotes.imageMarker(sha256.convert(bytes ?? oldBytes).toString())}\n$body\n';
+
   CalendarUpdater updater({
     CalendarDownload? download,
     CalendarNotesDownload? notes,
@@ -149,12 +152,140 @@ void main() {
     expect(subject.latestCheckSucceeded, isTrue);
   });
 
+  for (final response in [
+    'missing',
+    'offline',
+    'stale-bound',
+    'stale-unbound',
+  ]) {
+    test(
+      'CAL-A-001: same-day replacement rejects $response notes and survives restart',
+      () async {
+        const day = '2026-10-29';
+        const sourceB =
+            'https://img.owspace.com/Public/uploads/Download/2026/1030.jpg';
+        final noteA = researchNote(
+          day,
+          '# Attribution A\n[Original A](https://example.com/a)',
+        );
+        final noteFile = File('${dir.path}/$day.notes.md');
+        await manifest(day, oldBytes);
+        await noteFile.writeAsString(noteA);
+        final subject = updater(
+          download: (_, requestedDay) async {
+            await manifest(requestedDay, revisedBytes, url: sourceB);
+            return true;
+          },
+          notes: (_) async {
+            if (response == 'offline') throw const SocketException('offline');
+            if (response == 'stale-bound') return noteA;
+            if (response == 'stale-unbound')
+              return '${CalendarNotes.marker(day)}\n# Attribution A\n';
+            return null;
+          },
+        );
+        await subject.loadCache();
+        expect(subject.reading!.hasResearchNotes, isTrue);
+        expect(subject.reading!.notes, contains('Attribution A'));
+
+        await subject.update(force: true);
+        expect(subject.reading!.bytes, revisedBytes);
+        expect(subject.latestCheckSucceeded, isTrue);
+        expect(subject.reading!.hasResearchNotes, isFalse);
+        expect(subject.reading!.notes, contains(sourceB));
+        expect(subject.reading!.notes, isNot(contains('Attribution A')));
+        expect(
+          await noteFile.readAsString(),
+          noteA,
+        ); // Preserve old evidence without displaying it for B.
+
+        final offline = updater();
+        await offline.update(force: true);
+        expect(offline.reading!.hasResearchNotes, isFalse);
+        expect(offline.reading!.notes, contains(sourceB));
+        expect(offline.reading!.notes, isNot(contains('Attribution A')));
+      },
+    );
+  }
+
+  test('unbound legacy notes stay on disk but cannot replace a revised manifest source', () async {
+    const day = '2026-10-29';
+    const sourceB =
+        'https://img.owspace.com/Public/uploads/Download/2026/1030.jpg';
+    await image(day);
+    final note = File('${dir.path}/$day.notes.md');
+    final oldNote = '${CalendarNotes.marker(day)}\n# Unbound attribution A\n';
+    await note.writeAsString(oldNote);
+    await manifest(day, revisedBytes, url: sourceB);
+    final reading = (await LocalCalendar(dir).readLatest(now))!;
+    expect(reading.bytes, revisedBytes);
+    expect(reading.hasResearchNotes, isFalse);
+    expect(reading.notes, contains(sourceB));
+    expect(reading.notes, isNot(contains('Unbound attribution A')));
+    expect(await note.readAsString(), oldNote);
+  });
+
+  test(
+    'matching B notes can replace A notes without reloading B image bytes',
+    () async {
+      const day = '2026-10-29';
+      await manifest(day, revisedBytes);
+      await File('${dir.path}/$day.notes.md')
+          .writeAsString(researchNote(day, '# A'));
+      final subject = updater(
+        notes: (date) async => researchNote(date, '# B', revisedBytes),
+      );
+      await subject.loadCache();
+      final bytes = subject.reading!.bytes;
+      expect(subject.reading!.hasResearchNotes, isFalse);
+      await subject.update(force: true);
+      expect(subject.reading!.notes, '# B');
+      expect(subject.reading!.hasResearchNotes, isTrue);
+      expect(subject.reading!.bytes, same(bytes));
+      expect((await LocalCalendar(dir).readLatest(now))!.notes, '# B');
+    },
+  );
+
+  test('note binding requires the exact image digest and rejects legacy and malformed bindings', () {
+    const day = '2026-10-29';
+    final digestA = sha256.convert(oldBytes).toString();
+    final digestB = sha256.convert(revisedBytes).toString();
+    final document = researchNote(day, '# A');
+    expect(
+      CalendarNotes.parse(utf8.encode(document), day, imageSha256: digestA),
+      '# A',
+    );
+    expect(
+      CalendarNotes.parse(utf8.encode(document), day, imageSha256: digestB),
+      isNull,
+    );
+    expect(
+      CalendarNotes.parse(
+        utf8.encode('${CalendarNotes.marker(day)}\n# Unbound'),
+        day,
+        imageSha256: digestA,
+      ),
+      isNull,
+    );
+    for (final broken in [
+      document.replaceFirst(digestA, '../bad'),
+      document.replaceFirst(digestA, digestA.toUpperCase()),
+      document.replaceFirst(day, '2026-10-28'),
+      '$document<script>',
+    ]) {
+      expect(
+        CalendarNotes.parse(utf8.encode(broken), day, imageSha256: digestA),
+        isNull,
+      );
+    }
+  });
+
   test('unmodified bytes are reused while notes can change', () async {
     await image('2026-10-29');
     var note = '# First';
     final subject = updater(
       download: (_, _) async => true,
-      notes: (_) async => note,
+      notes: (day) async => researchNote(day, note),
     );
     await subject.update(force: true);
     final bytes = subject.reading!.bytes;
@@ -175,7 +306,7 @@ void main() {
           if (!online) throw const SocketException('offline');
           return true;
         },
-        notes: (_) async => '# Cached source',
+        notes: (day) async => researchNote(day, '# Cached source'),
       );
       await subject.update(force: true);
       expect(subject.latestCheckSucceeded, isTrue);
@@ -327,7 +458,7 @@ void main() {
           await image(day);
           return true;
         },
-        notes: (_) async => '# Verified',
+        notes: (day) async => researchNote(day, '# Verified'),
       );
       await subject.update();
       expect(subject.nextCheck(clock), const Duration(minutes: 2));
@@ -364,7 +495,7 @@ void main() {
         notes: (day) async {
           expect(day, '2026-10-29');
           requests++;
-          return published ? '# Verified source' : null;
+          return published ? researchNote(day, '# Verified source') : null;
         },
       );
       await subject.update();

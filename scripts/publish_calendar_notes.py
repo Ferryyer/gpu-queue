@@ -19,7 +19,11 @@ def validate(text, day):
     marker = f'<!-- inspire-calendar-date: {day} -->\n'
     if len(text.encode()) > MAX_BYTES or not text.startswith(marker):
         raise ValueError('Missing matching date marker or note exceeds 64 KiB')
-    body = text[len(marker):].strip()
+    body = text[len(marker):]
+    binding = re.match(r'^<!-- inspire-calendar-image-sha256: [a-f0-9]{64} -->\n', body)
+    if binding:
+        body = body[binding.end():]
+    body = body.strip()
     if not body or '<' in body or '![' in body:
         raise ValueError('Use plain Markdown without HTML or embedded images')
     if re.search(r'PRIVATE KEY|gh[pousr]_[A-Za-z0-9]|github_pat_|/Users/|/home/|Bearer\s', body):

@@ -108,6 +108,7 @@ class LocalCalendar {
         final research = CalendarNotes.parse(
           await researchFile.readAsBytes(),
           date,
+          imageSha256: sha256.convert(bytes).toString(),
         );
         if (research != null) {
           notes = research;
