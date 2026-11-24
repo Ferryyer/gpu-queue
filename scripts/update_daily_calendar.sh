@@ -12,11 +12,6 @@ checker=${3:-"$(cd "$(dirname "$0")" && pwd)/CalendarCheck"}
 [[ "$(/bin/date -j -f '%Y-%m-%d' "$day" +%F 2>/dev/null)" == "$day" ]] || exit 64
 [[ -x "$checker" ]] || { echo 'Calendar date verifier is missing' >&2; exit 69; }
 /bin/mkdir -p "$cache"
-target="$cache/$day.jpg"
-if [[ -f "$target" ]] && "$checker" "$target" "$day" >/dev/null; then
-    printf '%s\n' "$day"
-    exit 0
-fi
 temp=$(/usr/bin/mktemp -d "$cache/.download.XXXXXX")
 trap '/bin/rm -rf "$temp"' EXIT
 # The publisher occasionally places a page under the following day's filename.
@@ -30,14 +25,21 @@ for candidate in "$day" "$next"; do
     url="https://img.owspace.com/Public/uploads/Download/$year/$month$date.jpg"
     if ! /usr/bin/curl --fail --silent --show-error --location --max-redirs 2 \
         --proto '=https' --proto-redir '=https' --connect-timeout 10 --max-time 25 \
-        --max-filesize 10485760 --output "$temp/image.jpg" "$url"; then
+        --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' \
+        --max-filesize 10485760 --output "$temp/image.jpg" \
+        "$url?inspire_calendar_check=${temp##*/}-$RANDOM"; then
         continue
     fi
     [[ $(/usr/bin/stat -f %z "$temp/image.jpg") -le 10485760 ]] || continue
     if ! "$checker" "$temp/image.jpg" "$day" >/dev/null; then continue; fi
-    printf '# 单向历 · %s\n\n图片来源：[单向空间原图](%s)。\n\n图面日期已在本机核对；作者与作品出处见原图署名。\n' "$day" "$url" > "$temp/source.md"
-    /bin/mv -f "$temp/source.md" "$cache/$day.md"
-    /bin/mv -f "$temp/image.jpg" "$target"
+    # A single atomic manifest publishes the verified bytes AND their source.
+    # Readers of the previous manifest retain an immutable, checksummed image.
+    digest=$(/usr/bin/shasum -a 256 "$temp/image.jpg")
+    digest=${digest%% *}
+    [[ "$digest" =~ ^[a-f0-9]{64}$ ]] || exit 65
+    /bin/mv -f "$temp/image.jpg" "$cache/$day.$digest.jpg"
+    printf '{"date":"%s","sha256":"%s","source":"%s"}\n' "$day" "$digest" "$url" > "$temp/manifest.json"
+    /bin/mv -f "$temp/manifest.json" "$cache/$day.json"
     printf '%s\n' "$day"
     exit 0
 done

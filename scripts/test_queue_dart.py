@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--flutter', default='flutter')
     parser.add_argument('--widgets', action='store_true', help='Also render production GPU monitor widgets on the CPU Flutter test engine')
+    parser.add_argument('--calendar', action='store_true', help='Run only calendar storage, refresh and panel tests')
     parser.add_argument('--ssh-bundle', action='store_true', help='Verify ZIP parsing, private key matching and protected SSH configuration')
     parser.add_argument('--offline', action='store_true', help='Use already cached pub dependencies')
     args = parser.parse_args()
@@ -20,11 +21,17 @@ def main():
     with tempfile.TemporaryDirectory(prefix='queue-dart-', dir=build) as folder:
         harness = Path(folder)
         (harness/'test').mkdir()
-        ui = '  material_ui: 1.5.0\n  cupertino_ui: 1.1.1\n  url_launcher: 6.3.2\n  clock: ^1.1.3\n' if args.widgets else ''
+        ui = '  crypto: ^3.0.0\n'
+        if args.widgets or args.calendar:
+            ui += '  material_ui: 1.5.0\n  cupertino_ui: 1.1.1\n  url_launcher: 6.3.2\n  clock: ^1.1.3\n'
+        if args.calendar:
+            ui += '  flutter_markdown_plus: ^1.0.12\n'
         if args.ssh_bundle:
-            ui += f'  archive: ^4.3.0\n  crypto: ^3.0.0\n  pointycastle: ^4.0.0\n  pinenacl: ^0.6.0\n  dartssh2:\n    path: "{ROOT / "serverbox/packages/dartssh2"}"\n'
+            ui += f'  archive: ^4.3.0\n  pointycastle: ^4.0.0\n  pinenacl: ^0.6.0\n  dartssh2:\n    path: "{ROOT / "serverbox/packages/dartssh2"}"\n'
         (harness/'pubspec.yaml').write_text("name: queue_protocol_checks\nenvironment:\n  sdk: '>=3.11.0 <4.0.0'\ndependencies:\n  flutter:\n    sdk: flutter\n"+ui+"dev_dependencies:\n  flutter_test:\n    sdk: flutter\nflutter:\n  uses-material-design: true\n")
         names = ['queue_protocol_test.dart', 'queue_session_test.dart', 'queue_presentation_test.dart', 'mac_update_release_test.dart', 'mac_update_bridge_test.dart', 'local_calendar_test.dart', 'result_preview_test.dart']
+        if args.calendar:
+            names = ['local_calendar_test.dart', 'calendar_panel_test.dart']
         if args.widgets:
             names += ['queue_resource_widget_test.dart', 'queue_workspace_widget_test.dart', 'feishu_task_widget_test.dart', 'overview_layout_test.dart']
         for name in names:
