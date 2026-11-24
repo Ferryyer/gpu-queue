@@ -1,0 +1,46 @@
+name: Feishu task interaction
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - serverbox/assets/feishu/**
+      - serverbox/lib/view/page/feishu/**
+      - serverbox/macos/Runner/FeishuTaskView.swift
+      - serverbox/test/unit/app/feishu_task_widget_test.dart
+      - scripts/feishu-tests/**
+      - scripts/test_feishu_*.py
+      - .github/workflows/feishu-interaction.yml
+
+permissions:
+  contents: read
+
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Check task-only styling and reversible hover feedback
+        run: |
+          npm ci --prefix scripts/feishu-tests --no-audit --no-fund
+          node --test scripts/feishu-tests/style.test.cjs
+      - name: Check mouse hit testing with synthetic pages at different zoom levels
+        run: |
+          python3 -m venv build/feishu-browser
+          build/feishu-browser/bin/python -m pip install playwright==1.65.2
+          build/feishu-browser/bin/python -m playwright install --with-deps chromium
+          build/feishu-browser/bin/python scripts/test_feishu_pointer.py
+  webkit:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Compile the production Swift view and check shared preferences in WebKit
+        run: python3 scripts/test_feishu_browser.py

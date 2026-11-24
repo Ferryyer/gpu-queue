@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 const feishuTaskUrl = 'https://uqyv5nolng8.feishu.cn/next/task/my-tasks';
 const feishuRefreshInterval = Duration(hours: 3);
+const feishuHintDuration = Duration(seconds: 6);
 
 class FeishuTaskPage extends StatefulWidget {
   const FeishuTaskPage({super.key, this.embedded = false, this.onExpand,
@@ -25,8 +26,10 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
   MethodChannel? _channel;
   bool _loading = true, _back = false, _styled = true, _hint = true;
   bool? _dark;
+  bool _hideHover = true;
   String? _error;
   Timer? _refreshTimer;
+  Timer? _hintTimer;
   DateTime? _refreshDue;
   bool _foreground = true;
 
@@ -34,6 +37,11 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
   void initState() {
     super.initState();
     _hint = !widget.embedded;
+    if (_hint) {
+      _hintTimer = Timer(feishuHintDuration, () {
+        if (mounted) setState(() => _hint = false);
+      });
+    }
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
@@ -91,6 +99,7 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
         _loading = state['loading'] == true;
         _back = state['canGoBack'] == true;
         _styled = state['enabled'] != false;
+        _hideHover = state['hideHover'] != false;
         _error = state['error'] as String?;
       });
     });
@@ -113,6 +122,7 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    _hintTimer?.cancel();
     _channel?.setMethodCallHandler(null);
     super.dispose();
   }
@@ -141,10 +151,12 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
             onSelected: (value) {
               if (value == 'home') unawaited(_command('home'));
               if (value == 'style') unawaited(_command('appearance', !_styled));
+              if (value == 'hover') unawaited(_command('hideHover', !_hideHover));
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'home', child: Text('回到我负责的')),
               CheckedPopupMenuItem(value: 'style', checked: _styled, child: const Text('Inspire 风格')),
+              CheckedPopupMenuItem(value: 'hover', checked: _hideHover, child: const Text('隐藏网页悬停提示')),
             ],
           ),
         ]),
@@ -155,7 +167,10 @@ class _FeishuTaskPageState extends State<FeishuTaskPage>
         child: Row(children: [
           const Expanded(child: Padding(padding: EdgeInsets.symmetric(vertical: 10),
             child: Text('首次使用请在飞书页面登录；登录状态保存在本机。', style: TextStyle(fontSize: 12)))),
-          IconButton(tooltip: '收起提示', onPressed: () => setState(() => _hint = false),
+          IconButton(tooltip: '收起提示', onPressed: () {
+            _hintTimer?.cancel();
+            setState(() => _hint = false);
+          },
             icon: const Icon(Icons.close, size: 16)),
         ]),
       ),

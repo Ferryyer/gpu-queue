@@ -23,6 +23,9 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
   private let embedded: Bool
   private var enabled: Bool
   private var dark: Bool
+  private var hideHover: Bool
+  private var hoverObservation: NSObjectProtocol?
+  private static let hoverChanged = Notification.Name("InspireFeishuHoverChanged")
   private var popupWindows: [NSWindow] = []
   private var loadingObservation: NSKeyValueObservation?
   private var activeObservation: NSObjectProtocol?
@@ -37,6 +40,7 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     embedded = args["embedded"] as? Bool ?? false
     dark = args["dark"] as? Bool ?? false
     enabled = UserDefaults.standard.object(forKey: "inspire.feishu.appearance") as? Bool ?? true
+    hideHover = UserDefaults.standard.object(forKey: "inspire.feishu.hideHover") as? Bool ?? true
     channel = FlutterMethodChannel(name: "work.inspirequeue/feishu/\(viewId)", binaryMessenger: messenger)
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .default()
@@ -88,12 +92,28 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
         self.installScript()
         self.web.evaluateJavaScript("window.InspireTaskAppearance?.setDark(\(self.dark));", completionHandler: nil)
         result(nil)
+      case "hideHover":
+        let hidden = call.arguments as? Bool ?? true
+        UserDefaults.standard.set(hidden, forKey: "inspire.feishu.hideHover")
+        // Overview and full-page documents must share the same preference.
+        NotificationCenter.default.post(name: Self.hoverChanged, object: nil,
+                                        userInfo: ["hidden": hidden])
+        result(nil)
       default: result(FlutterMethodNotImplemented)
       }
     }
     activeObservation = NotificationCenter.default.addObserver(
       forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
     ) { [weak self] _ in self?.recoverIfNeeded() }
+    hoverObservation = NotificationCenter.default.addObserver(
+      forName: Self.hoverChanged, object: nil, queue: .main
+    ) { [weak self] notification in
+      guard let self = self, let hidden = notification.userInfo?["hidden"] as? Bool else { return }
+      self.hideHover = hidden
+      self.installScript()
+      self.web.evaluateJavaScript("window.InspireTaskAppearance?.setHideHover(\(hidden));", completionHandler: nil)
+      self.sendState()
+    }
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
   override func layout() {
@@ -112,6 +132,7 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
   }
   deinit {
     if let observer = activeObservation { NotificationCenter.default.removeObserver(observer) }
+    if let observer = hoverObservation { NotificationCenter.default.removeObserver(observer) }
     channel.setMethodCallHandler(nil)
     web.stopLoading()
     popupWindows.forEach { $0.close() }
@@ -132,7 +153,7 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
   private func installScript() {
     let content = web.configuration.userContentController
     content.removeAllUserScripts()
-    let options = "window.__inspireTaskOptions={enabled:\(enabled),dark:\(dark),embedded:\(embedded)};\n"
+    let options = "window.__inspireTaskOptions={enabled:\(enabled),dark:\(dark),embedded:\(embedded),hideHover:\(hideHover)};\n"
     content.addUserScript(WKUserScript(source: options + script,
       injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }
@@ -141,6 +162,7 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     // Never send the full URL: login redirects can include authorization codes.
     channel.invokeMethod("state", arguments: [
       "loading": web.isLoading, "canGoBack": web.canGoBack, "enabled": enabled,
+      "hideHover": hideHover,
       "error": pageError as Any? ?? NSNull()
     ])
   }
