@@ -253,6 +253,147 @@ class BlockedStopTests(unittest.TestCase):
         self.assertIn(str(self.store.root/'tasks'/following['id']), calls[-1].args[1])
         self.platform.request.assert_not_called()
 
+    def crash_after_selecting_reused_gpu(self):
+        self.control.start(self.task['id'], self.task['digest'])
+        self.service.sync()
+        task = self.store.get(self.task['id'])
+        task['internal']['request_uuid'] = 'requested-A'
+        self.store.save(task)
+        # The real dispatch writes B's marker after claiming, before saving the
+        # execution identity in SQLite. No compute submit has happened yet.
+        with patch.object(self.store, 'save', side_effect=RuntimeError('fixture crash')):
+            with self.assertRaisesRegex(RuntimeError, 'fixture crash'):
+                self.service.dispatch(task, ({'id': 'reused-B'}, ['GPU-fixture']))
+        self.platform.submit_job.assert_not_called()
+        saved = self.store.get(task['id'])
+        self.assertEqual(saved['internal']['request_uuid'], 'requested-A')
+        self.assertFalse(saved['internal'].get('argv'))
+        self.assertFalse(saved['internal'].get('dispatch'))
+        marker = (self.folder/'run/dispatch.json').read_bytes()
+        self.control.start(self.following['id'], self.following['digest'])
+        self.restart()
+        self.service.sync()
+        self.stop()
+        return marker
+
+    def test_reused_allocation_marker_survives_crash_with_only_application_uuid_saved(self):
+        marker = self.crash_after_selecting_reused_gpu()
+        self.platform.resources['reused-B'] = {'id': 'reused-B', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        task = self.store.get(self.task['id'])
+        self.assertTrue(task['internal'].get('stop_confirmed'))
+        self.assertEqual(task['internal']['request_uuid'], 'reused-B')
+        self.assertEqual(task['internal']['dispatch'], 'unknown')
+        self.assertEqual((self.folder/'run/dispatch.json').read_bytes(), marker)
+        self.assert_next_dispatched()
+        self.control.delete(task['id'], task['digest'])
+        self.restart()
+        self.service.tick()
+        self.assertNotIn(task['id'], [t['id'] for t in self.control.state()['tasks']])
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+
+    def test_reused_allocation_marker_can_reconcile_unique_receipt_and_stop_proof(self):
+        self.crash_after_selecting_reused_gpu()
+        self.receipt(request='reused-B')
+        self.proof(request='reused-B', job=None)
+        self.idle_resource()
+        self.service.tick()
+        task = self.store.get(self.task['id'])
+        self.assertTrue(task['internal'].get('stop_confirmed'))
+        self.assertEqual(task['internal']['request_uuid'], 'reused-B')
+        self.assertEqual(task['internal']['job_uuid'], 'compute-job')
+        self.assert_next_dispatched()
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+
+    def test_saved_dispatch_identity_still_rejects_conflicting_allocation_marker(self):
+        self.blocked()
+        self.stop()
+        marker = read_json(self.folder/'run/dispatch.json')
+        atomic_json(self.folder/'run/dispatch.json', {**marker, 'request': 'other'})
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.platform.resources['other'] = {'id': 'other', 'status': 'closed'}
+        for evidence in [{'dispatch': 'submitting'}, {'dispatch': 'submitted'},
+                         {'dispatch': 'unknown', 'dispatched_at': time.time()},
+                         {'dispatch': 'unknown', 'job_uuid': 'compute-job'}]:
+            with self.subTest(evidence=evidence):
+                task = self.store.get(self.task['id'])
+                task['internal'] = {'request_uuid': 'original', **evidence}
+                self.store.save(task)
+                self.service.tick()
+                self.assert_waiting()
+        self.platform.submit_job.assert_not_called()
+
+    def test_closed_confirmation_later_imports_verified_completion_without_reoccupying_queue(self):
+        self.blocked()
+        self.stop()
+        atomic_json(self.folder/'run/status.json', {'state': 'completed', 'stage': 1,
+            'started_at': time.time()-10, 'updated_at': time.time(), 'finished_at': time.time(),
+            'steps': [{'state': 'completed', 'outputs': [{'name': 'result.txt', 'size': 5}]}]})
+        (self.folder/'run/step-0.log').write_text('saved final log')
+        output = self.folder/'outputs/result.txt'
+        output.parent.mkdir(); output.write_text('saved')
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        self.assert_next_dispatched()
+        task = self.store.get(self.task['id'])
+        self.assertEqual(task['public']['state'], 'stopped')  # Receipt still missing.
+        dispatch = {k: task['internal'].get(k) for k in ['request_uuid', 'job_uuid', 'dispatch', 'argv']}
+        marker = (self.folder/'run/dispatch.json').read_bytes()
+        stopped_at = next(t for t in self.control.state()['tasks'] if t['id']==task['id'])['stopped_at']
+        self.restart()
+        self.receipt()
+        self.service.tick()
+        for _ in range(2):
+            self.restart()
+            self.service.tick()
+            task = self.store.get(self.task['id'])
+            self.assertEqual(task['public']['state'], 'completed')
+            self.assertTrue(task['internal']['stop_confirmed'])
+            self.assertEqual({k: task['internal'].get(k) for k in dispatch}, dispatch)
+            self.assertEqual(task['public']['step_records'][0]['outputs'][0]['name'], 'result.txt')
+            self.assertEqual(task['public']['step_records'][0]['log'], 'saved final log')
+            shown = next(t for t in self.control.state()['tasks'] if t['id']==task['id'])
+            self.assertEqual(shown['state'], 'completed')
+            self.assertEqual(shown['stopped_at'], stopped_at)
+        self.assertEqual(output.read_text(), 'saved')
+        self.assertEqual((self.folder/'run/dispatch.json').read_bytes(), marker)
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+        self.platform.request.assert_not_called()
+
+    def test_late_live_receipt_cannot_undo_confirmed_stop(self):
+        self.blocked()
+        self.stop()
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        self.receipt()
+        atomic_json(self.folder/'run/status.json', {'state': 'running', 'stage': 0,
+            'started_at': time.time()-10, 'updated_at': time.time(), 'steps': [{'state': 'running'}]})
+        self.restart()
+        self.service.tick()
+        task = self.store.get(self.task['id'])
+        self.assertEqual(task['public']['state'], 'stopped')
+        self.assertEqual(task['public']['step_records'][0]['state'], 'stopped')
+        self.assertTrue(task['internal']['stop_confirmed'])
+        self.assertEqual(task['internal']['dispatch'], 'unknown')
+        self.assertNotIn('job_uuid', task['internal'])
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+
+    def test_stop_snapshot_replaces_stale_dispatch_phase_before_scheduler_sync(self):
+        self.blocked()
+        task = self.store.get(self.task['id'])
+        task['public']['phase'] = '等待 GPU 执行入口领取任务'
+        self.store.save(task)
+        shown = self.stop()
+        self.assertEqual(shown['state'], 'stopping')
+        self.assertIn('停止状态待核查', shown['phase'])
+        self.assertIn('原计算回执待核查', shown['phase'])
+        self.assertNotIn('等待 GPU 执行入口', shown['phase'])
+        self.assertFalse(self.store.get(task['id'])['internal'].get('stop_requested_at'))
+        self.assertEqual(self.stop()['phase'], shown['phase'])
+
     def test_blocked_stop_is_version_bound_idempotent_across_restart(self):
         self.blocked()
         with self.assertRaises(ControlError): self.control.stop(self.task['id'], 'stale-digest')

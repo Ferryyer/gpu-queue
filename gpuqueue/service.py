@@ -116,34 +116,33 @@ class Service:
         if not isinstance(marker, dict):
             return None, None
         if marker:
+            # request_uuid is also saved while applying for a GPU. Until a
+            # dispatch identity is persisted, the version-bound marker records
+            # the allocation actually selected (which can be a reused GPU).
+            dispatched = (argv or internal.get('job_uuid') or internal.get('dispatched_at') or
+                          internal.get('dispatch') in {'submitting', 'submitted'})
             if (marker.get('task') != task['id'] or marker.get('digest') != task['digest'] or
-                    request and marker.get('request') != request or
+                    dispatched and request and marker.get('request') != request or
                     argv and marker.get('argv') != argv):
                 return None, None
-            request, argv = request or marker.get('request'), argv or marker.get('argv')
+            request, argv = marker.get('request'), argv or marker.get('argv')
         return request, argv
 
     def refresh_task(self, task):
         internal, public = task['internal'], task['public']
-        # Confirmation is durable even if the original submit remains ambiguous.
-        # Never let late compute receipts restore its queue occupancy.
-        if internal.get('stop_confirmed') and not internal.get('job_uuid'):
-            if public['state'] != 'completed':
-                public.update(state='stopped', phase='任务已停止，已有产物保留')
-                public.pop('failureReason', None)
-                for step in public.get('step_records', []):
-                    if step.get('state') == 'running': step['state'] = 'stopped'
-            self.store.save(task)
+        confirmed = internal.get('stop_confirmed')
+        if confirmed and public['state'] == 'completed':
             return
         request_id, job_id = internal.get('request_uuid'), internal.get('job_uuid')
-        if internal.get('dispatch') in ['submitting', 'unknown'] and not job_id:
+        if (confirmed or internal.get('dispatch') in ['submitting', 'unknown']) and not job_id:
             matches = []
             try:
                 request_id, expected = self.original_dispatch(task)
-                if request_id:
+                if request_id and not confirmed:
                     internal['request_uuid'] = request_id
                 if request_id and expected:
-                    internal['argv'] = expected
+                    if not confirmed:
+                        internal['argv'] = expected
                     for file in self.platform.job_folder(request_id).glob('*.json'):
                         receipt = read_json(file, {})
                         if not isinstance(receipt, dict):
@@ -153,13 +152,22 @@ class Service:
             except (OSError, ValueError, TypeError):
                 matches = []
             if len(matches) == 1:
-                internal.update(request_uuid=request_id, job_uuid=matches[0], dispatch='submitted')
                 job_id = matches[0]
-                public.update(state='dispatching', phase='已核对计算回执，等待执行状态')
+                if not confirmed:
+                    internal.update(request_uuid=request_id, job_uuid=job_id, dispatch='submitted')
+                    public.update(state='dispatching', phase='已核对计算回执，等待执行状态')
             else:
-                internal['dispatch'] = 'unknown'
-                public.update(state='stopping' if internal.get('stop_requested_at') else 'blocked',
-                              failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
+                if confirmed:
+                    # Late receipts may enrich results, but cannot undo the
+                    # confirmed stop or rewrite the original dispatch record.
+                    public.update(state='stopped', phase='任务已停止，已有产物保留')
+                    public.pop('failureReason', None)
+                    for step in public.get('step_records', []):
+                        if step.get('state') == 'running': step['state'] = 'stopped'
+                else:
+                    internal['dispatch'] = 'unknown'
+                    public.update(state='stopping' if internal.get('stop_requested_at') else 'blocked',
+                                  failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
                 self.store.save(task)
                 return
         if not job_id:
@@ -169,6 +177,8 @@ class Service:
         job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
         if status:
             public.update(state=status['state'], stage=status.get('stage', 0), step_records=status.get('steps', []), progress=None)
+            if status['state'] == 'completed':
+                public.pop('failureReason', None)
             if status.get('error'):
                 public['failureReason'] = redact(status['error'])[:1200]
             if status.get('gpu_verified'):

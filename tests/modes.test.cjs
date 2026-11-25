@@ -45,8 +45,10 @@ test('blocked detail submits the existing version-bound stop action and keeps th
  assert.equal(calls[1].path,'/api/tasks/'+task.id+'/stop');
  assert.equal(calls[1].method,'POST');
  assert.deepEqual(JSON.parse(calls[1].body),{digest:task.digest});
- vm.runInContext('renderDetail()',s.context);
- assert.match(s.element('#detail').innerHTML,/正在停止/);
- assert.match(s.element('#detail').innerHTML,/停止状态待核查：原计算回执缺失/);
- assert.doesNotMatch(s.element('#detail').innerHTML,/data-detail-stop=/);
+ for(const tab of ['overview','logs','results','events']){
+  vm.runInContext(`detailTab='${tab}';renderDetail()`,s.context);
+  assert.match(s.element('#detail').innerHTML,/正在停止/);
+  assert.match(s.element('#detail').innerHTML,/停止状态待核查：原计算回执缺失/);
+  assert.doesNotMatch(s.element('#detail').innerHTML,/data-detail-stop=/);
+ }
 });

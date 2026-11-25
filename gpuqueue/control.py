@@ -45,9 +45,12 @@ class Control:
             if row['claimed_at'] and task['state'] in LIVE:
                 task['state'] = 'dispatching'
             if row['stop_at'] and task['state'] != 'completed':
+                was_stopping = task['state'] == 'stopping'
                 may_execute = (row['claimed_at'] or internal.get('dispatch') or
                                internal.get('job_uuid') or task['state'] == 'blocked')
                 task['state'] = 'stopped' if row['stopped_at'] else 'stopping' if may_execute else 'cancelled'
+                if task['state'] == 'stopping' and (not was_stopping or not task.get('phase')):
+                    task['phase'] = '停止状态待核查：'+task.get('failureReason', '原计算执行状态尚未确认')
             task.update(digest=row['digest'], approved_at=row['approved_at'], claimed_at=row['claimed_at'], position=row['position'], stop_requested_at=row['stop_at'], stopped_at=row['stopped_at'])
             tasks.append(task)
         heartbeat = db.execute("SELECT value FROM queue_meta WHERE key='heartbeat'").fetchone()
