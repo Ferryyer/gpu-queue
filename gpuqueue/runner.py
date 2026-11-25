@@ -87,10 +87,13 @@ def execute(folder):
             process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             record['pid'] = process.pid
             write(state_file, status)
+            heartbeat_at = time.monotonic()
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
             while selector.get_map():
-                for key, _ in selector.select(timeout=10):
+                # Output must not trigger a status fsync or delay the next heartbeat.
+                timeout = max(0, 10 - (time.monotonic() - heartbeat_at))
+                for key, _ in selector.select(timeout=timeout):
                     chunk = os.read(key.fileobj.fileno(), 65536)
                     if not chunk:
                         selector.unregister(key.fileobj)
@@ -99,8 +102,11 @@ def execute(folder):
                         os.replace(log, log.with_suffix('.previous.log'))
                     with log.open('ab') as stream:
                         stream.write(chunk)
-                status['updated_at'] = time.time()
-                write(state_file, status)
+                heartbeat_now = time.monotonic()
+                if heartbeat_now - heartbeat_at >= 10:
+                    status['updated_at'] = time.time()
+                    write(state_file, status)
+                    heartbeat_at = heartbeat_now
             selector.close()
             process.stdout.close()
             code = process.wait()
