@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,40 @@ class QueueTests(unittest.TestCase):
   self.script.write_text('changed')
   self.assertNotEqual(self.task()['id'],task['id'])
   self.assertIn('import pathlib',(self.store.root/'tasks'/task['id']/'code/step.py').read_text())
+ def test_concurrent_submission_reuses_existing_nonempty_snapshot(self):
+  rename=Path.rename
+  winner=[]
+  def competing_rename(staging,folder):
+   with patch.object(Path,'rename',rename):
+    winner.append(self.store.submit(self.manifest)[0])
+   self.assertTrue(any(folder.iterdir()))
+   # Pin the Linux/macOS collision errno regardless of the test filesystem.
+   raise OSError(errno.ENOTEMPTY,'Directory not empty',str(folder))
+  with patch.object(Path,'rename',competing_rename):
+   task,_=self.store.submit(self.manifest)
+  self.assertEqual(task,winner[0])
+  self.assertEqual(self.store.tasks(),[task])
+  self.assertIsNone(task['internal']['approved_at'])
+  folder=self.store.root/'tasks'/task['id']
+  self.assertEqual((folder/'code/step.py').read_text(),self.script.read_text())
+  self.assertEqual(list(folder.parent.glob('.prepare-*')),[])
+ def test_submission_propagates_unexpected_rename_errors(self):
+  with patch.object(Path,'rename',side_effect=PermissionError(errno.EACCES,'denied')):
+   with self.assertRaises(PermissionError):self.store.submit(self.manifest)
+  self.assertEqual(self.store.tasks(),[])
+  self.assertEqual(list((self.store.root/'tasks').iterdir()),[])
+ def test_snapshot_source_paths_require_code_placeholder(self):
+  data=self.project/'data.txt';data.write_text('input data')
+  home_script='{home}/'+str(self.script.resolve().relative_to(HOME))
+  for argument in (str(self.script.resolve()),'{project}/step.py',home_script):
+   with self.subTest(rejected=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    with self.assertRaisesRegex(ValueError,'运行代码请引用'):normalize(self.manifest)
+  for argument in ('{code}/step.py','{project}/data.txt'):
+   with self.subTest(accepted=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    doc,_=normalize(self.manifest)
+    self.assertEqual(doc['steps'][0]['argv'][1],argument)
  def test_unapproved_service_does_not_call_gpu_or_lark(self):
   self.task();platform=Mock();platform.resources={}
   service=Service({},self.store,platform)
@@ -91,6 +126,94 @@ class QueueTests(unittest.TestCase):
   job='22222222-2222-4222-8222-222222222222';atomic_json(adapter.job_folder(request)/(job+'.json'),{'argv':argv})
   adapter.submit_job=Mock();service=Service({},self.store,adapter);service.refresh_task(task)
   self.assertEqual(task['internal']['job_uuid'],job);adapter.submit_job.assert_not_called()
+
+ def execution_service(self, state='running', age=181, job_state='finished'):
+  self.manifest['submission_key']=f'{state}-{age}-{job_state}'
+  task=self.task();folder=self.store.root/'tasks'/task['id']
+  request='11111111-1111-4111-8111-111111111111';job='22222222-2222-4222-8222-222222222222'
+  task['internal'].update(approved_at='browser',dispatch='submitted',request_uuid=request,job_uuid=job,dispatched_at=900)
+  task['public']['state']='execution_unknown';self.store.save(task)
+  status={'state':state,'started_at':900,'updated_at':1000-age,'stage':0,'steps':[{'name':'first','state':state}]}
+  if state in ['completed','failed']:status['finished_at']=950
+  atomic_json(folder/'run/status.json',status)
+  (folder/'run/step-0.log').write_text('existing step log\n')
+  (folder/'outputs/one.json').write_text('{"checkpoint":true}')
+  adapter=Markflow(self.store,{'home':str(self.root)})
+  adapter.resources={request:{'id':request,'status':'online','type':'H卡离线','telemetry':{'at':1000,'gpus':[{'uuid':'GPU-test','total_mb':81920,'used_mb':1}],'apps':[]}}}
+  job_file=adapter.job_folder(request)/job/'status.json'
+  if job_state is not None:atomic_json(job_file,{'state':job_state})
+  else:job_file.unlink(missing_ok=True)
+  adapter.refresh=Mock();adapter.request=Mock();adapter.submit_job=Mock()
+  return Service({},self.store,adapter),task,folder
+
+ def test_stale_execution_with_finished_job_is_interrupted_and_preserves_files(self):
+  for state in ['starting','running']:
+   for job_state in ['finished','failed']:
+    with self.subTest(state=state,job_state=job_state):
+     service,task,folder=self.execution_service(state=state,job_state=job_state)
+     before={p:p.read_bytes() for p in [folder/'run/status.json',folder/'run/step-0.log',folder/'outputs/one.json']}
+     with patch('gpuqueue.service.time.time',return_value=1000):
+      service.refresh_task(task)
+      service.refresh_task(self.store.get(task['id']))
+     saved=self.store.get(task['id'])
+     self.assertEqual(saved['public']['state'],'interrupted')
+     self.assertIn('执行进程已退出',saved['public']['failureReason'])
+     self.assertIn('未自动重跑',saved['public']['failureReason'])
+     self.assertEqual(saved['public']['step_records'][0]['log'],'existing step log\n')
+     self.assertEqual(before,{p:p.read_bytes() for p in before})
+     self.assertEqual(saved['internal']['job_uuid'],task['internal']['job_uuid'])
+     service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_interrupted_execution_no_longer_blocks_next_approved_task(self):
+  service,task,folder=self.execution_service()
+  self.manifest['submission_key']='next'
+  pending=self.task();pending['internal'].update(approved_at='browser',position=1);pending['public']['state']='queued';self.store.save(pending)
+  service.dispatch=Mock()
+  with patch('gpuqueue.service.time.time',return_value=1000):service.tick()
+  self.assertEqual(self.store.get(task['id'])['public']['state'],'interrupted')
+  service.dispatch.assert_called_once()
+  self.assertEqual(service.dispatch.call_args.args[0]['id'],pending['id'])
+  self.assertEqual(service.dispatch.call_args.args[1][1],['GPU-test'])
+  service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_unreadable_job_receipt_with_stale_heartbeat_remains_unknown(self):
+  for error in [PermissionError('fixture denied'),json.JSONDecodeError('fixture incomplete','{',1)]:
+   with self.subTest(error=type(error).__name__):
+    service,task,folder=self.execution_service()
+    job_file=service.platform.job_folder(task['internal']['request_uuid'])/task['internal']['job_uuid']/'status.json'
+    def read(path,default=None):
+     if path==job_file:raise error
+     return read_json(path,default)
+    with patch('gpuqueue.service.read_json',side_effect=read),patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+    self.assertEqual(task['public']['state'],'execution_unknown')
+    service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_stale_execution_with_live_or_missing_job_remains_unknown(self):
+  for job_state in ['starting','running',None]:
+   with self.subTest(job_state=job_state):
+    service,task,folder=self.execution_service(job_state=job_state)
+    with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+    self.assertEqual(task['public']['state'],'execution_unknown')
+    pending=self.task()
+    self.assertIsNone(service.platform.select(pending,[task])[0])
+    service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_fresh_heartbeat_keeps_runner_state_even_if_job_has_ended(self):
+  for state in ['starting','running']:
+   for age in [0,180]:
+    with self.subTest(state=state,age=age):
+     service,task,folder=self.execution_service(state=state,age=age)
+     with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+     self.assertEqual(task['public']['state'],state)
+
+ def test_terminal_runner_states_are_preserved_with_stale_heartbeat(self):
+  for state in ['completed','failed']:
+   for job_state in ['finished','failed']:
+    with self.subTest(state=state,job_state=job_state):
+     service,task,folder=self.execution_service(state=state,job_state=job_state)
+     with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+     self.assertEqual(task['public']['state'],state)
+     self.assertTrue(task['internal']['finished_recorded'])
 
  def test_each_successful_dispatch_starts_sampling_after_compute_receipt_is_saved(self):
   task=self.task();task['internal']['approved_at']='browser approval';self.store.save(task)
