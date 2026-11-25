@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,40 @@ class QueueTests(unittest.TestCase):
   self.script.write_text('changed')
   self.assertNotEqual(self.task()['id'],task['id'])
   self.assertIn('import pathlib',(self.store.root/'tasks'/task['id']/'code/step.py').read_text())
+ def test_concurrent_submission_reuses_existing_nonempty_snapshot(self):
+  rename=Path.rename
+  winner=[]
+  def competing_rename(staging,folder):
+   with patch.object(Path,'rename',rename):
+    winner.append(self.store.submit(self.manifest)[0])
+   self.assertTrue(any(folder.iterdir()))
+   # Pin the Linux/macOS collision errno regardless of the test filesystem.
+   raise OSError(errno.ENOTEMPTY,'Directory not empty',str(folder))
+  with patch.object(Path,'rename',competing_rename):
+   task,_=self.store.submit(self.manifest)
+  self.assertEqual(task,winner[0])
+  self.assertEqual(self.store.tasks(),[task])
+  self.assertIsNone(task['internal']['approved_at'])
+  folder=self.store.root/'tasks'/task['id']
+  self.assertEqual((folder/'code/step.py').read_text(),self.script.read_text())
+  self.assertEqual(list(folder.parent.glob('.prepare-*')),[])
+ def test_submission_propagates_unexpected_rename_errors(self):
+  with patch.object(Path,'rename',side_effect=PermissionError(errno.EACCES,'denied')):
+   with self.assertRaises(PermissionError):self.store.submit(self.manifest)
+  self.assertEqual(self.store.tasks(),[])
+  self.assertEqual(list((self.store.root/'tasks').iterdir()),[])
+ def test_snapshot_source_paths_require_code_placeholder(self):
+  data=self.project/'data.txt';data.write_text('input data')
+  home_script='{home}/'+str(self.script.resolve().relative_to(HOME))
+  for argument in (str(self.script.resolve()),'{project}/step.py',home_script):
+   with self.subTest(rejected=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    with self.assertRaisesRegex(ValueError,'运行代码请引用'):normalize(self.manifest)
+  for argument in ('{code}/step.py','{project}/data.txt'):
+   with self.subTest(accepted=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    doc,_=normalize(self.manifest)
+    self.assertEqual(doc['steps'][0]['argv'][1],argument)
  def test_unapproved_service_does_not_call_gpu_or_lark(self):
   self.task();platform=Mock();platform.resources={}
   service=Service({},self.store,platform)
