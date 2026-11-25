@@ -169,7 +169,8 @@ while True:time.sleep(.1)
         task['internal'].update(approved_at='browser', dispatch='submitted',
                                 request_uuid='original-request', job_uuid='original-compute')
         if supervised:
-            task['internal']['argv'] = ['python3', 'supervise', str(self.folder)]
+            task['internal']['argv'] = ['/usr/bin/python3', '-I', str(self.folder/'run/stop-control.py'),
+                                        'supervise', str(self.folder)]
         self.store.save(task)
         self.jobs = self.root/'jobs'
         self.jobs.mkdir()
@@ -711,19 +712,21 @@ while True:time.sleep(.1)
         self.stop_dispatch_fixture()
         self.poll_stop(1000)
         original = self.store.get(self.task['id'])
-        for branch in ['completed', 'cancelled', 'not_dispatched', 'allocation_closed']:
+        cases = {'completed': 'completed', 'cancelled': 'cancelled',
+                 'missing_compute_receipt': 'stopping', 'allocation_closed': 'stopped'}
+        for branch, expected in cases.items():
             with self.subTest(branch=branch):
                 task = json.loads(json.dumps(original))
                 self.platform.resources = {}
                 if branch in ['completed', 'cancelled']:
                     task['public']['state'] = branch
-                elif branch == 'not_dispatched':
+                elif branch == 'missing_compute_receipt':
                     task['internal'].update(job_uuid=None, dispatch=None)
                 else:
                     self.platform.resources = {'original-request': {'status': 'closed'}}
                 self.clock.return_value = 1060
                 self.service.process_stop(task)
                 self.assertEqual(self.platform.submit_job.call_count, 1)
-                self.assertEqual(task['public']['state'], branch if branch in ['completed', 'cancelled'] else 'stopped')
+                self.assertEqual(task['public']['state'], expected)
 
 if __name__=='__main__':unittest.main()

@@ -54,6 +54,18 @@ class TaskDeleteTests(unittest.TestCase):
                 self.control.delete(self.ids[0], '0'*64)
         self.assertEqual(len(self.control.state()['tasks']), 3)
 
+    def test_completed_ambiguous_dispatch_still_requires_durable_stop_confirmation(self):
+        self.control.start(self.ids[0], '0'*64)
+        self.control.stop(self.ids[0], '0'*64)
+        # A snapshot flag alone cannot authorize deletion; controls is authority.
+        self.state(0, 'completed', dispatch='unknown', stop_confirmed=True)
+        with self.assertRaises(ControlError): self.control.delete(self.ids[0], '0'*64)
+        state = self.control.state()
+        with self.assertRaises(ControlError): self.control.cleanup([self.ids[0]], state['revision'])
+        self.control.confirm_stop(self.ids[0], '0'*64)
+        self.control.delete(self.ids[0], '0'*64)
+        self.assertNotIn(self.ids[0], [t['id'] for t in self.control.state()['tasks']])
+
     def test_cleanup_only_removes_the_confirmed_completed_and_cancelled_ids(self):
         self.state(0, 'completed')
         self.state(1, 'cancelled')

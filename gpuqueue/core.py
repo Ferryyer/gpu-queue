@@ -1,5 +1,6 @@
 import contextlib
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -144,6 +145,8 @@ def normalize(manifest, source='Codex'):
         if any(k in env for k in ['CUDA_VISIBLE_DEVICES', 'GPUQ_OUTPUT_DIR', 'GPUQ_TASK_ID']):
             raise ValueError('GPU 设备与任务目录由执行器指定')
         for a in argv[1:]:
+            # Match the project/home placeholders expanded by the runner.
+            a = a.replace('{project}', str(project)).replace('{home}', str(HOME))
             if a.startswith(str(project) + '/') and Path(a).is_file() and str(Path(a).relative_to(project)) in files:
                 raise ValueError('运行代码请引用 {code}/文件，避免执行 Agent 后续修改的源文件')
         normalized_steps.append({'name': raw.get('name') or f'步骤 {index + 1}', 'argv': argv, 'cwd': raw.get('cwd', '{code}'), 'outputs': outputs, 'env': env})
@@ -190,11 +193,26 @@ class Store:
             row = connection.execute('SELECT value FROM meta WHERE key=?', (key,)).fetchone()
             return json.loads(row[0]) if row else None
 
+    def _submitted_task(self, connection, task_id):
+        # Called inside a write transaction so deletion cannot commit between
+        # checking the tombstone and deciding whether submission succeeded.
+        row = connection.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone()
+        if not row:
+            return None
+        # The CLI can submit before Control has initialized its tables.
+        if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_deletions'").fetchone():
+            if connection.execute('SELECT 1 FROM task_deletions WHERE id=?', (task_id,)).fetchone():
+                raise ValueError('这一版任务已删除，请修改 submission_key 或清单内容后重新提交')
+        return self.decode(row)
+
     def submit(self, manifest, source='Codex'):
         doc, digest = normalize(manifest, source)
         task_id = 'GQ-' + digest[:16]
-        if self.get(task_id):
-            return self.get(task_id), False
+        with self.connect() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            existing = self._submitted_task(connection, task_id)
+            if existing:
+                return existing, False
         folder = self.root / 'tasks' / task_id
         folder.parent.mkdir(exist_ok=True, mode=0o700)
         staging = Path(tempfile.mkdtemp(dir=folder.parent, prefix='.prepare-'))
@@ -213,12 +231,17 @@ class Store:
             (staging / 'run').mkdir(mode=0o700)
             try:
                 staging.rename(folder)
-            except FileExistsError:
-                pass
+            except OSError as error:
+                # Filesystems report a competing nonempty directory as either
+                # EEXIST or ENOTEMPTY. Let the final transaction decide whether
+                # the winning submission is still visible or has been deleted.
+                if error.errno not in {errno.EEXIST, errno.ENOTEMPTY} or not folder.is_dir():
+                    raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         public = {'id': task_id, 'name': doc['title'], 'description': doc['description'], 'project': Path(doc['project']).name, 'agent': source, 'state': 'ready', 'stage': 0, 'progress': None, 'elapsed': '尚未运行', 'version': digest[:12], 'memory': doc['resources']['memory_gb'], 'resources': doc['resources'], 'steps': [s['name'] for s in doc['steps']], 'step_records': [], 'events': ['代码和配置已固定版本', 'CPU 准备检查通过，等待你在网页点击开始'], 'created_at': now(), 'checks': ['代码快照已校验', '输入路径已检查', '执行入口已检查', 'GPU 兼容性将在运行时验证']}
         task = {'id': task_id, 'digest': digest, 'doc': doc, 'public': public, 'internal': {'approved_at': None, 'position': 0, 'request_uuid': None, 'job_uuid': None, 'dispatch': None}}
         with self.connect() as connection:
-            connection.execute('INSERT OR IGNORE INTO tasks VALUES (?,?,?,?,?)', (task_id, digest, canonical(doc), canonical(public), canonical(task['internal'])))
-        return self.get(task_id), True
+            connection.execute('BEGIN IMMEDIATE')
+            inserted = connection.execute('INSERT OR IGNORE INTO tasks VALUES (?,?,?,?,?)', (task_id, digest, canonical(doc), canonical(public), canonical(task['internal'])))
+            return self._submitted_task(connection, task_id), inserted.rowcount == 1
