@@ -39,12 +39,15 @@ class Control:
         import json
         for row in rows:
             task = json.loads(row['public'])
+            internal = json.loads(row['internal'])
             if row['approved_at'] and task['state'] == 'ready':
                 task['state'] = 'queued'
             if row['claimed_at'] and task['state'] in LIVE:
                 task['state'] = 'dispatching'
             if row['stop_at'] and task['state'] != 'completed':
-                task['state'] = 'cancelled' if not row['claimed_at'] else 'stopped' if row['stopped_at'] else 'stopping'
+                may_execute = (row['claimed_at'] or internal.get('dispatch') or
+                               internal.get('job_uuid') or task['state'] == 'blocked')
+                task['state'] = 'stopped' if row['stopped_at'] else 'stopping' if may_execute else 'cancelled'
             task.update(digest=row['digest'], approved_at=row['approved_at'], claimed_at=row['claimed_at'], position=row['position'], stop_requested_at=row['stop_at'], stopped_at=row['stopped_at'])
             tasks.append(task)
         heartbeat = db.execute("SELECT value FROM queue_meta WHERE key='heartbeat'").fetchone()
@@ -78,7 +81,8 @@ class Control:
         import json
         row = db.execute('SELECT internal FROM tasks WHERE id=?', (task['id'],)).fetchone()
         internal = json.loads(row['internal'])
-        if internal.get('dispatch') in {'submitting', 'unknown'}:
+        if (internal.get('dispatch') in {'submitting', 'unknown'} and not
+                (task['state'] == 'stopped' and task['stop_requested_at'] and task['stopped_at'])):
             raise ControlError('执行状态尚未确认，不能删除此任务')
         if task['state'] not in DELETABLE and not (
                 task['state'] == 'ready' and not task['approved_at'] and not task['claimed_at']):
@@ -208,7 +212,7 @@ class Control:
                 raise ControlError('任务不存在', 404)
             if task['digest'] != digest:
                 raise ControlError('任务版本已变化，请刷新后重试')
-            if task['state'] in TERMINAL:
+            if task['state'] in TERMINAL - {'blocked'}:
                 return state
             at = task['stop_requested_at'] or now()
             if not task['stop_requested_at']:
