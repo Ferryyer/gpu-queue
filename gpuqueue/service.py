@@ -118,7 +118,11 @@ class Service:
             return
         folder = self.store.root/'tasks'/task['id']
         status = read_json(folder/'run/status.json')
-        job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
+        try:
+            job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
+        except (OSError, ValueError):
+            # An unreadable receipt is not evidence that execution has ended.
+            job_status = {}
         if status:
             public.update(state=status['state'], stage=status.get('stage', 0), step_records=status.get('steps', []), progress=None)
             if status.get('error'):
@@ -126,7 +130,10 @@ class Service:
             if status.get('gpu_verified'):
                 public['checks'][-1] = 'GPU 设备已核验'
             if status['state'] in ['starting', 'running'] and time.time()-status.get('updated_at', 0)>180:
-                public.update(state='execution_unknown', failureReason='执行心跳已中断，正在核查原任务；不会重新申请或重复运行')
+                if job_status.get('state') in ['finished', 'failed']:
+                    public.update(state='interrupted', phase='任务中断，已有产物和日志保留', failureReason='执行进程已退出，未自动重跑；已有产物和日志保留')
+                else:
+                    public.update(state='execution_unknown', failureReason='执行心跳已中断，正在核查原任务；不会重新申请或重复运行')
             end = status.get('finished_at', time.time())
             public['elapsed'] = str(max(0, int((end-status['started_at'])/60)))+' 分钟'
             for index, step in enumerate(public['step_records']):
