@@ -13,6 +13,7 @@ import uuid
 from .core import HOME, atomic_json, read_json, now
 from .feishu import FeishuAuthError, PlatformError, auth_error, command, verify_user
 from .serverbox import publish as publish_serverbox
+from .resources import record_terminal
 
 FORM = 'shrcn3qH6A3KPzzS07UzvgAUAkh'
 TRUSTED_SENDER = 'cli_aa59fbf9c878dd0b'
@@ -96,6 +97,8 @@ class Markflow:
         self.record_auth()
 
     def persist(self):
+        for resource in self.resources.values():
+            record_terminal(resource)
         self.store.metadata('resources', self.resources)
 
     @staticmethod
@@ -136,6 +139,7 @@ class Markflow:
                 resource.update(type=fields.get('资源类型'), gpus=fields.get('卡数'), purpose=fields.get('用途', '')[:180])
                 if local.get('state') in ['closed', 'failed', 'rejected', 'cancelled']:
                     resource['status'] = 'closed' if local.get('state') == 'closed' else 'failed'
+                    record_terminal(resource, local.get('closed_recorded_at'), local.get('closed_recorded_utc'))
                 # A submission receipt is historical, not evidence that a
                 # previously online allocation is applying again after failure.
                 resource['recorded_phase'] = local.get('state', 'unknown')
@@ -173,6 +177,12 @@ class Markflow:
                 resource['status'] = 'closed'
             elif title.startswith('本次GPU申请失败') or re.match(r'^GPU.*(申请失败|启动失败|申请被拒)', title):
                 resource['status'] = 'failed'
+            # Only the authenticated, matching terminal notice can date this
+            # transition. Feishu's numeric create_time is epoch milliseconds.
+            stamp = message.get('update_time' if message.get('updated') else 'create_time')
+            if type(stamp) in (int, float) or isinstance(stamp, str) and stamp.isdecimal():
+                stamp = float(stamp) / 1000
+            record_terminal(resource, stamp)
 
     def job_folder(self, request_id):
         return self.home/'.local/state/markflow-gpu'/request_id/'jobs'
@@ -253,7 +263,7 @@ class Markflow:
             resource['probe_checked'] = 0
             return
 
-    def refresh_probe(self, resource):
+    def refresh_probe(self, resource, *, active=True):
         if resource['status'] not in ['ready', 'online'] and not (
                 resource['status'] == 'unknown' and (resource.get('probe') or
                     (resource.get('monitor') or {}).get('state') == 'sampling')):
@@ -311,7 +321,8 @@ class Markflow:
         # With a slow platform poll, adding another 30 seconds here made a
         # healthy allocation repeatedly cross the 90-second freshness limit.
         last_sample = (resource.get('telemetry') or {}).get('at', resource.get('probe_checked', 0))
-        if (not resource.get('probe_checked') or time.time()-last_sample >= 10
+        interval = 60 if not active and resource['status'] in ['ready', 'online'] else 10
+        if (not resource.get('probe_checked') or time.time()-last_sample >= interval
                 or resource.get('sample_requested_at', 0) > last_sample):
             job = self.submit_job(resource['id'], ['/usr/bin/python3', '-c', PROBE_SCRIPT], self.home)
             resource['probe'] = {'job': job, 'at': time.time()}
@@ -353,7 +364,8 @@ class Markflow:
             for resource in resources:
                 # A failed notification query must not prevent reading a probe
                 # already completed in shared HOME, or skip other allocations.
-                for refresh in (self.recover_active_probe, self.refresh_probe):
+                for refresh in (self.recover_active_probe,
+                                lambda r: self.refresh_probe(r, active=active)):
                     try:
                         refresh(resource)
                     except (PlatformError, OSError, subprocess.SubprocessError) as error:

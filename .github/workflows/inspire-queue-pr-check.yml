@@ -33,4 +33,4 @@ jobs:
       - name: Run isolated queue unit tests
         run: |
           mkdir -p "$HOME/scratch"
-          python3 -m unittest discover -s tests -p test_gpuqueue.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
