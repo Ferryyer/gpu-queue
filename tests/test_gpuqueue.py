@@ -1,3 +1,4 @@
+import errno
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,40 @@ class QueueTests(unittest.TestCase):
   self.script.write_text('changed')
   self.assertNotEqual(self.task()['id'],task['id'])
   self.assertIn('import pathlib',(self.store.root/'tasks'/task['id']/'code/step.py').read_text())
+ def test_concurrent_submission_reuses_existing_nonempty_snapshot(self):
+  rename=Path.rename
+  winner=[]
+  def competing_rename(staging,folder):
+   with patch.object(Path,'rename',rename):
+    winner.append(self.store.submit(self.manifest)[0])
+   self.assertTrue(any(folder.iterdir()))
+   # Pin the Linux/macOS collision errno regardless of the test filesystem.
+   raise OSError(errno.ENOTEMPTY,'Directory not empty',str(folder))
+  with patch.object(Path,'rename',competing_rename):
+   task,_=self.store.submit(self.manifest)
+  self.assertEqual(task,winner[0])
+  self.assertEqual(self.store.tasks(),[task])
+  self.assertIsNone(task['internal']['approved_at'])
+  folder=self.store.root/'tasks'/task['id']
+  self.assertEqual((folder/'code/step.py').read_text(),self.script.read_text())
+  self.assertEqual(list(folder.parent.glob('.prepare-*')),[])
+ def test_submission_propagates_unexpected_rename_errors(self):
+  with patch.object(Path,'rename',side_effect=PermissionError(errno.EACCES,'denied')):
+   with self.assertRaises(PermissionError):self.store.submit(self.manifest)
+  self.assertEqual(self.store.tasks(),[])
+  self.assertEqual(list((self.store.root/'tasks').iterdir()),[])
+ def test_snapshot_source_paths_require_code_placeholder(self):
+  data=self.project/'data.txt';data.write_text('input data')
+  home_script='{home}/'+str(self.script.resolve().relative_to(HOME))
+  for argument in (str(self.script.resolve()),'{project}/step.py',home_script):
+   with self.subTest(rejected=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    with self.assertRaisesRegex(ValueError,'运行代码请引用'):normalize(self.manifest)
+  for argument in ('{code}/step.py','{project}/data.txt'):
+   with self.subTest(accepted=argument):
+    self.manifest['steps'][0]['argv'][1]=argument
+    doc,_=normalize(self.manifest)
+    self.assertEqual(doc['steps'][0]['argv'][1],argument)
  def test_unapproved_service_does_not_call_gpu_or_lark(self):
   self.task();platform=Mock();platform.resources={}
   service=Service({},self.store,platform)
@@ -91,6 +126,94 @@ class QueueTests(unittest.TestCase):
   job='22222222-2222-4222-8222-222222222222';atomic_json(adapter.job_folder(request)/(job+'.json'),{'argv':argv})
   adapter.submit_job=Mock();service=Service({},self.store,adapter);service.refresh_task(task)
   self.assertEqual(task['internal']['job_uuid'],job);adapter.submit_job.assert_not_called()
+
+ def execution_service(self, state='running', age=181, job_state='finished'):
+  self.manifest['submission_key']=f'{state}-{age}-{job_state}'
+  task=self.task();folder=self.store.root/'tasks'/task['id']
+  request='11111111-1111-4111-8111-111111111111';job='22222222-2222-4222-8222-222222222222'
+  task['internal'].update(approved_at='browser',dispatch='submitted',request_uuid=request,job_uuid=job,dispatched_at=900)
+  task['public']['state']='execution_unknown';self.store.save(task)
+  status={'state':state,'started_at':900,'updated_at':1000-age,'stage':0,'steps':[{'name':'first','state':state}]}
+  if state in ['completed','failed']:status['finished_at']=950
+  atomic_json(folder/'run/status.json',status)
+  (folder/'run/step-0.log').write_text('existing step log\n')
+  (folder/'outputs/one.json').write_text('{"checkpoint":true}')
+  adapter=Markflow(self.store,{'home':str(self.root)})
+  adapter.resources={request:{'id':request,'status':'online','type':'H卡离线','telemetry':{'at':1000,'gpus':[{'uuid':'GPU-test','total_mb':81920,'used_mb':1}],'apps':[]}}}
+  job_file=adapter.job_folder(request)/job/'status.json'
+  if job_state is not None:atomic_json(job_file,{'state':job_state})
+  else:job_file.unlink(missing_ok=True)
+  adapter.refresh=Mock();adapter.request=Mock();adapter.submit_job=Mock()
+  return Service({},self.store,adapter),task,folder
+
+ def test_stale_execution_with_finished_job_is_interrupted_and_preserves_files(self):
+  for state in ['starting','running']:
+   for job_state in ['finished','failed']:
+    with self.subTest(state=state,job_state=job_state):
+     service,task,folder=self.execution_service(state=state,job_state=job_state)
+     before={p:p.read_bytes() for p in [folder/'run/status.json',folder/'run/step-0.log',folder/'outputs/one.json']}
+     with patch('gpuqueue.service.time.time',return_value=1000):
+      service.refresh_task(task)
+      service.refresh_task(self.store.get(task['id']))
+     saved=self.store.get(task['id'])
+     self.assertEqual(saved['public']['state'],'interrupted')
+     self.assertIn('执行进程已退出',saved['public']['failureReason'])
+     self.assertIn('未自动重跑',saved['public']['failureReason'])
+     self.assertEqual(saved['public']['step_records'][0]['log'],'existing step log\n')
+     self.assertEqual(before,{p:p.read_bytes() for p in before})
+     self.assertEqual(saved['internal']['job_uuid'],task['internal']['job_uuid'])
+     service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_interrupted_execution_no_longer_blocks_next_approved_task(self):
+  service,task,folder=self.execution_service()
+  self.manifest['submission_key']='next'
+  pending=self.task();pending['internal'].update(approved_at='browser',position=1);pending['public']['state']='queued';self.store.save(pending)
+  service.dispatch=Mock()
+  with patch('gpuqueue.service.time.time',return_value=1000):service.tick()
+  self.assertEqual(self.store.get(task['id'])['public']['state'],'interrupted')
+  service.dispatch.assert_called_once()
+  self.assertEqual(service.dispatch.call_args.args[0]['id'],pending['id'])
+  self.assertEqual(service.dispatch.call_args.args[1][1],['GPU-test'])
+  service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_unreadable_job_receipt_with_stale_heartbeat_remains_unknown(self):
+  for error in [PermissionError('fixture denied'),json.JSONDecodeError('fixture incomplete','{',1)]:
+   with self.subTest(error=type(error).__name__):
+    service,task,folder=self.execution_service()
+    job_file=service.platform.job_folder(task['internal']['request_uuid'])/task['internal']['job_uuid']/'status.json'
+    def read(path,default=None):
+     if path==job_file:raise error
+     return read_json(path,default)
+    with patch('gpuqueue.service.read_json',side_effect=read),patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+    self.assertEqual(task['public']['state'],'execution_unknown')
+    service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_stale_execution_with_live_or_missing_job_remains_unknown(self):
+  for job_state in ['starting','running',None]:
+   with self.subTest(job_state=job_state):
+    service,task,folder=self.execution_service(job_state=job_state)
+    with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+    self.assertEqual(task['public']['state'],'execution_unknown')
+    pending=self.task()
+    self.assertIsNone(service.platform.select(pending,[task])[0])
+    service.platform.request.assert_not_called();service.platform.submit_job.assert_not_called()
+
+ def test_fresh_heartbeat_keeps_runner_state_even_if_job_has_ended(self):
+  for state in ['starting','running']:
+   for age in [0,180]:
+    with self.subTest(state=state,age=age):
+     service,task,folder=self.execution_service(state=state,age=age)
+     with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+     self.assertEqual(task['public']['state'],state)
+
+ def test_terminal_runner_states_are_preserved_with_stale_heartbeat(self):
+  for state in ['completed','failed']:
+   for job_state in ['finished','failed']:
+    with self.subTest(state=state,job_state=job_state):
+     service,task,folder=self.execution_service(state=state,job_state=job_state)
+     with patch('gpuqueue.service.time.time',return_value=1000):service.refresh_task(task)
+     self.assertEqual(task['public']['state'],state)
+     self.assertTrue(task['internal']['finished_recorded'])
 
  def test_each_successful_dispatch_starts_sampling_after_compute_receipt_is_saved(self):
   task=self.task();task['internal']['approved_at']='browser approval';self.store.save(task)
@@ -160,6 +283,290 @@ class QueueTests(unittest.TestCase):
   task=self.task();task['doc']['resources']['memory_gb']=80
   adapter,resource=self.h100_adapter();running=self.task();running['internal']['dispatched_at']=time.time()-600
   self.assertIsNone(adapter.select(task,[running])[0])
+
+class ServiceRefreshTests(unittest.TestCase):
+ def setUp(self):
+  self.temp = tempfile.TemporaryDirectory()
+  self.addCleanup(self.temp.cleanup)
+  self.queue('queue')
+
+ def queue(self, name):
+  self.store = Store(Path(self.temp.name)/name)
+  self.control = Control(self.store)
+  self.platform = Mock()
+  self.platform.resources = {}
+  self.platform.job_folder.return_value = self.store.root/'jobs'
+  self.service = Service({}, self.store, self.platform)
+
+ def task(self, state, **internal):
+  index = len(self.store.tasks())+1
+  task_id = 'GQ-'+str(index).zfill(16)
+  public = {'id':task_id, 'state':state, 'events':[], 'checks':['pending']}
+  internal = {'position':0, **internal}
+  with self.store.connect() as db:
+   db.execute('INSERT INTO tasks VALUES (?,?,?,?,?)',
+              (task_id, str(index)*64, canonical({'project':self.temp.name}), canonical(public), canonical(internal)))
+  return self.store.get(task_id)
+
+ def status(self, task, state='running', **extra):
+  atomic_json(self.store.root/'tasks'/task['id']/'run/status.json',
+              {'state':state, 'started_at':1000, 'updated_at':1000, 'steps':[], **extra})
+
+ def test_tick_skips_terminal_files_and_saves_but_refreshes_active_task(self):
+  history = [self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted', terminal_reconciled=True)
+             for state in ['completed', 'failed', 'interrupted', 'cancelled', 'stopped']]
+  deleted = self.task('completed', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.control.delete(deleted['id'], deleted['digest'])
+  history.append(deleted)
+  active = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.status(active)
+  original_read = read_json
+  def read_active_only(path, *args):
+   self.assertFalse(any(t['id'] in Path(path).parts for t in history))
+   return original_read(path, *args)
+  with patch('gpuqueue.service.read_json', side_effect=read_active_only), \
+       patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.tick()
+  self.assertEqual([call.args[0]['id'] for call in save.call_args_list], [active['id']])
+  self.assertEqual(self.store.get(active['id'])['public']['state'], 'running')
+  self.platform.refresh.assert_called_once_with(active=True)
+  self.platform.submit_job.assert_not_called()
+
+ def test_unchanged_active_refresh_and_both_cycle_syncs_do_not_save(self):
+  task = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.task('ready')
+  self.status(task, steps=[{'state':'running'}])
+  log = self.store.root/'tasks'/task['id']/'run/step-0.log'
+  log.write_text('first log')
+  with patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.cycle()
+   with patch.object(self.store, 'save', wraps=self.store.save) as save:
+    self.service.cycle()
+   save.assert_not_called()
+   log.write_text('new log')
+   with patch.object(self.store, 'save', wraps=self.store.save) as save:
+    self.service.tick()
+   save.assert_called_once()
+  self.assertEqual(self.store.get(task['id'])['public']['step_records'][0]['log'], 'new log')
+
+ def test_sync_saves_browser_changes_once_and_rejects_stale_digest(self):
+  task = self.task('ready')
+  self.control.start(task['id'], task['digest'])
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.sync()
+   self.service.sync()
+  save.assert_called_once()
+  saved = self.store.get(task['id'])
+  self.assertTrue(saved['internal']['approved_at'])
+  self.assertEqual(saved['public']['state'], 'queued')
+  self.assertEqual(len(saved['public']['events']), 1)
+  self.service.remote = Mock(return_value={'revision':2, 'tasks':[
+   {'id':task['id'], 'digest':'stale', 'position':99, 'stop_requested_at':'later'}]})
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.sync()
+  save.assert_not_called()
+  self.assertEqual(self.store.get(task['id']), saved)
+
+ def test_blocked_and_terminal_ambiguous_dispatch_reconcile_late_receipt(self):
+  for state, dispatch in [('blocked', 'unknown'), ('failed', 'submitting')]:
+   with self.subTest(state=state):
+    argv = ['unique-runner', state]
+    task = self.task(state, request_uuid='r', dispatch=dispatch, argv=argv)
+    self.service.tick()  # No receipt yet; retain the uncertain submission.
+    self.assertEqual(self.store.get(task['id'])['internal']['dispatch'], 'unknown')
+    atomic_json(self.platform.job_folder('r')/(state+'.json'), {'argv':argv})
+    self.status(task, updated_at=time.time())
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['internal']['job_uuid'], state)
+    self.assertEqual(saved['public']['state'], 'running')
+  self.platform.request.assert_not_called()
+  self.platform.submit_job.assert_not_called()
+
+ def test_unchanged_unresolved_receipt_does_not_save(self):
+  task = self.task('blocked', request_uuid='r', dispatch='unknown', argv=['runner'])
+  self.service.tick()
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.tick()
+  save.assert_not_called()
+  self.assertEqual(self.store.get(task['id'])['public']['state'], 'blocked')
+
+ def test_blocked_and_execution_unknown_with_jobs_still_observe_completion(self):
+  for state in ['blocked', 'execution_unknown']:
+   with self.subTest(state=state):
+    task = self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted')
+    self.status(task, 'completed', finished_at=1060)
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['public']['state'], 'completed')
+    self.assertTrue(saved['internal']['finished_recorded'])
+    with patch.object(self.store, 'save', wraps=self.store.save) as save:
+     self.service.tick()
+    save.assert_not_called()
+
+ def test_terminal_with_pending_stop_still_checks_matching_proof(self):
+  task = self.task('ready')
+  state = self.control.start(task['id'], task['digest'])
+  self.control.claim(task['id'], task['digest'], state['revision'])
+  state = self.control.stop(task['id'], task['digest'])
+  at = state['tasks'][0]['stop_requested_at']
+  task['internal'].update(request_uuid='r', job_uuid='j', dispatch='submitted', stop_requested_at=at)
+  task['public']['state'] = 'failed'
+  self.store.save(task)
+  self.status(task, 'failed', finished_at=1060)
+  proof_path = self.store.root/'tasks'/task['id']/'run/stop-result.json'
+  proof = {'task':task['id'], 'digest':'wrong', 'stop_at':at, 'uid':os.getuid(),
+           'request':'r', 'job':'j', 'state':'stopped'}
+  atomic_json(proof_path, proof)
+  task['internal']['stop_dispatch'] = 'submitted'
+  self.store.save(task)
+  self.service.tick()
+  self.assertFalse(self.store.get(task['id'])['internal'].get('stop_confirmed'))
+  atomic_json(proof_path, {**proof, 'digest':task['digest']})
+  self.service.tick()
+  saved = self.store.get(task['id'])
+  self.assertTrue(saved['internal']['stop_confirmed'])
+  self.assertEqual(saved['public']['state'], 'stopped')
+  self.service = Service({}, self.store, self.platform)  # Restart retains the settled state.
+  with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.read_json', side_effect=AssertionError('settled task read')), \
+       patch('gpuqueue.service.atomic_json', side_effect=AssertionError('settled stop marker write')):
+   self.service.tick()
+  save.assert_not_called()
+  self.platform.submit_job.assert_not_called()
+
+ def assert_settled_completion(self, task):
+  saved = self.store.get(task['id'])
+  self.assertEqual(saved['public']['state'], 'completed')
+  self.assertTrue(saved['internal']['finished_recorded'])
+  self.assertEqual(saved['public']['step_records'][0]['outputs'][0]['name'], 'result.json')
+  self.assertEqual(saved['public']['step_records'][0]['log'], 'final log')
+  self.assertEqual(saved['public']['events'].count('全部步骤成功完成'), 1)
+  self.assertEqual(self.control.state()['tasks'][0]['state'], 'completed')
+  self.service = Service({}, self.store, self.platform)
+  with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.read_json', side_effect=AssertionError('settled task read')):
+   self.service.tick()
+  save.assert_not_called()
+  self.platform.request.assert_not_called()
+  self.platform.submit_job.assert_not_called()
+
+ def complete(self, task):
+  self.status(task, 'completed', finished_at=1060, steps=[
+   {'state':'completed', 'outputs':[{'name':'result.json', 'size':2}]}])
+  (self.store.root/'tasks'/task['id']/'run/step-0.log').write_text('final log')
+
+ def test_stop_proof_after_initial_status_read_retains_natural_completion(self):
+  task = self.task('ready')
+  state = self.control.start(task['id'], task['digest'])
+  self.control.claim(task['id'], task['digest'], state['revision'])
+  state = self.control.stop(task['id'], task['digest'])
+  at = state['tasks'][0]['stop_requested_at']
+  task['internal'].update(request_uuid='r', job_uuid='j', dispatch='submitted')
+  task['public']['state'] = 'running'
+  self.store.save(task)
+  self.status(task)
+  proof_path = self.store.root/'tasks'/task['id']/'run/stop-result.json'
+  reads = []
+  def finish_before_stop_proof(path, *args):
+   reads.append(Path(path))
+   if Path(path) == proof_path:
+    self.complete(task)  # Runner exits after tick's first status snapshot.
+    atomic_json(proof_path, {'task':task['id'], 'digest':task['digest'],
+                'stop_at':at, 'uid':os.getuid(), 'request':'r', 'job':'j', 'state':'stopped'})
+   return read_json(path, *args)
+  with patch('gpuqueue.service.read_json', side_effect=finish_before_stop_proof), \
+       patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.tick()
+  status_path = self.store.root/'tasks'/task['id']/'run/status.json'
+  self.assertLess(reads.index(status_path), reads.index(proof_path))
+  self.assert_settled_completion(task)
+
+ def test_job_exit_after_missing_status_read_retains_final_result(self):
+  for exit_state in ['finished', 'failed', 'closed']:
+   with self.subTest(exit_state=exit_state):
+    # Each subcase has an independent queue so UI assertions cover the same task.
+    self.queue(exit_state)
+    task = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+    status_path = self.store.root/'tasks'/task['id']/'run/status.json'
+    job_path = self.platform.job_folder('r')/'j/status.json'
+    status_reads = []
+    def finish_before_job_receipt(path, *args):
+     if Path(path) == job_path:
+      self.complete(task)  # The first execution-status read returned None.
+      if exit_state == 'closed':
+       self.platform.resources = {'r':{'status':'closed'}}
+      else:
+       atomic_json(job_path, {'state':exit_state})
+     value = read_json(path, *args)
+     if Path(path) == status_path:
+      status_reads.append(value)
+     return value
+    with patch('gpuqueue.service.read_json', side_effect=finish_before_job_receipt):
+     self.service.tick()
+    self.assertIsNone(status_reads[0])
+    self.assert_settled_completion(task)
+
+ def legacy_terminal(self, state):
+  self.queue(state)
+  task = self.task('ready', request_uuid='r', job_uuid='j', dispatch='submitted')
+  if state == 'stopped':
+   started = self.control.start(task['id'], task['digest'])
+   self.control.claim(task['id'], task['digest'], started['revision'])
+   stopped = self.control.stop(task['id'], task['digest'])
+   self.control.confirm_stop(task['id'], task['digest'])
+   task['internal'].update(stop_requested_at=stopped['tasks'][0]['stop_requested_at'], stop_confirmed=True)
+  task['public']['state'] = state
+  self.store.save(task)
+  return task
+
+ def reopen_service(self):
+  self.store = Store(self.store.root)
+  self.control = Control(self.store)
+  self.service = Service({}, self.store, self.platform)
+
+ def test_upgrade_recovers_final_results_from_legacy_terminal_snapshots(self):
+  for state in ['stopped', 'failed', 'interrupted']:
+   with self.subTest(state=state):
+    task = self.legacy_terminal(state)
+    self.assertNotIn('terminal_reconciled', task['internal'])
+    self.complete(task)  # Old scheduler exited before copying this into SQLite.
+    self.reopen_service()
+    self.service.tick()
+    self.assert_settled_completion(task)
+
+ def test_upgrade_persists_confirmed_terminal_check_across_restarts(self):
+  for state in ['stopped', 'failed', 'interrupted']:
+   with self.subTest(state=state):
+    task = self.legacy_terminal(state)
+    if state == 'failed':
+     self.status(task, 'failed', finished_at=1060)
+    elif state == 'stopped':
+     self.status(task)  # A killed runner left its last running snapshot.
+    else:
+     self.platform.resources = {'r':{'status':'closed'}}
+    self.reopen_service()
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['public']['state'], state)
+    self.assertTrue(saved['internal'].get('terminal_reconciled'))
+    self.reopen_service()
+    with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+         patch('gpuqueue.service.read_json', side_effect=AssertionError('already reconciled read')):
+     self.service.tick()
+    save.assert_not_called()
+    self.platform.request.assert_not_called()
+    self.platform.submit_job.assert_not_called()
+
+ def test_legacy_failure_without_exit_evidence_keeps_checking(self):
+  task = self.legacy_terminal('failed')
+  self.reopen_service()
+  self.service.tick()
+  self.assertFalse(self.store.get(task['id'])['internal'].get('terminal_reconciled'))
+  self.complete(task)
+  self.service.tick()
+  self.assert_settled_completion(task)
 
 class BlockedStopTests(unittest.TestCase):
     """Exercise real queue selection with private records and a mock platform."""

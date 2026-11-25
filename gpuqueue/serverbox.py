@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 import uuid
 from .core import atomic_json
+from .resources import published_resources
 
 
 def metric(value):
@@ -17,7 +18,7 @@ def metric(value):
 
 def publish(resources, home):
     records = []
-    for resource in resources.values():
+    for resource in published_resources(resources).values():
         request = str(uuid.UUID(resource['id']))
         telemetry = resource.get('telemetry') or {}
         stamp = metric(telemetry.get('at')) or 0

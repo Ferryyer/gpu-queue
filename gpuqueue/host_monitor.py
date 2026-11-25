@@ -21,8 +21,10 @@ class HostMonitor:
         try:
             if self.module is None:
                 spec = importlib.util.spec_from_file_location('gpuq_serverbox_threads', HELPER)
-                self.module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(self.module)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                # A failed load must remain retryable after the cache expires.
+                self.module = module
             uid = os.getuid()
             text = self.module.render(Path('/proc'), Path.home(), uid, pwd.getpwuid(uid).pw_name)
             result = dict(available=True, at=time.time(), text=text)

@@ -126,7 +126,7 @@ class ServerBoxTests(unittest.TestCase):
         first, second = self.resource(), self.resource(SECOND)
         self.adapter.resources = {REQUEST: first, SECOND: second}
         self.adapter.refresh_notice = Mock()
-        def probe(resource):
+        def probe(resource, *, active=True):
             if resource['id'] == REQUEST:
                 raise BlockingIOError(11, 'Resource temporarily unavailable')
             resource['telemetry']['at'] = 123
