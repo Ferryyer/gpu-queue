@@ -33,6 +33,9 @@ class HostMonitorTests(unittest.TestCase):
     def test_absent_source_is_unavailable_instead_of_zero(self):
         monitor = HostMonitor()
         with patch('gpuqueue.host_monitor.HELPER', '/nonexistent/sampler.py'):
-            result = monitor.state()
-        self.assertFalse(result['available'])
-        self.assertNotIn('0 个线程', result['text'])
+            for checked_at in (10, 16):
+                with patch('gpuqueue.host_monitor.time.monotonic', return_value=checked_at):
+                    result = monitor.state()
+                self.assertFalse(result['available'])
+                self.assertNotIn('0 个线程', result['text'])
+        self.assertIsNone(monitor.module)

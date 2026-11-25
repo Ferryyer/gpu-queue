@@ -145,6 +145,8 @@ def normalize(manifest, source='Codex'):
         if any(k in env for k in ['CUDA_VISIBLE_DEVICES', 'GPUQ_OUTPUT_DIR', 'GPUQ_TASK_ID']):
             raise ValueError('GPU 设备与任务目录由执行器指定')
         for a in argv[1:]:
+            # Match the project/home placeholders expanded by the runner.
+            a = a.replace('{project}', str(project)).replace('{home}', str(HOME))
             if a.startswith(str(project) + '/') and Path(a).is_file() and str(Path(a).relative_to(project)) in files:
                 raise ValueError('运行代码请引用 {code}/文件，避免执行 Agent 后续修改的源文件')
         normalized_steps.append({'name': raw.get('name') or f'步骤 {index + 1}', 'argv': argv, 'cwd': raw.get('cwd', '{code}'), 'outputs': outputs, 'env': env})

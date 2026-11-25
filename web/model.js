@@ -1,4 +1,4 @@
-export function canStop(task){return ['ready','queued','waiting_gpu','checking_resources','dispatching','starting','running','execution_unknown'].includes(task.state);}
+export function canStop(task){return ['ready','queued','waiting_gpu','checking_resources','dispatching','starting','running','execution_unknown','blocked'].includes(task.state);}
 export function stepState(task,index){
  const record=task.step_records?.[index];
  if(record?.state==='completed'||task.state==='completed')return 'done';

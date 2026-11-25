@@ -130,6 +130,24 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(request('POST',delete_path,{'digest':'0'*64},forbidden)[0],403)
             self.assertEqual(request('POST',delete_path,{'digest':'0'*64},headers)[0],200)
             self.assertNotIn(self.ids[0],[t['id'] for t in self.control.state()['tasks']])
+            # Reuse the same HTTP stop endpoint for a claimed, blocked task.
+            state=self.control.start(self.ids[1],'1'*64)
+            self.control.claim(self.ids[1],'1'*64,state['revision'])
+            task=self.store.get(self.ids[1]);task['public']['state']='blocked'
+            task['public'].update(phase='等待 GPU 执行入口领取任务',failureReason='无法唯一确认原计算回执')
+            task['internal']['dispatch']='unknown';self.store.save(task)
+            stop_path='/api/tasks/'+self.ids[1]+'/stop'
+            self.assertEqual(request('POST',stop_path,{'digest':'stale'},headers)[0],409)
+            status,body=request('POST',stop_path,{'digest':'1'*64},headers)
+            self.assertEqual(status,200)
+            stopped=next(t for t in json.loads(body)['tasks'] if t['id']==self.ids[1])
+            self.assertEqual(stopped['state'],'stopping')
+            self.assertIn('停止状态待核查',stopped['phase'])
+            self.assertIn('无法唯一确认原计算回执',stopped['phase'])
+            self.assertNotIn('等待 GPU 执行入口',stopped['phase'])
+            _,again=request('POST',stop_path,{'digest':'1'*64},headers)
+            self.assertEqual(next(t for t in json.loads(again)['tasks'] if t['id']==self.ids[1])['stop_requested_at'],stopped['stop_requested_at'])
+            self.assertEqual(request('POST','/api/tasks/'+self.ids[1]+'/delete',{'digest':'1'*64},headers)[0],409)
         finally:
             child.terminate();child.wait(timeout=5)
 
