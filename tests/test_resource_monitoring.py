@@ -30,7 +30,7 @@ class MonitoringFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.home = Path(self.temp.name)
+        self.home = Path(self.temp.name).resolve()
         self.store = Store(self.home/'queue')
         self.adapter = Markflow(self.store, dict(home=str(self.home), username='employee'))
         self.adapter.check_auth = Mock()
