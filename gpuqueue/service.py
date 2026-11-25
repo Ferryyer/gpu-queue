@@ -87,7 +87,10 @@ class Service:
                 local['internal']['stop_requested_at'] = at
                 atomic_json(self.store.root/'tasks'/local['id']/'run/stop.json', {'task':local['id'],'digest':local['digest'],'at':at})
                 if remote['state'] != 'completed':
-                    local['public'].update(state=remote['state'], phase='已移出队列' if remote['state']=='cancelled' else '任务已停止，已有产物保留' if remote['state']=='stopped' else '正在确认任务进程退出；已有产物保留')
+                    phase = ('已移出队列' if remote['state'] == 'cancelled' else
+                             '任务已停止，已有产物保留' if remote['state'] == 'stopped' else
+                             local['internal'].get('stop_phase', '正在确认任务进程退出；已有产物保留'))
+                    local['public'].update(state=remote['state'], phase=phase)
             self.store.save(local)
 
     def refresh_task(self, task):
@@ -159,6 +162,13 @@ class Service:
             target.chmod(0o400)
         return target
 
+    def stop_pending(self, task, phase):
+        if task['internal'].get('stop_retry_consumed_at') is not None:
+            phase += '；已用完一次自动重发机会'
+        task['internal']['stop_phase'] = phase
+        task['public'].update(state='stopping', phase=phase)
+        self.store.save(task)
+
     def process_stop(self, task):
         internal, public = task['internal'], task['public']
         if not internal.get('stop_requested_at') or internal.get('stop_confirmed') or public['state'] in ['completed','cancelled']:
@@ -182,41 +192,85 @@ class Service:
                 if step.get('state') == 'running': step['state'] = 'stopped'
             self.store.save(task);return
         if valid and proof.get('state')=='unverified':
-            public['phase'] = '停止状态待核查：'+redact(proof.get('error','未能确认所有任务进程退出'))
-            self.store.save(task);return
+            self.stop_pending(task, '停止状态待核查：'+redact(proof.get('error','未能确认所有任务进程退出')))
+            return
         if 'supervise' in internal.get('argv',[]) and not internal.get('stop_dispatch'):
             # The new control layer observes the marker itself. A separate GPU
             # command is only a fallback if that layer does not confirm in time.
             started = internal.setdefault('stop_supervisor_wait_started',time.time())
             if time.time()-started<15:
-                public.update(state='stopping',phase='已通知执行器停止，等待进程退出确认')
-                self.store.save(task);return
+                self.stop_pending(task, '已通知执行器停止，等待进程退出确认')
+                return
         if internal.get('stop_dispatch'):
+            stop_request = internal.get('stop_request_uuid', request)
             if internal.get('stop_job_uuid'):
-                stop_folder = self.platform.job_folder(request)/internal['stop_job_uuid']
+                stop_folder = self.platform.job_folder(stop_request)/internal['stop_job_uuid']
                 stop_status = read_json(stop_folder/'status.json',{})
-                if stop_status.get('state') in ['finished','failed'] and not valid:
-                    public['phase'] = '停止命令已退出但未获得有效确认，状态待核查'
+                if stop_status.get('state') in ['finished','failed']:
                     public['stop_log'] = tail(stop_folder/'output.log')
-                    self.store.save(task)
+                    self.stop_pending(task, '停止命令已退出但未获得有效确认，状态待核查')
             if internal['stop_dispatch']=='submitting' and not internal.get('stop_job_uuid'):
-                matches = [p.stem for p in self.platform.job_folder(request).glob('*.json') if read_json(p,{}).get('argv')==internal['stop_argv']]
-                if len(matches)==1: internal.update(stop_job_uuid=matches[0],stop_dispatch='submitted')
-                else: public['phase'] = '停止请求提交回执待核查，不会重复发送'
+                # Legacy records get a full wait window from first takeover.
+                started = internal.setdefault('stop_submitted_at', time.time())
                 self.store.save(task)
+                seen = set(internal.get('stop_receipts', []))
+                matches = []
+                try:
+                    # glob may hide directory errors. A missing/unreadable or
+                    # malformed receipt is not evidence of zero submissions.
+                    for path in self.platform.job_folder(stop_request).iterdir():
+                        if path.suffix != '.json':
+                            continue
+                        receipt = json.loads(path.read_text())
+                        if not isinstance(receipt, dict) or not isinstance(receipt.get('argv'), list):
+                            raise ValueError('停止命令回执格式无效')
+                        if receipt['argv'] == internal['stop_argv']:
+                            matches.append(path.stem)
+                            seen.add(path.stem)
+                except (OSError, ValueError) as error:
+                    internal['stop_receipts'] = sorted(seen)
+                    internal['stop_receipt_error'] = redact(str(error))[:400]
+                    self.stop_pending(task, '停止请求提交回执读取失败，状态待核查')
+                    return
+                internal['stop_receipts'] = sorted(seen)
+                internal.pop('stop_receipt_error', None)
+                if len(matches) == 1 and len(seen) == 1:
+                    internal.update(stop_job_uuid=matches[0], stop_dispatch='submitted')
+                    self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
+                elif seen:
+                    self.stop_pending(task, '停止请求提交回执无法唯一确认，状态待核查')
+                elif time.time()-started < 60:
+                    self.stop_pending(task, '停止请求提交回执待核查，等待满 60 秒后再核对')
+                elif internal.get('stop_retry_consumed_at') is not None:
+                    self.stop_pending(task, '停止请求提交回执待核查')
+                else:
+                    # Commit the budget and audit together before platform I/O.
+                    # A crash even before the call must never allow a third send.
+                    internal['stop_retry_consumed_at'] = time.time()
+                    phase = '停止请求已自动重发，提交回执及进程退出状态待核查；已用完一次自动重发机会'
+                    internal['stop_phase'] = phase
+                    public.update(state='stopping', phase=phase)
+                    with self.store.connect() as db:
+                        db.execute('UPDATE tasks SET public=?, internal=? WHERE id=?',
+                                   (canonical(public), canonical(internal), task['id']))
+                        db.execute('INSERT INTO queue_audit(task_id,action,at) VALUES (?,?,?)',
+                                   (task['id'], 'stop_retry:'+task['digest']+':'+internal['stop_requested_at'], now()))
+                    stopped_job = self.platform.submit_job(stop_request, internal['stop_argv'], internal.get('stop_cwd', task['doc']['project']))
+                    internal.update(stop_dispatch='submitted', stop_job_uuid=stopped_job)
+                    self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
             return
         if not request or not job:
-            public['phase'] = '正在核对原计算任务回执，停止请求已保存'
-            self.store.save(task);return
+            self.stop_pending(task, '正在核对原计算任务回执，停止请求已保存')
+            return
         control = self.stop_control(folder)
         argv = ['/usr/bin/python3','-I',str(control),'stop',str(folder),request,job]
-        internal.update(stop_dispatch='submitting',stop_argv=argv)
-        public.update(state='stopping',phase='停止请求已发送，等待 GPU 确认进程退出')
-        self.store.save(task)
+        internal.update(stop_dispatch='submitting', stop_argv=argv, stop_submitted_at=time.time(),
+                        stop_request_uuid=request, stop_cwd=task['doc']['project'])
+        self.stop_pending(task, '停止请求已发送，提交回执及进程退出状态待核查')
         # Same allocation, a control-only command. No model or resource request.
         stopped_job = self.platform.submit_job(request,argv,task['doc']['project'])
         internal.update(stop_dispatch='submitted',stop_job_uuid=stopped_job)
-        self.store.save(task)
+        self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
 
     def dispatch(self, task, selection):
         if not task['internal'].get('approved_at') or task['internal'].get('dispatch'):
