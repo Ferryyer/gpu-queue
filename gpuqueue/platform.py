@@ -153,6 +153,7 @@ class Markflow:
         resource['notice_checked'] = time.time()
         data = self.lark(['im', '+messages-search', '--query', resource['id'], '--no-reactions'], timeout=8)
         messages = data.get('messages', [])
+        terminal_evidence = []
         for message in reversed(messages):
             if message.get('sender', {}).get('id') != TRUSTED_SENDER or message.get('deleted'):
                 continue
@@ -173,16 +174,23 @@ class Markflow:
                     resource['status'] = 'ready'
                 resource['ready_message'] = message.get('message_id')
                 resource['ready_notice_consumed'] = True
+                continue
             elif re.match(r'^GPU.*(已回收|已关闭|已终止)', title):
                 resource['status'] = 'closed'
             elif title.startswith('本次GPU申请失败') or re.match(r'^GPU.*(申请失败|启动失败|申请被拒)', title):
                 resource['status'] = 'failed'
+            else:
+                continue
             # Only the authenticated, matching terminal notice can date this
             # transition. Feishu's numeric create_time is epoch milliseconds.
             stamp = message.get('update_time' if message.get('updated') else 'create_time')
             if type(stamp) in (int, float) or isinstance(stamp, str) and stamp.isdecimal():
                 stamp = float(stamp) / 1000
-            record_terminal(resource, stamp)
+            terminal_evidence.append(stamp)
+        # Consider every matching terminal notice before falling back to the
+        # observation time. A duplicate without a time must not mask evidence
+        # later in this response; ready and unrelated notices cannot date it.
+        record_terminal(resource, *terminal_evidence)
 
     def job_folder(self, request_id):
         return self.home/'.local/state/markflow-gpu'/request_id/'jobs'
@@ -329,8 +337,8 @@ class Markflow:
             self.persist()
 
     def refresh(self, active=False):
-        self.discover()
         try:
+            self.discover()
             # Resource monitoring outlives compute jobs. These existing read-only
             # probes never request GPUs or authorize model execution.
             errors = []

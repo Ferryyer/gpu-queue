@@ -259,6 +259,31 @@ class RetentionTests(MonitoringFixture):
                     self.assert_lists([])
                     self.clock.return_value = NOW
 
+    def test_duplicate_terminal_notices_prefer_valid_batch_evidence_before_fallback(self):
+        for title in ['GPU已回收', '本次GPU申请失败']:
+            for invalid in [None, 'invalid', iso(NOW+1)]:
+                for reverse in [False, True]:
+                    with self.subTest(title=title, invalid=invalid, reverse=reverse):
+                        messages = [self.notice(title, iso(NOW-WEEK)), self.notice(title, invalid)]
+                        if reverse:
+                            messages.reverse()
+                        self.adapter.resources = {REQUEST: dict(id=REQUEST, status='pending')}
+                        self.adapter.lark = Mock(return_value=dict(messages=messages))
+                        self.adapter.refresh()
+                        self.assertEqual(self.adapter.resources[REQUEST]['terminal_at'], NOW-WEEK)
+                        self.assert_lists([])
+                        # Repeated notices and restarts cannot move the stored time.
+                        self.clock.return_value = NOW+60
+                        self.adapter = Markflow(self.store, self.adapter.config)
+                        self.adapter.check_auth = Mock()
+                        self.adapter.submit_job = Mock(return_value=JOB)
+                        self.adapter.lark = Mock(return_value=dict(messages=messages))
+                        self.adapter.refresh()
+                        self.adapter.lark.assert_not_called()
+                        self.assertEqual(self.adapter.resources[REQUEST]['terminal_at'], NOW-WEEK)
+                        self.assert_lists([])
+                        self.clock.return_value = NOW
+
     def test_notice_without_valid_time_uses_observation_not_old_ready_or_submission_time(self):
         for stamp in [None, 'bad', iso(NOW+10), '2020-01-01T00:00:00']:
             with self.subTest(stamp=stamp):
@@ -312,6 +337,31 @@ class RetentionTests(MonitoringFixture):
         self.assertEqual({r['id'] for r in Control(self.store).state()['heartbeat']['resources']}, {SECOND})
         self.assert_lists([SECOND])
         self.assertIn(REQUEST, self.adapter.resources)
+
+    def test_discovery_enumeration_error_still_expires_both_publications(self):
+        folder = self.local(closed_recorded_at=iso(NOW-WEEK+1))
+        self.adapter.resources = {SECOND: dict(id=SECOND, status='pending')}
+        self.adapter.refresh()
+        self.assert_lists([REQUEST, SECOND])
+        before = {p: p.read_bytes() for p in folder.iterdir() if p.is_file()}
+        self.clock.return_value = NOW+1
+        base = folder.parent
+        original = Path.iterdir
+
+        def denied(path):
+            if path == base:
+                raise PermissionError('synthetic request directory denial')
+            return original(path)
+
+        service = Service({}, self.store, self.adapter)
+        with patch.object(Path, 'iterdir', denied):
+            service.cycle()
+        self.assertIn('synthetic request directory denial', service.error)
+        self.assertEqual({r['id'] for r in Control(self.store).state()['heartbeat']['resources']}, {SECOND})
+        self.assert_lists([SECOND])
+        self.assertEqual(self.store.metadata('resources')[REQUEST]['terminal_at'], NOW-WEEK+1)
+        self.assertEqual(before, {p: p.read_bytes() for p in before})
+        self.adapter.submit_job.assert_not_called()
 
     def test_begin_task_sampling_instant_publication_also_filters_expired_history(self):
         for error in [None, PlatformError('synthetic probe failure')]:
