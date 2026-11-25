@@ -1,3 +1,4 @@
+from copy import deepcopy
 import fcntl
 from copy import deepcopy
 import json
@@ -67,8 +68,15 @@ class Service:
                 if local['public']['state'] == 'ready':
                     local['public']['state'] = 'queued'
                 local['public']['events'].append('你在网页点击了开始，授权执行这一版完整流程')
-            if (remote.get('claimed_at') and not local['internal'].get('dispatch')
-                    and not local['internal'].get('job_uuid') and local['public']['state'] not in TERMINAL):
+            if remote.get('claimed_at'):
+                local['internal']['claimed_at'] = remote['claimed_at']
+            if remote.get('stopped_at'):
+                local['internal']['stop_confirmed'] = True
+            if (not local['internal'].get('dispatch')
+                    and not local['internal'].get('job_uuid')
+                    and not local['internal'].get('stop_confirmed')
+                    and (remote.get('claimed_at') and local['public']['state'] not in TERMINAL - {'blocked'}
+                         or remote['state'] == 'stopping')):
                 local['internal']['dispatch'] = 'unknown'
                 local['public'].update(state='blocked', failureReason='任务已被领取，正在核对计算投放记录')
             local['internal']['position'] = remote['position']
@@ -81,35 +89,118 @@ class Service:
                     atomic_json(self.store.root/'tasks'/local['id']/'run/stop.json', {'task':local['id'],'digest':local['digest'],'at':at})
                 local['internal']['stop_requested_at'] = at
                 if remote['state'] != 'completed':
-                    local['public'].update(state=remote['state'], phase='已移出队列' if remote['state']=='cancelled' else '任务已停止，已有产物保留' if remote['state']=='stopped' else '正在确认任务进程退出；已有产物保留')
+                    phase = ('已移出队列' if remote['state']=='cancelled' else
+                             '任务已停止，已有产物保留' if remote['state']=='stopped' else
+                             local['public'].get('phase') if local['public']['state']=='stopping' else None)
+                    phase = phase or '正在确认任务进程退出；已有产物保留'
+                    reason = local['public'].get('failureReason')
+                    if remote['state'] == 'stopping' and reason and reason not in phase:
+                        phase += '；'+reason
+                    local['public'].update(state=remote['state'], phase=phase)
+                    if remote['state'] == 'stopped':
+                        local['public'].pop('failureReason', None)
+                        for step in local['public'].get('step_records', []):
+                            if step.get('state') == 'running': step['state'] = 'stopped'
             self.save_if_changed(local, previous)
 
     def save_if_changed(self, task, previous):
         if task != previous:
             self.store.save(task)
 
+    def original_dispatch(self, task):
+        """Recover only the version-bound original allocation and command."""
+        internal = task['internal']
+        request, argv = internal.get('request_uuid'), internal.get('argv')
+        marker = read_json(self.store.root/'tasks'/task['id']/'run/dispatch.json', {})
+        if not isinstance(marker, dict):
+            return None, None
+        if marker:
+            # request_uuid is also saved while applying for a GPU. Until a
+            # dispatch identity is persisted, the version-bound marker records
+            # the allocation actually selected (which can be a reused GPU).
+            dispatched = (argv or internal.get('job_uuid') or internal.get('dispatched_at') or
+                          internal.get('dispatch') in {'submitting', 'submitted'})
+            if (marker.get('task') != task['id'] or marker.get('digest') != task['digest'] or
+                    dispatched and request and marker.get('request') != request or
+                    argv and marker.get('argv') != argv):
+                return None, None
+            request, argv = marker.get('request'), argv or marker.get('argv')
+        return request, argv
+
     def refresh_task(self, task):
+        internal = task['internal']
+        if internal.get('stop_requested_at') and not internal.get('stop_confirmed'):
+            # A crash can leave the confirmation committed in controls before
+            # the task snapshot records it. Recover it before any result I/O.
+            with self.store.connect() as db:
+                row = db.execute('SELECT controls.stopped_at FROM controls JOIN tasks ON tasks.id=controls.id '
+                                 'WHERE tasks.id=? AND tasks.digest=? AND controls.stop_at=?',
+                                 (task['id'], task['digest'], internal['stop_requested_at'])).fetchone()
+            if row and row['stopped_at']:
+                internal['stop_confirmed'] = True
+        if not internal.get('stop_confirmed'):
+            return self._refresh_task(task)
+        # Late results are optional enrichment after a confirmed stop. Work on
+        # a copy so malformed metadata or unreadable logs cannot partially
+        # overwrite the saved result or stop other tasks from being scheduled.
+        candidate = deepcopy(task)
+        try:
+            self._refresh_task(candidate)
+        except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+            previous = deepcopy(task)
+            public = task['public']
+            message = '迟到结果读取失败，保留已确认停止；稍后重试：'+redact(type(error).__name__+': '+str(error))[:400]
+            if public.get('result_refresh_error') != message:
+                public['events'].append(message)
+            public['result_refresh_error'] = message
+            if public['state'] != 'completed':
+                public.update(state='stopped', phase='任务已停止，已有产物保留')
+            self.save_if_changed(task, previous)
+        else:
+            task.update(candidate)
+
+    def _refresh_task(self, task):
         internal, public = task['internal'], task['public']
         previous = deepcopy(task)
+        confirmed = internal.get('stop_confirmed')
+        if confirmed and public['state'] == 'completed':
+            return
         request_id, job_id = internal.get('request_uuid'), internal.get('job_uuid')
-        if internal.get('dispatch') in ['submitting', 'unknown'] and not job_id:
-            expected = internal.get('argv')
-            if not expected:
-                marker = read_json(self.store.root/'tasks'/task['id']/'run/dispatch.json', {})
-                if marker.get('task') == task['id'] and marker.get('digest') == task['digest']:
-                    request_id, expected = marker.get('request'), marker.get('argv')
+        recovering_job = not job_id
+        if (confirmed or internal.get('dispatch') in ['submitting', 'unknown']) and not job_id:
             matches = []
-            if request_id and expected:
-                for file in self.platform.job_folder(request_id).glob('*.json'):
-                    if read_json(file, {}).get('argv') == expected:
-                        matches.append(file.stem)
+            try:
+                request_id, expected = self.original_dispatch(task)
+                if request_id and not confirmed:
+                    internal['request_uuid'] = request_id
+                if request_id and expected:
+                    if not confirmed:
+                        internal['argv'] = expected
+                    for file in self.platform.job_folder(request_id).glob('*.json'):
+                        receipt = read_json(file, {})
+                        if not isinstance(receipt, dict):
+                            raise ValueError('Invalid compute receipt')
+                        if receipt.get('argv') == expected:
+                            matches.append(file.stem)
+            except (OSError, ValueError, TypeError):
+                matches = []
             if len(matches) == 1:
-                internal.update(request_uuid=request_id, job_uuid=matches[0], dispatch='submitted')
                 job_id = matches[0]
-                public.update(state='dispatching', phase='已核对计算回执，等待执行状态')
+                if not confirmed:
+                    internal.update(request_uuid=request_id, job_uuid=job_id, dispatch='submitted')
+                    public.update(state='dispatching', phase='已核对计算回执，等待执行状态')
             else:
-                internal['dispatch'] = 'unknown'
-                public.update(state='blocked', failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
+                if confirmed:
+                    # Late receipts may enrich results, but cannot undo the
+                    # confirmed stop or rewrite the original dispatch record.
+                    public.update(state='stopped', phase='任务已停止，已有产物保留')
+                    public.pop('failureReason', None)
+                    for step in public.get('step_records', []):
+                        if step.get('state') == 'running': step['state'] = 'stopped'
+                else:
+                    internal['dispatch'] = 'unknown'
+                    public.update(state='stopping' if internal.get('stop_requested_at') else 'blocked',
+                                  failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
                 self.save_if_changed(task, previous)
                 return
         if not job_id:
@@ -118,8 +209,12 @@ class Service:
         status = read_json(folder/'run/status.json')
         try:
             job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
+            if not isinstance(job_status, dict):
+                raise ValueError('Invalid compute job status')
         except (OSError, ValueError):
             # An unreadable receipt is not evidence that execution has ended.
+            if confirmed or recovering_job or internal.get('stop_requested_at'):
+                raise
             job_status = {}
         resource = self.platform.resources.get(request_id, {})
         if job_status.get('state') in ['finished', 'failed'] or resource.get('status') == 'closed':
@@ -128,6 +223,8 @@ class Service:
             status = read_json(folder/'run/status.json')
         if status:
             public.update(state=status['state'], stage=status.get('stage', 0), step_records=status.get('steps', []), progress=None)
+            if status['state'] == 'completed':
+                public.pop('failureReason', None)
             if status.get('error'):
                 public['failureReason'] = redact(status['error'])[:1200]
             if status.get('gpu_verified'):
@@ -160,6 +257,7 @@ class Service:
             public.pop('failureReason',None)
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
+        public.pop('result_refresh_error', None)
         if (public['state'] in ['completed', 'failed', 'interrupted', 'stopped'] and (
                 (status or {}).get('state') in ['completed', 'failed']
                 or job_status.get('state') in ['finished', 'failed']
@@ -183,14 +281,25 @@ class Service:
         previous = deepcopy(task)
         folder = self.store.root/'tasks'/task['id']
         request, job = internal.get('request_uuid'), internal.get('job_uuid')
-        proof = read_json(folder/'run/stop-result.json',{})
-        valid = (proof.get('task')==task['id'] and proof.get('digest')==task['digest'] and
+        try:
+            original_request, original_argv = self.original_dispatch(task)
+        except (OSError, ValueError, TypeError):
+            original_request, original_argv = None, None
+        try:
+            proof = read_json(folder/'run/stop-result.json',{})
+            if not isinstance(proof, dict):
+                proof = {}
+        except (OSError, ValueError, TypeError):
+            proof = {}
+        supervisor = ['/usr/bin/python3', '-I', str(folder/'run/stop-control.py'), 'supervise', str(folder)]
+        valid = (bool(request and job) and original_request == request and
+                 proof.get('task')==task['id'] and proof.get('digest')==task['digest'] and
                  proof.get('stop_at')==internal['stop_requested_at'] and proof.get('uid')==os.getuid() and
                  proof.get('request')==request and (proof.get('job')==job or
-                 proof.get('mode')=='supervisor' and 'supervise' in internal.get('argv',[])))
-        not_dispatched = not job and not internal.get('dispatch')
-        allocation_closed = request and self.platform.resources.get(request,{}).get('status')=='closed'
-        if (valid and proof.get('state')=='stopped') or not_dispatched or allocation_closed:
+                 proof.get('job') is None and proof.get('mode')=='supervisor' and original_argv == supervisor))
+        allocation_closed = (request and original_request == request and
+                             self.platform.resources.get(request,{}).get('status')=='closed')
+        if (valid and proof.get('state')=='stopped') or allocation_closed:
             if job:
                 # Matching stop proof is written after the process exits. A
                 # natural completion since tick's first refresh takes priority.
@@ -208,6 +317,9 @@ class Service:
             self.save_if_changed(task, previous);return
         if valid and proof.get('state')=='unverified':
             public['phase'] = '停止状态待核查：'+redact(proof.get('error','未能确认所有任务进程退出'))
+            self.save_if_changed(task, previous);return
+        if not request or not job:
+            public['phase'] = '停止状态待核查：正在核对原计算任务回执，停止请求已保存；'+public.get('failureReason', '执行状态待核查')
             self.save_if_changed(task, previous);return
         if 'supervise' in internal.get('argv',[]) and not internal.get('stop_dispatch'):
             # The new control layer observes the marker itself. A separate GPU
@@ -230,8 +342,8 @@ class Service:
                 else: public['phase'] = '停止请求提交回执待核查，不会重复发送'
                 self.save_if_changed(task, previous)
             return
-        if not request or not job:
-            public['phase'] = '正在核对原计算任务回执，停止请求已保存'
+        if original_request != request:
+            public['phase'] = '原计算投放记录与任务版本不匹配，停止状态待核查'
             self.save_if_changed(task, previous);return
         control = self.stop_control(folder)
         argv = ['/usr/bin/python3','-I',str(control),'stop',str(folder),request,job]
@@ -285,8 +397,9 @@ class Service:
         for task in self.store.tasks():
             self.process_stop(task)
         tasks = self.store.tasks()
-        active = [t for t in tasks if t['public']['state'] in ['starting', 'running', 'dispatching', 'execution_unknown', 'stopping']
-                  or t['internal'].get('dispatch') in ['submitting', 'unknown'] and not t['internal'].get('stop_confirmed')]
+        active = [t for t in tasks if not t['internal'].get('stop_confirmed') and (
+                  t['public']['state'] in ['starting', 'running', 'dispatching', 'execution_unknown', 'stopping', 'blocked']
+                  or t['internal'].get('dispatch') in ['submitting', 'unknown'])]
         pending = sorted([t for t in tasks if t['internal'].get('approved_at')
                           and not t['internal'].get('dispatch') and not t['internal'].get('job_uuid')
                           and t['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']], key=lambda t: t['internal']['position'])
@@ -317,7 +430,7 @@ class Service:
         # before any future release adapter can act on this intent.
         busy = any(t['internal'].get('approved_at') and (
             t['public']['state'] not in TERMINAL or
-            t['internal'].get('dispatch') in ['submitting', 'unknown']
+            t['internal'].get('dispatch') in ['submitting', 'unknown'] and not t['internal'].get('stop_confirmed')
         ) for t in tasks)
         changed = False
         for resource in self.platform.resources.values():
