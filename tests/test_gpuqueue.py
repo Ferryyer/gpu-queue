@@ -10,6 +10,7 @@ from unittest.mock import patch,Mock
 from gpuqueue.core import Store,normalize,atomic_json,read_json,HOME,canonical
 from gpuqueue.control import Control,ControlError
 from gpuqueue.runner import execute
+from gpuqueue import runner
 from gpuqueue.service import Service
 from gpuqueue.platform import Markflow
 
@@ -85,6 +86,167 @@ class QueueTests(unittest.TestCase):
   with patch('gpuqueue.runner.subprocess.run',return_value=subprocess.CompletedProcess([],0,'GPU-test\n','')):
    self.assertEqual(execute(folder),1)
   self.assertFalse((folder/'outputs/two.json').exists());self.assertEqual(len(read_json(folder/'run/status.json')['steps']),1)
+
+ def run_output_events(self, events, *, exit_code=0, steps=1, exit_at=None):
+  # A deterministic child-output timeline: each event is (elapsed seconds, bytes).
+  # The fake selector honors deadlines, including silent periods before an event.
+  self.manifest['steps'] = [dict(name=f'step {i}', argv=['/usr/bin/python3', '-c', 'pass']) for i in range(steps)]
+  folder = self.approve(self.task())
+  clock = [0.0]
+  chunk = [b'']
+  writes = []
+  timeouts = []
+  process = Mock(pid=1234)
+  process.wait.return_value = exit_code
+  if exit_at is not None:
+   def wait(timeout=None):
+    if timeout is None or clock[0] + timeout >= exit_at:
+     clock[0] = exit_at
+     return exit_code
+    clock[0] += timeout
+    raise subprocess.TimeoutExpired('synthetic child', timeout)
+   process.wait.side_effect = wait
+  process.stdout.fileno.return_value = 123
+  key = Mock(fileobj=process.stdout)
+
+  def make_selector():
+   pending = [(clock[0] + at, data) for at, data in events]
+   registered = {123: key}
+   selector = Mock()
+   selector.get_map.side_effect = lambda: registered
+   selector.unregister.side_effect = lambda _: registered.clear()
+
+   def select(timeout):
+    timeouts.append(timeout)
+    at, data = pending[0]
+    if at > clock[0] + timeout:
+     clock[0] += timeout
+     return []
+    pending.pop(0)
+    clock[0] = at
+    chunk[0] = data
+    return [(key, runner.selectors.EVENT_READ)]
+
+   selector.select.side_effect = select
+   return selector
+
+  def save(path, status):
+   runner_write(path, status)
+   writes.append((clock[0], read_json(path)))
+
+  runner_write = runner.write
+  with patch.object(runner.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'GPU-test\n', '')), \
+       patch.object(runner.subprocess, 'Popen', return_value=process), \
+       patch.object(runner.selectors, 'DefaultSelector', side_effect=make_selector), \
+       patch.object(runner.os, 'read', side_effect=lambda *_: chunk[0]) as reads, \
+       patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), \
+       patch.object(runner.time, 'time', side_effect=lambda: 1000 + clock[0]), \
+       patch.object(runner, 'write', side_effect=save):
+   result = execute(folder)
+  return result, folder, writes, timeouts, reads.call_count
+
+ def test_runner_burst_output_does_not_fsync_status_per_chunk(self):
+  events = [(i / 100, f'line {i}\n'.encode()) for i in range(1, 101)]
+  result, folder, writes, _, reads = self.run_output_events(events + [(1.25, b'')])
+  self.assertEqual(result, 0)
+  self.assertEqual(reads, 101)
+  self.assertEqual(len(writes), 5)
+  self.assertEqual((folder/'run/step-0.log').read_bytes(), b''.join(data for _, data in events))
+  self.assertEqual([s['state'] for _, s in writes], ['starting', 'running', 'running', 'running', 'completed'])
+  self.assertEqual(writes[-2][1]['steps'][0]['state'], 'completed')
+  self.assertEqual(writes[-1][0], 1.25)
+  self.assertEqual(read_json(folder/'run/status.json'), writes[-1][1])
+
+ def test_runner_continuous_output_keeps_ten_second_heartbeats(self):
+  events = [(i / 4, b'progress\r') for i in range(1, 101)]
+  result, _, writes, _, _ = self.run_output_events(events + [(25.25, b'')])
+  self.assertEqual(result, 0)
+  self.assertEqual([at for at, _ in writes[3:-2]], [10, 20])
+  self.assertEqual([s['updated_at'] for _, s in writes[3:-2]], [1010, 1020])
+
+ def test_runner_real_child_burst_preserves_all_output_with_few_status_writes(self):
+  self.manifest['steps'] = [dict(name='noisy child', argv=['/usr/bin/python3', '-c',
+      "import sys; sys.stdout.buffer.write(b'line\\n' * 200000)"])]
+  folder = self.approve(self.task())
+  with patch.object(runner.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'GPU-test\n', '')), \
+       patch.object(runner.time, 'monotonic', return_value=0), \
+       patch.object(runner.os, 'read', wraps=os.read) as reads, \
+       patch.object(runner, 'write', wraps=runner.write) as writes:
+   self.assertEqual(execute(folder), 0)
+  self.assertGreater(reads.call_count, 15)
+  self.assertEqual(writes.call_count, 5)
+  self.assertEqual((folder/'run/step-0.log').read_bytes(), b'line\n' * 200000)
+  self.assertEqual(read_json(folder/'run/status.json')['state'], 'completed')
+
+ def test_runner_silent_child_keeps_ten_second_heartbeats(self):
+  result, _, writes, timeouts, _ = self.run_output_events([(30.5, b'')])
+  self.assertEqual(result, 0)
+  self.assertEqual(timeouts, [10, 10, 10, 10])
+  self.assertEqual([at for at, _ in writes[3:-2]], [10, 20, 30])
+
+ def test_runner_output_before_silence_does_not_postpone_heartbeat(self):
+  result, _, writes, timeouts, _ = self.run_output_events([(9.75, b'progress'), (20.5, b'')])
+  self.assertEqual(result, 0)
+  self.assertEqual(timeouts, [10, 0.25, 10, 10])
+  self.assertEqual([at for at, _ in writes[3:-2]], [10, 20])
+
+ def test_runner_early_eof_keeps_heartbeat_until_child_exits(self):
+  result, folder, writes, _, _ = self.run_output_events([(9, b'')], exit_at=185)
+  self.assertEqual(result, 0)
+  self.assertEqual([at for at, _ in writes[3:-2]], list(range(10, 181, 10)))
+  # A scheduler read at 182 seconds must see a live step, not a stale heartbeat.
+  observed_at, observed = [entry for entry in writes if entry[0] <= 182][-1]
+  self.assertLessEqual(182 - observed_at, 10)
+  self.assertEqual(observed['state'], 'running')
+  self.assertEqual(observed['updated_at'], 1180)
+  self.assertEqual(writes[-1][0], 185)
+  final = read_json(folder/'run/status.json')
+  self.assertEqual(final['state'], 'completed')
+  task = self.store.get(folder.name)
+  task['internal'].update(request_uuid='synthetic-resource', job_uuid='synthetic-job')
+  platform = Mock(resources={})
+  platform.job_folder.return_value = self.root/'jobs'
+  service = Service({}, self.store, platform)
+  atomic_json(folder/'run/status.json', observed)
+  with patch.object(runner.time, 'time', return_value=1182):
+   service.refresh_task(task)
+  self.assertEqual(task['public']['state'], 'running')
+  self.assertFalse(task['public'].get('failureReason'))
+  atomic_json(folder/'run/status.json', final)
+  with patch.object(runner.time, 'time', return_value=1185):
+   service.refresh_task(task)
+  self.assertEqual(task['public']['state'], 'completed')
+  self.assertFalse(task['public'].get('failureReason'))
+
+ def test_runner_early_eof_failure_is_written_at_child_exit(self):
+  result, folder, writes, _, _ = self.run_output_events([(9, b'')], exit_at=22, exit_code=7)
+  self.assertEqual(result, 1)
+  self.assertEqual([at for at, _ in writes[3:-1]], [10, 20])
+  self.assertEqual(writes[-1][0], 22)
+  status = read_json(folder/'run/status.json')
+  self.assertEqual(status['state'], 'failed')
+  self.assertEqual(status['steps'][0]['exit_code'], 7)
+
+ def test_runner_failure_is_written_before_heartbeat_deadline(self):
+  result, folder, writes, _, _ = self.run_output_events([(0.25, b'error\n'), (0.5, b'')], exit_code=7)
+  self.assertEqual(result, 1)
+  self.assertEqual(len(writes), 4)
+  self.assertEqual(writes[-1][0], 0.5)
+  status = read_json(folder/'run/status.json')
+  self.assertEqual(status['state'], 'failed')
+  self.assertEqual(status['steps'][0]['state'], 'failed')
+  self.assertEqual(status['steps'][0]['exit_code'], 7)
+
+ def test_runner_step_boundaries_are_written_before_heartbeat_deadline(self):
+  result, _, writes, _, _ = self.run_output_events([(0.25, b'output\n'), (0.5, b'')], steps=2)
+  self.assertEqual(result, 0)
+  self.assertEqual([at for at, _ in writes], [0, 0, 0, 0.5, 0.5, 0.5, 1, 1])
+  self.assertEqual(writes[3][1]['steps'][0]['state'], 'completed')
+  self.assertEqual(writes[4][1]['stage'], 1)
+  self.assertEqual(writes[4][1]['steps'][1]['state'], 'running')
+  self.assertEqual(writes[6][1]['steps'][1]['state'], 'completed')
+  self.assertEqual(writes[7][1]['state'], 'completed')
+
  def test_changed_inputs_fail_before_any_step(self):
   data=self.project/'data.txt';data.write_text('first');self.manifest['inputs']=[str(data)]
   folder=self.approve(self.task());data.write_text('second')
