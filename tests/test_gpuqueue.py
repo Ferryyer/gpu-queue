@@ -1,8 +1,12 @@
+from concurrent.futures import ThreadPoolExecutor
 import errno
 import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
+import sys
+import threading
 import tempfile
 import time
 import unittest
@@ -1359,6 +1363,229 @@ class BlockedStopTests(unittest.TestCase):
         self.assertEqual(task['public']['step_records'][0]['log'], 'saved log')
         self.assertFalse(task['internal'].get('stop_confirmed'))
         self.assertEqual(next(t for t in self.control.state()['tasks'] if t['id']==task['id'])['state'], 'completed')
+
+
+class SubmissionDeleteTests(unittest.TestCase):
+    """Deleted versions stay deleted across CLI submissions and transaction races."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        home_patch = patch('gpuqueue.core.HOME', self.home)
+        home_patch.start()
+        self.addCleanup(home_patch.stop)
+        project = self.home / 'project'
+        project.mkdir()
+        (project / 'step.py').write_text('print("fixture")\n')
+        self.manifest = {
+            'title': 'submission fixture', 'project': str(project),
+            'code_files': ['step.py'],
+            'steps': [{'argv': [sys.executable, '{code}/step.py']}],
+        }
+        self.manifest_path = self.home / 'manifest.json'
+        self.store = Store(self.home / '.local/state/gpuq')
+
+    def cli_submit(self):
+        self.manifest_path.write_text(json.dumps(self.manifest))
+        return subprocess.run(
+            [sys.executable, '-m', 'gpuqueue.cli', 'submit',
+             '--manifest', str(self.manifest_path), '--source', 'Codex'],
+            env={**os.environ, 'HOME': str(self.home)},
+            capture_output=True, text=True, timeout=20,
+        )
+
+    def snapshot(self):
+        with self.store.connect() as db:
+            database = list(db.iterdump())
+        files = {
+            str(p.relative_to(self.store.root)): (
+                p.read_bytes(), p.stat().st_mode, p.stat().st_mtime_ns)
+            for p in (self.store.root / 'tasks').rglob('*') if p.is_file()
+        }
+        return database, files
+
+    def assert_cli_rejected(self):
+        before = self.snapshot()
+        result = self.cli_submit()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout, '')
+        error = json.loads(result.stderr)
+        self.assertFalse(error['ok'])
+        self.assertEqual(error['error'],
+                         '这一版任务已删除，请修改 submission_key 或清单内容后重新提交')
+        self.assertNotIn('http://', result.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_cli_first_submission_and_visible_duplicate_without_control_tables(self):
+        # Also represents old CLI-only databases with tasks/meta but no Control.
+        for created in [True, False]:
+            result = self.cli_submit()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertTrue(receipt['ok'])
+            self.assertEqual(receipt['created'], created)
+            self.assertEqual(receipt['state'], 'ready')
+            if created:
+                task_id = receipt['task_id']
+            self.assertEqual(receipt['task_id'], task_id)
+        self.assertIsNone(self.store.get(task_id)['internal']['approved_at'])
+        with self.store.connect() as db:
+            self.assertIsNone(db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='task_deletions'").fetchone())
+
+    def check_deleted_submission(self, state):
+        task, _ = self.store.submit(self.manifest)
+        control = Control(self.store)
+        platform = Mock()
+        platform.resources = {}
+        service = Service({}, self.store, platform)
+        if state != 'ready':
+            control.start(task['id'], task['digest'])
+            if state == 'synced':
+                service.sync()
+            if state == 'claimed':
+                control.claim(task['id'], task['digest'], control.state()['revision'])
+            control.stop(task['id'], task['digest'])
+            if state == 'claimed':
+                control.confirm_stop(task['id'], task['digest'])
+        folder = self.store.root / 'tasks' / task['id']
+        (folder / 'run/output.log').write_text('retained log')
+        (folder / 'outputs/result.txt').write_text('retained output')
+        control.delete(task['id'], task['digest'])
+        self.assert_cli_rejected()
+        self.assertEqual(control.state()['tasks'], [])
+        with self.assertRaises(ControlError):
+            control.start(task['id'], task['digest'])
+        # Even an approval not yet seen by the scheduler must not start work.
+        service.tick()
+        platform.request.assert_not_called()
+        platform.submit_job.assert_not_called()
+        self.assertEqual(control.state()['tasks'], [])
+
+    def test_cli_rejects_deleted_ready_task(self):
+        self.check_deleted_submission('ready')
+
+    def test_cli_rejects_deleted_approval_before_scheduler_sync(self):
+        self.check_deleted_submission('unsynced')
+
+    def test_cli_rejects_deleted_approval_after_scheduler_sync(self):
+        self.check_deleted_submission('synced')
+
+    def test_cli_rejects_deleted_claimed_and_confirmed_stopped_task(self):
+        self.check_deleted_submission('claimed')
+
+    def test_new_submission_key_creates_ready_version_requiring_new_approval(self):
+        old, _ = self.store.submit(self.manifest)
+        control = Control(self.store)
+        control.start(old['id'], old['digest'])
+        control.stop(old['id'], old['digest'])
+        control.delete(old['id'], old['digest'])
+        self.manifest['submission_key'] = 'second-version'
+        result = self.cli_submit()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertTrue(receipt['created'])
+        self.assertNotEqual(receipt['task_id'], old['id'])
+        task = self.store.get(receipt['task_id'])
+        self.assertEqual(task['public']['state'], 'ready')
+        self.assertIsNone(task['internal']['approved_at'])
+        self.assertIsNone(task['internal']['dispatch'])
+        visible = control.state()['tasks']
+        self.assertEqual([t['id'] for t in visible], [task['id']])
+        self.assertIsNone(visible[0]['approved_at'])
+        with self.assertRaises(ControlError):
+            control.claim(task['id'], task['digest'], control.state()['revision'])
+
+    def race(self, *, existing=False, delete=True, rename_errno=None):
+        """Pause the losing submit before lookup or during snapshot preparation.
+
+        The other connection creates/deletes and commits before releasing it.
+        No sleeps or timing-dependent winner selection are used.
+        """
+        control = Control(self.store)
+        if existing:
+            task, _ = self.store.submit(self.manifest)
+        paused, resume = threading.Event(), threading.Event()
+        main_thread = threading.current_thread()
+        connect, copy = self.store.connect, shutil.copy2
+        rename = Path.rename
+        collisions = []
+
+        def wait_for_commit():
+            if threading.current_thread() is not main_thread and not paused.is_set():
+                paused.set()
+                if not resume.wait(10):
+                    raise TimeoutError('competing transaction did not complete')
+
+        def gated_connect():
+            wait_for_commit()
+            return connect()
+
+        def gated_copy(*args, **kwargs):
+            wait_for_commit()
+            return copy(*args, **kwargs)
+
+        def competing_rename(source, destination):
+            if (rename_errno is not None and
+                    threading.current_thread() is not main_thread and
+                    destination.is_dir()):
+                collisions.append(rename_errno)
+                raise OSError(rename_errno, os.strerror(rename_errno), str(destination))
+            return rename(source, destination)
+
+        target = (patch.object(self.store, 'connect', side_effect=gated_connect)
+                  if existing else patch('gpuqueue.core.shutil.copy2', side_effect=gated_copy))
+        with target, patch.object(Path, 'rename', competing_rename), ThreadPoolExecutor(max_workers=1) as pool:
+            losing = pool.submit(self.store.submit, self.manifest)
+            try:
+                self.assertTrue(paused.wait(10), 'submit did not reach barrier')
+                if not existing:
+                    task, created = self.store.submit(self.manifest)
+                    self.assertTrue(created)
+                if delete:
+                    control.delete(task['id'], task['digest'])
+                before = self.snapshot()
+            finally:
+                resume.set()
+            if delete:
+                with self.assertRaisesRegex(ValueError, '已删除.*submission_key'):
+                    losing.result(timeout=10)
+            else:
+                duplicate, created = losing.result(timeout=10)
+                self.assertEqual(duplicate, task)
+                self.assertFalse(created)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(list((self.store.root / 'tasks').glob('.prepare-*')))
+        if rename_errno is not None:
+            self.assertEqual(collisions, [rename_errno])
+
+    def test_deletion_committed_before_existing_task_lookup_is_rejected(self):
+        self.race(existing=True)
+
+    def test_concurrent_insert_then_delete_before_final_submission_is_rejected(self):
+        self.race()
+
+    def test_concurrent_visible_insert_returns_existing_task_created_false(self):
+        self.race(delete=False)
+
+    def test_directory_collision_errnos_reach_final_database_decision(self):
+        for error in [errno.EEXIST, errno.ENOTEMPTY]:
+            for delete in [False, True]:
+                with self.subTest(errno=error, deleted=delete):
+                    self.manifest['submission_key'] = f'collision-{error}-{delete}'
+                    self.race(delete=delete, rename_errno=error)
+
+    def test_unrelated_snapshot_rename_errors_propagate(self):
+        for error in [errno.EACCES, errno.ENOSPC]:
+            with self.subTest(errno=error):
+                before = self.snapshot()
+                failure = OSError(error, os.strerror(error))
+                with patch.object(Path, 'rename', side_effect=failure):
+                    with self.assertRaises(OSError) as raised:
+                        self.store.submit(self.manifest)
+                self.assertIs(raised.exception, failure)
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse(list((self.store.root / 'tasks').glob('.prepare-*')))
 
 
 if __name__=='__main__':unittest.main()
