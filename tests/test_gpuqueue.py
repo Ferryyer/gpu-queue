@@ -51,7 +51,7 @@ class QueueTests(unittest.TestCase):
    self.assertEqual(execute(folder),1)
   self.assertFalse((folder/'outputs/two.json').exists());self.assertEqual(len(read_json(folder/'run/status.json')['steps']),1)
 
- def run_output_events(self, events, *, exit_code=0, steps=1):
+ def run_output_events(self, events, *, exit_code=0, steps=1, exit_at=None):
   # A deterministic child-output timeline: each event is (elapsed seconds, bytes).
   # The fake selector honors deadlines, including silent periods before an event.
   self.manifest['steps'] = [dict(name=f'step {i}', argv=['/usr/bin/python3', '-c', 'pass']) for i in range(steps)]
@@ -62,6 +62,14 @@ class QueueTests(unittest.TestCase):
   timeouts = []
   process = Mock(pid=1234)
   process.wait.return_value = exit_code
+  if exit_at is not None:
+   def wait(timeout=None):
+    if timeout is None or clock[0] + timeout >= exit_at:
+     clock[0] = exit_at
+     return exit_code
+    clock[0] += timeout
+    raise subprocess.TimeoutExpired('synthetic child', timeout)
+   process.wait.side_effect = wait
   process.stdout.fileno.return_value = 123
   key = Mock(fileobj=process.stdout)
 
@@ -145,6 +153,43 @@ class QueueTests(unittest.TestCase):
   self.assertEqual(result, 0)
   self.assertEqual(timeouts, [10, 0.25, 10, 10])
   self.assertEqual([at for at, _ in writes[3:-2]], [10, 20])
+
+ def test_runner_early_eof_keeps_heartbeat_until_child_exits(self):
+  result, folder, writes, _, _ = self.run_output_events([(9, b'')], exit_at=185)
+  self.assertEqual(result, 0)
+  self.assertEqual([at for at, _ in writes[3:-2]], list(range(10, 181, 10)))
+  # A scheduler read at 182 seconds must see a live step, not a stale heartbeat.
+  observed_at, observed = [entry for entry in writes if entry[0] <= 182][-1]
+  self.assertLessEqual(182 - observed_at, 10)
+  self.assertEqual(observed['state'], 'running')
+  self.assertEqual(observed['updated_at'], 1180)
+  self.assertEqual(writes[-1][0], 185)
+  final = read_json(folder/'run/status.json')
+  self.assertEqual(final['state'], 'completed')
+  task = self.store.get(folder.name)
+  task['internal'].update(request_uuid='synthetic-resource', job_uuid='synthetic-job')
+  platform = Mock(resources={})
+  platform.job_folder.return_value = self.root/'jobs'
+  service = Service({}, self.store, platform)
+  atomic_json(folder/'run/status.json', observed)
+  with patch.object(runner.time, 'time', return_value=1182):
+   service.refresh_task(task)
+  self.assertEqual(task['public']['state'], 'running')
+  self.assertFalse(task['public'].get('failureReason'))
+  atomic_json(folder/'run/status.json', final)
+  with patch.object(runner.time, 'time', return_value=1185):
+   service.refresh_task(task)
+  self.assertEqual(task['public']['state'], 'completed')
+  self.assertFalse(task['public'].get('failureReason'))
+
+ def test_runner_early_eof_failure_is_written_at_child_exit(self):
+  result, folder, writes, _, _ = self.run_output_events([(9, b'')], exit_at=22, exit_code=7)
+  self.assertEqual(result, 1)
+  self.assertEqual([at for at, _ in writes[3:-1]], [10, 20])
+  self.assertEqual(writes[-1][0], 22)
+  status = read_json(folder/'run/status.json')
+  self.assertEqual(status['state'], 'failed')
+  self.assertEqual(status['steps'][0]['exit_code'], 7)
 
  def test_runner_failure_is_written_before_heartbeat_deadline(self):
   result, folder, writes, _, _ = self.run_output_events([(0.25, b'error\n'), (0.5, b'')], exit_code=7)

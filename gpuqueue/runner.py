@@ -109,7 +109,16 @@ def execute(folder):
                     heartbeat_at = heartbeat_now
             selector.close()
             process.stdout.close()
-            code = process.wait()
+            # EOF only closes the log stream; the child may still be computing.
+            while True:
+                timeout = max(0, 10 - (time.monotonic() - heartbeat_at))
+                try:
+                    code = process.wait(timeout=timeout)
+                    break
+                except subprocess.TimeoutExpired:
+                    status['updated_at'] = time.time()
+                    write(state_file, status)
+                    heartbeat_at = time.monotonic()
             record.update(exit_code=code, finished_at=time.time())
             if code != 0:
                 record['state'] = 'failed'
