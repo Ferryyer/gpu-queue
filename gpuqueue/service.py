@@ -1,3 +1,4 @@
+from copy import deepcopy
 import fcntl
 import hashlib
 import json
@@ -129,6 +130,37 @@ class Service:
         return request, argv
 
     def refresh_task(self, task):
+        internal = task['internal']
+        if internal.get('stop_requested_at') and not internal.get('stop_confirmed'):
+            # A crash can leave the confirmation committed in controls before
+            # the task snapshot records it. Recover it before any result I/O.
+            with self.store.connect() as db:
+                row = db.execute('SELECT controls.stopped_at FROM controls JOIN tasks ON tasks.id=controls.id '
+                                 'WHERE tasks.id=? AND tasks.digest=? AND controls.stop_at=?',
+                                 (task['id'], task['digest'], internal['stop_requested_at'])).fetchone()
+            if row and row['stopped_at']:
+                internal['stop_confirmed'] = True
+        if not internal.get('stop_confirmed'):
+            return self._refresh_task(task)
+        # Late results are optional enrichment after a confirmed stop. Work on
+        # a copy so malformed metadata or unreadable logs cannot partially
+        # overwrite the saved result or stop other tasks from being scheduled.
+        candidate = deepcopy(task)
+        try:
+            self._refresh_task(candidate)
+        except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError) as error:
+            public = task['public']
+            message = '迟到结果读取失败，保留已确认停止；稍后重试：'+redact(type(error).__name__+': '+str(error))[:400]
+            if public.get('result_refresh_error') != message:
+                public['events'].append(message)
+            public['result_refresh_error'] = message
+            if public['state'] != 'completed':
+                public.update(state='stopped', phase='任务已停止，已有产物保留')
+            self.store.save(task)
+        else:
+            task.update(candidate)
+
+    def _refresh_task(self, task):
         internal, public = task['internal'], task['public']
         confirmed = internal.get('stop_confirmed')
         if confirmed and public['state'] == 'completed':
@@ -209,6 +241,7 @@ class Service:
             public.pop('failureReason',None)
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
+        public.pop('result_refresh_error', None)
         self.store.save(task)
 
     def stop_control(self, folder):

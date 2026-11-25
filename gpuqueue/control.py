@@ -85,7 +85,7 @@ class Control:
         row = db.execute('SELECT internal FROM tasks WHERE id=?', (task['id'],)).fetchone()
         internal = json.loads(row['internal'])
         if (internal.get('dispatch') in {'submitting', 'unknown'} and not
-                (task['state'] == 'stopped' and task['stop_requested_at'] and task['stopped_at'])):
+                (task['stop_requested_at'] and task['stopped_at'])):
             raise ControlError('执行状态尚未确认，不能删除此任务')
         if task['state'] not in DELETABLE and not (
                 task['state'] == 'ready' and not task['approved_at'] and not task['claimed_at']):

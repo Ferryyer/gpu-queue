@@ -361,6 +361,152 @@ class BlockedStopTests(unittest.TestCase):
         self.assertEqual((self.folder/'run/dispatch.json').read_bytes(), marker)
         self.assertEqual(self.platform.submit_job.call_count, 1)
         self.platform.request.assert_not_called()
+        with self.assertRaises(ControlError): self.control.delete(task['id'], 'stale')
+        self.control.delete(task['id'], task['digest'])
+        self.restart()
+        self.service.tick()
+        self.assertNotIn(task['id'], [t['id'] for t in self.control.state()['tasks']])
+        self.assertEqual(output.read_text(), 'saved')
+        self.assertEqual((self.folder/'run/dispatch.json').read_bytes(), marker)
+        self.assertEqual(self.store.get(task['id'])['internal']['dispatch'], 'unknown')
+
+    def test_confirmed_late_completion_remains_eligible_for_existing_cleanup_filter(self):
+        self.blocked()
+        self.stop()
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        state = self.control.state()
+        with self.assertRaises(ControlError): self.control.cleanup([self.task['id']], state['revision'])
+        self.receipt()
+        atomic_json(self.folder/'run/status.json', {'state': 'completed', 'stage': 1,
+            'started_at': time.time()-10, 'steps': [{'state': 'completed', 'outputs': ['saved']} ]})
+        self.service.tick()
+        state = self.control.state()
+        self.assertEqual(next(t for t in state['tasks'] if t['id']==self.task['id'])['state'], 'completed')
+        self.control.cleanup([self.task['id']], state['revision'])
+        self.restart()
+        self.service.tick()
+        self.assertNotIn(self.task['id'], [t['id'] for t in self.control.state()['tasks']])
+        task = self.store.get(self.task['id'])
+        self.assertEqual(task['public']['step_records'][0]['outputs'], ['saved'])
+        self.assertEqual(task['internal']['dispatch'], 'unknown')
+
+    def test_invalid_late_job_status_does_not_block_successor_and_can_recover(self):
+        self.blocked()
+        self.stop()
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        # The first successor finished before the original receipt arrived.
+        following = self.store.get(self.following['id'])
+        following['public']['state'] = 'completed'
+        self.store.save(following)
+        next_task = self.add_task(3)
+        self.control.start(next_task['id'], next_task['digest'])
+        original = self.store.get(self.task['id'])
+        original_internal = dict(original['internal'])
+        marker = (self.folder/'run/dispatch.json').read_bytes()
+        stopped_at = next(t for t in self.control.state()['tasks'] if t['id']==original['id'])['stopped_at']
+        self.receipt()
+        status_path = self.platform.job_folder('original')/'compute-job/status.json'
+        status_path.parent.mkdir(); status_path.write_text('{invalid late status')
+        atomic_json(self.folder/'run/status.json', {'state': 'completed', 'stage': 1,
+            'started_at': time.time()-10, 'steps': [{'state': 'completed', 'outputs': ['kept-result']}]})
+        (self.folder/'run/step-0.log').write_text('kept log')
+        for _ in range(2):
+            self.restart()
+            self.service.tick()
+            task = self.store.get(original['id'])
+            self.assertEqual(task['public']['state'], 'stopped')
+            self.assertEqual(task['internal'], original_internal)
+            self.assertIn('迟到结果读取失败', task['public']['result_refresh_error'])
+            self.assertEqual(sum('迟到结果读取失败' in event for event in task['public']['events']), 1)
+            self.assertEqual(task['public'].get('step_records', []), original['public'].get('step_records', []))
+            self.assertEqual(next(t for t in self.control.state()['tasks'] if t['id']==task['id'])['stopped_at'], stopped_at)
+        self.assertEqual(self.store.get(next_task['id'])['internal']['dispatch'], 'submitted')
+        self.assertEqual(self.platform.submit_job.call_count, 2)  # Successors only.
+        self.platform.request.assert_not_called()
+        self.assertEqual((self.folder/'run/dispatch.json').read_bytes(), marker)
+        atomic_json(status_path, {'state': 'finished'})
+        self.service.tick()
+        recovered = self.store.get(original['id'])
+        self.assertEqual(recovered['public']['state'], 'completed')
+        self.assertNotIn('result_refresh_error', recovered['public'])
+        self.assertEqual(recovered['public']['step_records'][0]['outputs'], ['kept-result'])
+        self.assertEqual(recovered['public']['step_records'][0]['log'], 'kept log')
+        for key in ['dispatch', 'job_uuid', 'request_uuid', 'argv', 'stop_confirmed']:
+            self.assertEqual(recovered['internal'].get(key), original_internal.get(key))
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+
+    def test_confirmed_result_read_errors_preserve_snapshot_and_retry(self):
+        self.blocked()
+        self.stop()
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        self.idle_resource()
+        self.service.tick()
+        self.receipt()
+        task = self.store.get(self.task['id'])
+        task['public']['step_records'] = [{'state': 'completed', 'outputs': ['earlier-result']}]
+        self.store.save(task)
+        path = self.folder/'run/status.json'
+        for payload in ['{broken runner status', '{"state":"completed","steps":42}', '{"state":"completed","started_at":"invalid"}']:
+            with self.subTest(payload=payload):
+                path.write_text(payload)
+                self.restart()
+                self.service.tick()
+                saved = self.store.get(task['id'])
+                self.assertEqual(saved['public']['state'], 'stopped')
+                self.assertEqual(saved['public']['step_records'], task['public']['step_records'])
+                self.assertIn('迟到结果读取失败', saved['public']['result_refresh_error'])
+        path.unlink()
+        def read_with_denied_result(file, *args):
+            if Path(file) == path:
+                raise PermissionError('fixture read denied')
+            return read_json(file, *args)
+        with patch('gpuqueue.service.read_json', side_effect=read_with_denied_result):
+            # Isolate a read failure, leaving database persistence available.
+            self.service.refresh_task(self.store.get(task['id']))
+        self.assertEqual(self.store.get(task['id'])['public']['state'], 'stopped')
+        self.assertIn('PermissionError', self.store.get(task['id'])['public']['result_refresh_error'])
+        self.platform.request.assert_not_called()
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+
+    def test_persisted_confirmation_survives_bad_late_status_after_snapshot_crash(self):
+        self.blocked()
+        self.stop()
+        self.service.sync()
+        task = self.store.get(self.task['id'])
+        self.platform.resources['original'] = {'id': 'original', 'status': 'closed'}
+        with patch.object(self.store, 'save', side_effect=RuntimeError('fixture snapshot crash')):
+            with self.assertRaisesRegex(RuntimeError, 'fixture snapshot crash'):
+                self.service.process_stop(task)
+        self.assertFalse(self.store.get(task['id'])['internal'].get('stop_confirmed'))
+        self.receipt()
+        path = self.platform.job_folder('original')/'compute-job/status.json'
+        path.parent.mkdir(); path.write_text('{invalid late status')
+        self.idle_resource()
+        self.restart()
+        self.service.tick()
+        saved = self.store.get(task['id'])
+        self.assertTrue(saved['internal']['stop_confirmed'])
+        self.assertEqual(saved['public']['state'], 'stopped')
+        self.assertIn('JSONDecodeError', saved['public']['result_refresh_error'])
+        self.assertEqual(saved['internal']['dispatch'], 'unknown')
+        self.assertNotIn('job_uuid', saved['internal'])
+        self.assert_next_dispatched()
+        self.assertEqual(self.platform.submit_job.call_count, 1)
+
+    def test_unconfirmed_invalid_job_status_still_fails_closed(self):
+        self.blocked()
+        self.stop()
+        self.receipt()
+        path = self.platform.job_folder('original')/'compute-job/status.json'
+        path.parent.mkdir(); path.write_text('{broken status')
+        with self.assertRaises(ValueError): self.service.tick()
+        self.platform.submit_job.assert_not_called()
+        self.platform.request.assert_not_called()
+        with self.assertRaises(ControlError): self.control.delete(self.task['id'], self.task['digest'])
 
     def test_late_live_receipt_cannot_undo_confirmed_stop(self):
         self.blocked()
