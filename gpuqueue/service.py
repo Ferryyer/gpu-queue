@@ -1,12 +1,12 @@
 import fcntl
-import hashlib
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import time
-from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, read_json, canonical, now
+from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, read_json, now
 from .platform import Markflow, PlatformError
 from .feishu import FeishuAuthError
 
@@ -32,7 +32,6 @@ class Service:
         self.store = store or Store()
         self.platform = platform or Markflow(self.store, config)
         self.remote_revision = None
-        self.synced = {}
         self.error = None
         self.checked_at = None
 
@@ -45,30 +44,22 @@ class Service:
         raise ValueError('Unknown internal queue operation')
 
     def sync(self):
-        tasks = self.store.tasks()
-        changed = []
-        fingerprints = {}
-        for task in tasks:
-            digest = hashlib.sha256(canonical(task['public']).encode()).hexdigest()
-            fingerprints[task['id']] = digest
-            if self.synced.get(task['id']) != digest:
-                changed.append({'id': task['id'], 'digest': task['digest'], 'payload': task['public']})
         resources = []
         for resource in self.platform.resources.values():
             resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'monitor', 'recorded_phase']})
-        response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {
+        response = self.remote('/api/worker/sync', {'heartbeat': {
             'service': 'online', 'error': self.error, 'resources': resources,
             'resource_policy': self.store.metadata('resource_policy'), 'updated_at': now(),
             'feishu_auth': self.store.metadata('feishu_auth'),
             'checked_at': self.checked_at,
             'last_success_at': self.store.metadata('queue_last_success_at'),
         }})
-        self.synced.update(fingerprints)
         self.remote_revision = response['revision']
         for remote in response['tasks']:
             local = self.store.get(remote['id'])
             if not local or local['digest'] != remote['digest']:
                 continue
+            previous = deepcopy(local)
             if remote.get('approved_at') and not local['internal'].get('approved_at'):
                 local['internal']['approved_at'] = remote['approved_at']
                 local['public']['approved_at'] = remote['approved_at']
@@ -84,14 +75,21 @@ class Service:
                 at = remote['stop_requested_at']
                 if not local['internal'].get('stop_requested_at'):
                     local['public']['events'].append('你在网页请求停止任务；已有产物保留，后续步骤不再执行')
+                if (local['internal'].get('stop_requested_at') != at or
+                        not local['internal'].get('stop_confirmed') and remote['state'] not in ['completed', 'cancelled']):
+                    atomic_json(self.store.root/'tasks'/local['id']/'run/stop.json', {'task':local['id'],'digest':local['digest'],'at':at})
                 local['internal']['stop_requested_at'] = at
-                atomic_json(self.store.root/'tasks'/local['id']/'run/stop.json', {'task':local['id'],'digest':local['digest'],'at':at})
                 if remote['state'] != 'completed':
                     local['public'].update(state=remote['state'], phase='已移出队列' if remote['state']=='cancelled' else '任务已停止，已有产物保留' if remote['state']=='stopped' else '正在确认任务进程退出；已有产物保留')
-            self.store.save(local)
+            self.save_if_changed(local, previous)
+
+    def save_if_changed(self, task, previous):
+        if task != previous:
+            self.store.save(task)
 
     def refresh_task(self, task):
         internal, public = task['internal'], task['public']
+        previous = deepcopy(task)
         request_id, job_id = internal.get('request_uuid'), internal.get('job_uuid')
         if internal.get('dispatch') in ['submitting', 'unknown'] and not job_id:
             expected = internal.get('argv')
@@ -111,7 +109,7 @@ class Service:
             else:
                 internal['dispatch'] = 'unknown'
                 public.update(state='blocked', failureReason='GPU 提交曾中断，无法唯一确认回执；已停止自动重试')
-                self.store.save(task)
+                self.save_if_changed(task, previous)
                 return
         if not job_id:
             return
@@ -150,7 +148,7 @@ class Service:
             public.pop('failureReason',None)
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
-        self.store.save(task)
+        self.save_if_changed(task, previous)
 
     def stop_control(self, folder):
         target = folder/'run/stop-control.py'
@@ -163,6 +161,7 @@ class Service:
         internal, public = task['internal'], task['public']
         if not internal.get('stop_requested_at') or internal.get('stop_confirmed') or public['state'] in ['completed','cancelled']:
             return
+        previous = deepcopy(task)
         folder = self.store.root/'tasks'/task['id']
         request, job = internal.get('request_uuid'), internal.get('job_uuid')
         proof = read_json(folder/'run/stop-result.json',{})
@@ -180,17 +179,17 @@ class Service:
             public['events'].append('已确认任务停止；不会自动重跑；停止任务不等于释放 GPU')
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
-            self.store.save(task);return
+            self.save_if_changed(task, previous);return
         if valid and proof.get('state')=='unverified':
             public['phase'] = '停止状态待核查：'+redact(proof.get('error','未能确认所有任务进程退出'))
-            self.store.save(task);return
+            self.save_if_changed(task, previous);return
         if 'supervise' in internal.get('argv',[]) and not internal.get('stop_dispatch'):
             # The new control layer observes the marker itself. A separate GPU
             # command is only a fallback if that layer does not confirm in time.
             started = internal.setdefault('stop_supervisor_wait_started',time.time())
             if time.time()-started<15:
                 public.update(state='stopping',phase='已通知执行器停止，等待进程退出确认')
-                self.store.save(task);return
+                self.save_if_changed(task, previous);return
         if internal.get('stop_dispatch'):
             if internal.get('stop_job_uuid'):
                 stop_folder = self.platform.job_folder(request)/internal['stop_job_uuid']
@@ -198,16 +197,16 @@ class Service:
                 if stop_status.get('state') in ['finished','failed'] and not valid:
                     public['phase'] = '停止命令已退出但未获得有效确认，状态待核查'
                     public['stop_log'] = tail(stop_folder/'output.log')
-                    self.store.save(task)
+                    self.save_if_changed(task, previous)
             if internal['stop_dispatch']=='submitting' and not internal.get('stop_job_uuid'):
                 matches = [p.stem for p in self.platform.job_folder(request).glob('*.json') if read_json(p,{}).get('argv')==internal['stop_argv']]
                 if len(matches)==1: internal.update(stop_job_uuid=matches[0],stop_dispatch='submitted')
                 else: public['phase'] = '停止请求提交回执待核查，不会重复发送'
-                self.store.save(task)
+                self.save_if_changed(task, previous)
             return
         if not request or not job:
             public['phase'] = '正在核对原计算任务回执，停止请求已保存'
-            self.store.save(task);return
+            self.save_if_changed(task, previous);return
         control = self.stop_control(folder)
         argv = ['/usr/bin/python3','-I',str(control),'stop',str(folder),request,job]
         internal.update(stop_dispatch='submitting',stop_argv=argv)
@@ -246,7 +245,13 @@ class Service:
 
     def tick(self):
         for task in self.store.tasks():
-            self.refresh_task(task)
+            internal, public = task['internal'], task['public']
+            # blocked and ambiguous submissions still need receipt reconciliation.
+            pending_stop = (internal.get('stop_requested_at') and not internal.get('stop_confirmed')
+                            and public['state'] not in ['completed', 'cancelled'])
+            if (public['state'] not in TERMINAL or public['state'] == 'blocked'
+                    or internal.get('dispatch') in ['submitting', 'unknown'] or pending_stop):
+                self.refresh_task(task)
         # Synchronize authorization and order before any platform operation.
         self.sync()
         for task in self.store.tasks():
@@ -266,8 +271,9 @@ class Service:
         if selection:
             self.dispatch(task, selection)
         else:
+            previous = deepcopy(task)
             task['public'].update(state='waiting_gpu', phase=reason)
-            self.store.save(task)
+            self.save_if_changed(task, previous)
             if not active:
                 request_id = self.platform.request(task)
                 if request_id:
@@ -318,8 +324,9 @@ class Service:
             self.error = message
             for task in self.store.tasks():
                 if task['internal'].get('approved_at') and task['public']['state'] in ['queued', 'waiting_gpu', 'checking_resources']:
+                    previous = deepcopy(task)
                     task['public']['phase'] = message if isinstance(error, FeishuAuthError) else 'GPU 申请或状态核查未完成；已暂停新增申请：'+message
-                    self.store.save(task)
+                    self.save_if_changed(task, previous)
         # tick publishes before platform I/O to read browser decisions. Publish
         # again afterwards so failures and recovered states reach the UI now.
         self.checked_at = now()

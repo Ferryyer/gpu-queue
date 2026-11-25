@@ -6,7 +6,8 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch,Mock
-from gpuqueue.core import Store,normalize,atomic_json,read_json,HOME
+from gpuqueue.core import Store,normalize,atomic_json,read_json,HOME,canonical
+from gpuqueue.control import Control
 from gpuqueue.runner import execute
 from gpuqueue.service import Service
 from gpuqueue.platform import Markflow
@@ -159,5 +160,154 @@ class QueueTests(unittest.TestCase):
   task=self.task();task['doc']['resources']['memory_gb']=80
   adapter,resource=self.h100_adapter();running=self.task();running['internal']['dispatched_at']=time.time()-600
   self.assertIsNone(adapter.select(task,[running])[0])
+
+class ServiceRefreshTests(unittest.TestCase):
+ def setUp(self):
+  self.temp = tempfile.TemporaryDirectory()
+  self.addCleanup(self.temp.cleanup)
+  self.store = Store(Path(self.temp.name)/'queue')
+  self.control = Control(self.store)
+  self.platform = Mock()
+  self.platform.resources = {}
+  self.platform.job_folder.return_value = Path(self.temp.name)/'jobs'
+  self.service = Service({}, self.store, self.platform)
+
+ def task(self, state, **internal):
+  index = len(self.store.tasks())+1
+  task_id = 'GQ-'+str(index).zfill(16)
+  public = {'id':task_id, 'state':state, 'events':[], 'checks':['pending']}
+  internal = {'position':0, **internal}
+  with self.store.connect() as db:
+   db.execute('INSERT INTO tasks VALUES (?,?,?,?,?)',
+              (task_id, str(index)*64, canonical({'project':self.temp.name}), canonical(public), canonical(internal)))
+  return self.store.get(task_id)
+
+ def status(self, task, state='running', **extra):
+  atomic_json(self.store.root/'tasks'/task['id']/'run/status.json',
+              {'state':state, 'started_at':1000, 'updated_at':1000, 'steps':[], **extra})
+
+ def test_tick_skips_terminal_files_and_saves_but_refreshes_active_task(self):
+  history = [self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted')
+             for state in ['completed', 'failed', 'interrupted', 'cancelled', 'stopped']]
+  deleted = self.task('completed', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.control.delete(deleted['id'], deleted['digest'])
+  history.append(deleted)
+  active = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.status(active)
+  original_read = read_json
+  def read_active_only(path, *args):
+   self.assertFalse(any(t['id'] in Path(path).parts for t in history))
+   return original_read(path, *args)
+  with patch('gpuqueue.service.read_json', side_effect=read_active_only), \
+       patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.tick()
+  self.assertEqual([call.args[0]['id'] for call in save.call_args_list], [active['id']])
+  self.assertEqual(self.store.get(active['id'])['public']['state'], 'running')
+  self.platform.refresh.assert_called_once_with(active=True)
+  self.platform.submit_job.assert_not_called()
+
+ def test_unchanged_active_refresh_and_both_cycle_syncs_do_not_save(self):
+  task = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+  self.task('ready')
+  self.status(task, steps=[{'state':'running'}])
+  log = self.store.root/'tasks'/task['id']/'run/step-0.log'
+  log.write_text('first log')
+  with patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.cycle()
+   with patch.object(self.store, 'save', wraps=self.store.save) as save:
+    self.service.cycle()
+   save.assert_not_called()
+   log.write_text('new log')
+   with patch.object(self.store, 'save', wraps=self.store.save) as save:
+    self.service.tick()
+   save.assert_called_once()
+  self.assertEqual(self.store.get(task['id'])['public']['step_records'][0]['log'], 'new log')
+
+ def test_sync_saves_browser_changes_once_and_rejects_stale_digest(self):
+  task = self.task('ready')
+  self.control.start(task['id'], task['digest'])
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.sync()
+   self.service.sync()
+  save.assert_called_once()
+  saved = self.store.get(task['id'])
+  self.assertTrue(saved['internal']['approved_at'])
+  self.assertEqual(saved['public']['state'], 'queued')
+  self.assertEqual(len(saved['public']['events']), 1)
+  self.service.remote = Mock(return_value={'revision':2, 'tasks':[
+   {'id':task['id'], 'digest':'stale', 'position':99, 'stop_requested_at':'later'}]})
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.sync()
+  save.assert_not_called()
+  self.assertEqual(self.store.get(task['id']), saved)
+
+ def test_blocked_and_terminal_ambiguous_dispatch_reconcile_late_receipt(self):
+  for state, dispatch in [('blocked', 'unknown'), ('failed', 'submitting')]:
+   with self.subTest(state=state):
+    argv = ['unique-runner', state]
+    task = self.task(state, request_uuid='r', dispatch=dispatch, argv=argv)
+    self.service.tick()  # No receipt yet; retain the uncertain submission.
+    self.assertEqual(self.store.get(task['id'])['internal']['dispatch'], 'unknown')
+    atomic_json(self.platform.job_folder('r')/(state+'.json'), {'argv':argv})
+    self.status(task, updated_at=time.time())
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['internal']['job_uuid'], state)
+    self.assertEqual(saved['public']['state'], 'running')
+  self.platform.request.assert_not_called()
+  self.platform.submit_job.assert_not_called()
+
+ def test_unchanged_unresolved_receipt_does_not_save(self):
+  task = self.task('blocked', request_uuid='r', dispatch='unknown', argv=['runner'])
+  self.service.tick()
+  with patch.object(self.store, 'save', wraps=self.store.save) as save:
+   self.service.tick()
+  save.assert_not_called()
+  self.assertEqual(self.store.get(task['id'])['public']['state'], 'blocked')
+
+ def test_blocked_and_execution_unknown_with_jobs_still_observe_completion(self):
+  for state in ['blocked', 'execution_unknown']:
+   with self.subTest(state=state):
+    task = self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted')
+    self.status(task, 'completed', finished_at=1060)
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['public']['state'], 'completed')
+    self.assertTrue(saved['internal']['finished_recorded'])
+    with patch.object(self.store, 'save', wraps=self.store.save) as save:
+     self.service.tick()
+    save.assert_not_called()
+
+ def test_terminal_with_pending_stop_still_checks_matching_proof(self):
+  task = self.task('ready')
+  state = self.control.start(task['id'], task['digest'])
+  self.control.claim(task['id'], task['digest'], state['revision'])
+  state = self.control.stop(task['id'], task['digest'])
+  at = state['tasks'][0]['stop_requested_at']
+  task['internal'].update(request_uuid='r', job_uuid='j', dispatch='submitted', stop_requested_at=at)
+  task['public']['state'] = 'failed'
+  self.store.save(task)
+  self.status(task, 'failed', finished_at=1060)
+  proof_path = self.store.root/'tasks'/task['id']/'run/stop-result.json'
+  proof = {'task':task['id'], 'digest':'wrong', 'stop_at':at, 'uid':os.getuid(),
+           'request':'r', 'job':'j', 'state':'stopped'}
+  atomic_json(proof_path, proof)
+  task['internal']['stop_dispatch'] = 'submitted'
+  self.store.save(task)
+  self.service.tick()
+  self.assertFalse(self.store.get(task['id'])['internal'].get('stop_confirmed'))
+  atomic_json(proof_path, {**proof, 'digest':task['digest']})
+  self.service.tick()
+  saved = self.store.get(task['id'])
+  self.assertTrue(saved['internal']['stop_confirmed'])
+  self.assertEqual(saved['public']['state'], 'stopped')
+  self.service = Service({}, self.store, self.platform)  # Restart retains the settled state.
+  with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.read_json', side_effect=AssertionError('settled task read')), \
+       patch('gpuqueue.service.atomic_json', side_effect=AssertionError('settled stop marker write')):
+   self.service.tick()
+  save.assert_not_called()
+  self.platform.submit_job.assert_not_called()
 
 if __name__=='__main__':unittest.main()
