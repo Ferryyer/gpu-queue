@@ -116,6 +116,11 @@ class Service:
         folder = self.store.root/'tasks'/task['id']
         status = read_json(folder/'run/status.json')
         job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
+        resource = self.platform.resources.get(request_id, {})
+        if job_status.get('state') in ['finished', 'failed'] or resource.get('status') == 'closed':
+            # The runner may have finished after the first status snapshot.
+            # Read again after observing exit before freezing a terminal task.
+            status = read_json(folder/'run/status.json')
         if status:
             public.update(state=status['state'], stage=status.get('stage', 0), step_records=status.get('steps', []), progress=None)
             if status.get('error'):
@@ -135,7 +140,6 @@ class Service:
             public.update(state='failed', failureReason='执行入口退出，尚未开始步骤。请查看任务日志。', entry_log=tail(self.platform.job_folder(request_id)/job_id/'output.log'))
         elif public['state'] not in TERMINAL and time.time()-internal.get('dispatched_at', job_status.get('at', 0)) > 180:
             public.update(state='execution_unknown', failureReason='已投放计算，等待执行端回执核查')
-        resource = self.platform.resources.get(request_id, {})
         if resource.get('status') == 'closed' and public['state'] not in TERMINAL:
             public.update(state='interrupted', failureReason='GPU 已回收，任务中断；保留已有检查点，不自动重新申请或重跑')
         public['request_uuid'], public['job_uuid'] = request_id, job_id
@@ -172,6 +176,12 @@ class Service:
         not_dispatched = not job and not internal.get('dispatch')
         allocation_closed = request and self.platform.resources.get(request,{}).get('status')=='closed'
         if (valid and proof.get('state')=='stopped') or not_dispatched or allocation_closed:
+            if job:
+                # Matching stop proof is written after the process exits. A
+                # natural completion since tick's first refresh takes priority.
+                self.refresh_task(task)
+                if public['state'] == 'completed':
+                    return
             Control(self.store).confirm_stop(task['id'],task['digest'])
             internal['stop_confirmed'] = True
             public.update(state='stopped',phase='任务已停止，已有产物保留')

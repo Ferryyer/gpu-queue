@@ -165,11 +165,14 @@ class ServiceRefreshTests(unittest.TestCase):
  def setUp(self):
   self.temp = tempfile.TemporaryDirectory()
   self.addCleanup(self.temp.cleanup)
-  self.store = Store(Path(self.temp.name)/'queue')
+  self.queue('queue')
+
+ def queue(self, name):
+  self.store = Store(Path(self.temp.name)/name)
   self.control = Control(self.store)
   self.platform = Mock()
   self.platform.resources = {}
-  self.platform.job_folder.return_value = Path(self.temp.name)/'jobs'
+  self.platform.job_folder.return_value = self.store.root/'jobs'
   self.service = Service({}, self.store, self.platform)
 
  def task(self, state, **internal):
@@ -309,5 +312,77 @@ class ServiceRefreshTests(unittest.TestCase):
    self.service.tick()
   save.assert_not_called()
   self.platform.submit_job.assert_not_called()
+
+ def assert_settled_completion(self, task):
+  saved = self.store.get(task['id'])
+  self.assertEqual(saved['public']['state'], 'completed')
+  self.assertTrue(saved['internal']['finished_recorded'])
+  self.assertEqual(saved['public']['step_records'][0]['outputs'][0]['name'], 'result.json')
+  self.assertEqual(saved['public']['step_records'][0]['log'], 'final log')
+  self.assertEqual(saved['public']['events'].count('全部步骤成功完成'), 1)
+  self.assertEqual(self.control.state()['tasks'][0]['state'], 'completed')
+  self.service = Service({}, self.store, self.platform)
+  with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+       patch('gpuqueue.service.read_json', side_effect=AssertionError('settled task read')):
+   self.service.tick()
+  save.assert_not_called()
+  self.platform.request.assert_not_called()
+  self.platform.submit_job.assert_not_called()
+
+ def complete(self, task):
+  self.status(task, 'completed', finished_at=1060, steps=[
+   {'state':'completed', 'outputs':[{'name':'result.json', 'size':2}]}])
+  (self.store.root/'tasks'/task['id']/'run/step-0.log').write_text('final log')
+
+ def test_stop_proof_after_initial_status_read_retains_natural_completion(self):
+  task = self.task('ready')
+  state = self.control.start(task['id'], task['digest'])
+  self.control.claim(task['id'], task['digest'], state['revision'])
+  state = self.control.stop(task['id'], task['digest'])
+  at = state['tasks'][0]['stop_requested_at']
+  task['internal'].update(request_uuid='r', job_uuid='j', dispatch='submitted')
+  task['public']['state'] = 'running'
+  self.store.save(task)
+  self.status(task)
+  proof_path = self.store.root/'tasks'/task['id']/'run/stop-result.json'
+  reads = []
+  def finish_before_stop_proof(path, *args):
+   reads.append(Path(path))
+   if Path(path) == proof_path:
+    self.complete(task)  # Runner exits after tick's first status snapshot.
+    atomic_json(proof_path, {'task':task['id'], 'digest':task['digest'],
+                'stop_at':at, 'uid':os.getuid(), 'request':'r', 'job':'j', 'state':'stopped'})
+   return read_json(path, *args)
+  with patch('gpuqueue.service.read_json', side_effect=finish_before_stop_proof), \
+       patch('gpuqueue.service.time.time', return_value=1000):
+   self.service.tick()
+  status_path = self.store.root/'tasks'/task['id']/'run/status.json'
+  self.assertLess(reads.index(status_path), reads.index(proof_path))
+  self.assert_settled_completion(task)
+
+ def test_job_exit_after_missing_status_read_retains_final_result(self):
+  for exit_state in ['finished', 'failed', 'closed']:
+   with self.subTest(exit_state=exit_state):
+    # Each subcase has an independent queue so UI assertions cover the same task.
+    self.queue(exit_state)
+    task = self.task('dispatching', request_uuid='r', job_uuid='j', dispatch='submitted')
+    status_path = self.store.root/'tasks'/task['id']/'run/status.json'
+    job_path = self.platform.job_folder('r')/'j/status.json'
+    status_reads = []
+    def finish_before_job_receipt(path, *args):
+     if Path(path) == job_path:
+      self.complete(task)  # The first execution-status read returned None.
+      if exit_state == 'closed':
+       self.platform.resources = {'r':{'status':'closed'}}
+      else:
+       atomic_json(job_path, {'state':exit_state})
+     value = read_json(path, *args)
+     if Path(path) == status_path:
+      status_reads.append(value)
+     return value
+    with patch('gpuqueue.service.read_json', side_effect=finish_before_job_receipt):
+     self.service.tick()
+    self.assertIsNone(status_reads[0])
+    self.assert_settled_completion(task)
 
 if __name__=='__main__':unittest.main()
