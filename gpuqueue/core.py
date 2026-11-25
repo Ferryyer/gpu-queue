@@ -1,5 +1,6 @@
 import contextlib
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -144,6 +145,8 @@ def normalize(manifest, source='Codex'):
         if any(k in env for k in ['CUDA_VISIBLE_DEVICES', 'GPUQ_OUTPUT_DIR', 'GPUQ_TASK_ID']):
             raise ValueError('GPU 设备与任务目录由执行器指定')
         for a in argv[1:]:
+            # Match the project/home placeholders expanded by the runner.
+            a = a.replace('{project}', str(project)).replace('{home}', str(HOME))
             if a.startswith(str(project) + '/') and Path(a).is_file() and str(Path(a).relative_to(project)) in files:
                 raise ValueError('运行代码请引用 {code}/文件，避免执行 Agent 后续修改的源文件')
         normalized_steps.append({'name': raw.get('name') or f'步骤 {index + 1}', 'argv': argv, 'cwd': raw.get('cwd', '{code}'), 'outputs': outputs, 'env': env})
@@ -213,8 +216,10 @@ class Store:
             (staging / 'run').mkdir(mode=0o700)
             try:
                 staging.rename(folder)
-            except FileExistsError:
-                pass
+            except OSError as error:
+                # Existing nonempty snapshots report ENOTEMPTY on Linux/macOS.
+                if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                    raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         public = {'id': task_id, 'name': doc['title'], 'description': doc['description'], 'project': Path(doc['project']).name, 'agent': source, 'state': 'ready', 'stage': 0, 'progress': None, 'elapsed': '尚未运行', 'version': digest[:12], 'memory': doc['resources']['memory_gb'], 'resources': doc['resources'], 'steps': [s['name'] for s in doc['steps']], 'step_records': [], 'events': ['代码和配置已固定版本', 'CPU 准备检查通过，等待你在网页点击开始'], 'created_at': now(), 'checks': ['代码快照已校验', '输入路径已检查', '执行入口已检查', 'GPU 兼容性将在运行时验证']}
