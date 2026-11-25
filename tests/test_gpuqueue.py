@@ -190,7 +190,7 @@ class ServiceRefreshTests(unittest.TestCase):
               {'state':state, 'started_at':1000, 'updated_at':1000, 'steps':[], **extra})
 
  def test_tick_skips_terminal_files_and_saves_but_refreshes_active_task(self):
-  history = [self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted')
+  history = [self.task(state, request_uuid='r', job_uuid='j', dispatch='submitted', terminal_reconciled=True)
              for state in ['completed', 'failed', 'interrupted', 'cancelled', 'stopped']]
   deleted = self.task('completed', request_uuid='r', job_uuid='j', dispatch='submitted')
   self.control.delete(deleted['id'], deleted['digest'])
@@ -384,5 +384,65 @@ class ServiceRefreshTests(unittest.TestCase):
      self.service.tick()
     self.assertIsNone(status_reads[0])
     self.assert_settled_completion(task)
+
+ def legacy_terminal(self, state):
+  self.queue(state)
+  task = self.task('ready', request_uuid='r', job_uuid='j', dispatch='submitted')
+  if state == 'stopped':
+   started = self.control.start(task['id'], task['digest'])
+   self.control.claim(task['id'], task['digest'], started['revision'])
+   stopped = self.control.stop(task['id'], task['digest'])
+   self.control.confirm_stop(task['id'], task['digest'])
+   task['internal'].update(stop_requested_at=stopped['tasks'][0]['stop_requested_at'], stop_confirmed=True)
+  task['public']['state'] = state
+  self.store.save(task)
+  return task
+
+ def reopen_service(self):
+  self.store = Store(self.store.root)
+  self.control = Control(self.store)
+  self.service = Service({}, self.store, self.platform)
+
+ def test_upgrade_recovers_final_results_from_legacy_terminal_snapshots(self):
+  for state in ['stopped', 'failed', 'interrupted']:
+   with self.subTest(state=state):
+    task = self.legacy_terminal(state)
+    self.assertNotIn('terminal_reconciled', task['internal'])
+    self.complete(task)  # Old scheduler exited before copying this into SQLite.
+    self.reopen_service()
+    self.service.tick()
+    self.assert_settled_completion(task)
+
+ def test_upgrade_persists_confirmed_terminal_check_across_restarts(self):
+  for state in ['stopped', 'failed', 'interrupted']:
+   with self.subTest(state=state):
+    task = self.legacy_terminal(state)
+    if state == 'failed':
+     self.status(task, 'failed', finished_at=1060)
+    elif state == 'stopped':
+     self.status(task)  # A killed runner left its last running snapshot.
+    else:
+     self.platform.resources = {'r':{'status':'closed'}}
+    self.reopen_service()
+    self.service.tick()
+    saved = self.store.get(task['id'])
+    self.assertEqual(saved['public']['state'], state)
+    self.assertTrue(saved['internal'].get('terminal_reconciled'))
+    self.reopen_service()
+    with patch.object(self.store, 'save', wraps=self.store.save) as save, \
+         patch('gpuqueue.service.read_json', side_effect=AssertionError('already reconciled read')):
+     self.service.tick()
+    save.assert_not_called()
+    self.platform.request.assert_not_called()
+    self.platform.submit_job.assert_not_called()
+
+ def test_legacy_failure_without_exit_evidence_keeps_checking(self):
+  task = self.legacy_terminal('failed')
+  self.reopen_service()
+  self.service.tick()
+  self.assertFalse(self.store.get(task['id'])['internal'].get('terminal_reconciled'))
+  self.complete(task)
+  self.service.tick()
+  self.assert_settled_completion(task)
 
 if __name__=='__main__':unittest.main()

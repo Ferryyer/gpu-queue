@@ -152,6 +152,13 @@ class Service:
             public.pop('failureReason',None)
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
+        if (public['state'] in ['completed', 'failed', 'interrupted', 'stopped'] and (
+                (status or {}).get('state') in ['completed', 'failed']
+                or job_status.get('state') in ['finished', 'failed']
+                or resource.get('status') == 'closed' or internal.get('stop_confirmed'))):
+            # Persist the check so old tentative terminal snapshots get one
+            # reconciliation, while verified history stays idle after restart.
+            internal['terminal_reconciled'] = True
         self.save_if_changed(task, previous)
 
     def stop_control(self, folder):
@@ -184,6 +191,7 @@ class Service:
                     return
             Control(self.store).confirm_stop(task['id'],task['digest'])
             internal['stop_confirmed'] = True
+            internal['terminal_reconciled'] = True
             public.update(state='stopped',phase='任务已停止，已有产物保留')
             public.pop('failureReason',None)
             public['events'].append('已确认任务停止；不会自动重跑；停止任务不等于释放 GPU')
@@ -259,8 +267,10 @@ class Service:
             # blocked and ambiguous submissions still need receipt reconciliation.
             pending_stop = (internal.get('stop_requested_at') and not internal.get('stop_confirmed')
                             and public['state'] not in ['completed', 'cancelled'])
+            legacy_terminal = (internal.get('job_uuid') and not internal.get('terminal_reconciled')
+                               and public['state'] in ['failed', 'interrupted', 'stopped'])
             if (public['state'] not in TERMINAL or public['state'] == 'blocked'
-                    or internal.get('dispatch') in ['submitting', 'unknown'] or pending_stop):
+                    or internal.get('dispatch') in ['submitting', 'unknown'] or pending_stop or legacy_terminal):
                 self.refresh_task(task)
         # Synchronize authorization and order before any platform operation.
         self.sync()
