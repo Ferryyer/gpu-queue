@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import errno
 import json
 import os
 from pathlib import Path
@@ -296,7 +297,7 @@ class SubmissionDeleteTests(unittest.TestCase):
         with self.assertRaises(ControlError):
             control.claim(task['id'], task['digest'], control.state()['revision'])
 
-    def race(self, *, existing=False, delete=True):
+    def race(self, *, existing=False, delete=True, rename_errno=None):
         """Pause the losing submit before lookup or during snapshot preparation.
 
         The other connection creates/deletes and commits before releasing it.
@@ -308,6 +309,8 @@ class SubmissionDeleteTests(unittest.TestCase):
         paused, resume = threading.Event(), threading.Event()
         main_thread = threading.current_thread()
         connect, copy = self.store.connect, shutil.copy2
+        rename = Path.rename
+        collisions = []
 
         def wait_for_commit():
             if threading.current_thread() is not main_thread and not paused.is_set():
@@ -323,9 +326,17 @@ class SubmissionDeleteTests(unittest.TestCase):
             wait_for_commit()
             return copy(*args, **kwargs)
 
+        def competing_rename(source, destination):
+            if (rename_errno is not None and
+                    threading.current_thread() is not main_thread and
+                    destination.is_dir()):
+                collisions.append(rename_errno)
+                raise OSError(rename_errno, os.strerror(rename_errno), str(destination))
+            return rename(source, destination)
+
         target = (patch.object(self.store, 'connect', side_effect=gated_connect)
                   if existing else patch('gpuqueue.core.shutil.copy2', side_effect=gated_copy))
-        with target, ThreadPoolExecutor(max_workers=1) as pool:
+        with target, patch.object(Path, 'rename', competing_rename), ThreadPoolExecutor(max_workers=1) as pool:
             losing = pool.submit(self.store.submit, self.manifest)
             try:
                 self.assertTrue(paused.wait(10), 'submit did not reach barrier')
@@ -346,6 +357,8 @@ class SubmissionDeleteTests(unittest.TestCase):
                 self.assertFalse(created)
         self.assertEqual(self.snapshot(), before)
         self.assertFalse(list((self.store.root / 'tasks').glob('.prepare-*')))
+        if rename_errno is not None:
+            self.assertEqual(collisions, [rename_errno])
 
     def test_deletion_committed_before_existing_task_lookup_is_rejected(self):
         self.race(existing=True)
@@ -355,6 +368,25 @@ class SubmissionDeleteTests(unittest.TestCase):
 
     def test_concurrent_visible_insert_returns_existing_task_created_false(self):
         self.race(delete=False)
+
+    def test_directory_collision_errnos_reach_final_database_decision(self):
+        for error in [errno.EEXIST, errno.ENOTEMPTY]:
+            for delete in [False, True]:
+                with self.subTest(errno=error, deleted=delete):
+                    self.manifest['submission_key'] = f'collision-{error}-{delete}'
+                    self.race(delete=delete, rename_errno=error)
+
+    def test_unrelated_snapshot_rename_errors_propagate(self):
+        for error in [errno.EACCES, errno.ENOSPC]:
+            with self.subTest(errno=error):
+                before = self.snapshot()
+                failure = OSError(error, os.strerror(error))
+                with patch.object(Path, 'rename', side_effect=failure):
+                    with self.assertRaises(OSError) as raised:
+                        self.store.submit(self.manifest)
+                self.assertIs(raised.exception, failure)
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse(list((self.store.root / 'tasks').glob('.prepare-*')))
 
 
 if __name__=='__main__':unittest.main()

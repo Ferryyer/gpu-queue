@@ -1,5 +1,6 @@
 import contextlib
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -228,8 +229,12 @@ class Store:
             (staging / 'run').mkdir(mode=0o700)
             try:
                 staging.rename(folder)
-            except FileExistsError:
-                pass
+            except OSError as error:
+                # Filesystems report a competing nonempty directory as either
+                # EEXIST or ENOTEMPTY. Let the final transaction decide whether
+                # the winning submission is still visible or has been deleted.
+                if error.errno not in {errno.EEXIST, errno.ENOTEMPTY} or not folder.is_dir():
+                    raise
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         public = {'id': task_id, 'name': doc['title'], 'description': doc['description'], 'project': Path(doc['project']).name, 'agent': source, 'state': 'ready', 'stage': 0, 'progress': None, 'elapsed': '尚未运行', 'version': digest[:12], 'memory': doc['resources']['memory_gb'], 'resources': doc['resources'], 'steps': [s['name'] for s in doc['steps']], 'step_records': [], 'events': ['代码和配置已固定版本', 'CPU 准备检查通过，等待你在网页点击开始'], 'created_at': now(), 'checks': ['代码快照已校验', '输入路径已检查', '执行入口已检查', 'GPU 兼容性将在运行时验证']}
