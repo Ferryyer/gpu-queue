@@ -23,13 +23,20 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           RELEASE: b9e2c3e678fc2afa6eb5bf35ab20cc8d3587bd78
+          IMPORT_SOURCE: 38eba91f1720bd02068ba15c8dec573a458caf7f
+          IMPORT_MERGED: ae55482eaf2ca4f6c390c5c0011d032241e8dcce
         run: |
           test "$(git rev-parse HEAD)" = "$HEAD"
           git cat-file -e "$BASE^{commit}"
           git cat-file -e "$RELEASE^{commit}"
-          git merge-base --is-ancestor "$RELEASE" "$HEAD"
+          # PR #19 was squash merged. Prove release provenance on its original
+          # branch and exact ServerBox tree equality with the approved merge.
+          git fetch --no-tags origin "$IMPORT_SOURCE"
+          git merge-base --is-ancestor "$RELEASE" "$IMPORT_SOURCE"
+          test "$(git rev-parse "$IMPORT_SOURCE:serverbox")" = "$(git rev-parse "$IMPORT_MERGED:serverbox")"
+          git merge-base --is-ancestor "$IMPORT_MERGED" "$HEAD"
           git diff --check "$BASE...$HEAD" -- . ":(exclude)serverbox"
-          git diff --check "$RELEASE...$HEAD" -- serverbox
+          git diff --check "$IMPORT_MERGED...$HEAD" -- serverbox
       - name: Run isolated queue unit tests
         run: |
           mkdir -p "$HOME/scratch"
