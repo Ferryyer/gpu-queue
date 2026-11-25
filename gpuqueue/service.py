@@ -9,6 +9,7 @@ import time
 from .core import Store, HOME, DEFAULT_ROOT, SITE_URL, TERMINAL, atomic_json, read_json, canonical, now
 from .platform import Markflow, PlatformError
 from .feishu import FeishuAuthError
+from .resources import published_resources
 
 from .control import Control, QueueChanged
 
@@ -54,7 +55,7 @@ class Service:
             if self.synced.get(task['id']) != digest:
                 changed.append({'id': task['id'], 'digest': task['digest'], 'payload': task['public']})
         resources = []
-        for resource in self.platform.resources.values():
+        for resource in published_resources(self.platform.resources).values():
             resources.append({key: resource.get(key) for key in ['id', 'status', 'type', 'gpus', 'telemetry', 'error', 'release', 'monitor', 'recorded_phase']})
         response = self.remote('/api/worker/sync', {'tasks': changed, 'heartbeat': {
             'service': 'online', 'error': self.error, 'resources': resources,
