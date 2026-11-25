@@ -230,42 +230,63 @@ class Service:
             if bound:
                 seen.add(bound)
             matches = []
-            read_failed = False
+            receipt_errors = {}
             try:
                 # Continue even after binding: the other submission may arrive
                 # later. glob may hide directory errors, which are not zero.
                 for path in self.platform.job_folder(stop_request).iterdir():
                     if path.suffix != '.json':
                         continue
-                    receipt = json.loads(path.read_text())
-                    if not isinstance(receipt, dict) or not isinstance(receipt.get('argv'), list):
-                        raise ValueError('停止命令回执格式无效')
+                    try:
+                        receipt = json.loads(path.read_text())
+                        if not isinstance(receipt, dict) or not isinstance(receipt.get('argv'), list):
+                            raise ValueError('停止命令回执格式无效')
+                    except (OSError, ValueError) as error:
+                        receipt_errors[path.name] = redact(str(error))[:400]
+                        continue
                     if receipt['argv'] == internal['stop_argv']:
                         matches.append(path.stem)
                         seen.add(path.stem)
-                # Inspect every known control job, not just the bound one.
-                states = internal.setdefault('stop_job_states', {})
-                for stop_job in sorted(seen):
+            except OSError as error:
+                receipt_errors['directory'] = redact(str(error))[:400]
+            read_failed = bool(receipt_errors)
+            if read_failed:
+                internal['stop_receipt_error'] = canonical(receipt_errors)
+            else:
+                internal.pop('stop_receipt_error', None)
+            # Receipt errors cannot hide independently readable job states.
+            # Each job and log also has its own error boundary.
+            states = internal.setdefault('stop_job_states', {})
+            status_errors, log_errors = {}, {}
+            for stop_job in sorted(seen):
+                try:
                     stop_folder = self.platform.job_folder(stop_request)/stop_job
                     stop_status = read_json(stop_folder/'status.json', {})
                     if not isinstance(stop_status, dict):
                         raise ValueError('停止命令状态格式无效')
                     if stop_status.get('state'):
                         states[stop_job] = stop_status['state']
-                exited = [job for job in sorted(seen) if states.get(job) in ['finished', 'failed']]
-                if exited:
-                    logs = [(job, tail(self.platform.job_folder(stop_request)/job/'output.log')) for job in exited]
-                    public['stop_log'] = logs[0][1] if len(logs) == 1 else '\n\n'.join(job+':\n'+log for job, log in logs)
-            except (OSError, ValueError) as error:
-                read_failed = True
-                internal['stop_receipt_error'] = redact(str(error))[:400]
-            else:
-                internal.pop('stop_receipt_error', None)
+                except (OSError, ValueError) as error:
+                    status_errors[stop_job] = redact(str(error))[:400]
+            exited = [job for job in sorted(seen) if states.get(job) in ['finished', 'failed']]
+            logs = internal.setdefault('stop_job_logs', {})
+            for stop_job in exited:
+                try:
+                    logs[stop_job] = tail(self.platform.job_folder(stop_request)/stop_job/'output.log')
+                except OSError as error:
+                    log_errors[stop_job] = redact(str(error))[:400]
+            readable_logs = [(job, logs[job]) for job in exited if job in logs]
+            if readable_logs:
+                public['stop_log'] = readable_logs[0][1] if len(readable_logs) == 1 else '\n\n'.join(job+':\n'+log for job, log in readable_logs)
+            for key, errors in [('stop_status_errors', status_errors), ('stop_log_errors', log_errors)]:
+                if errors:
+                    internal[key] = errors
+                else:
+                    internal.pop(key, None)
             internal['stop_receipts'] = sorted(seen)
             if not read_failed and len(matches) == 1 and len(seen) == 1 and not bound:
                 bound = matches[0]
                 internal.update(stop_job_uuid=bound, stop_dispatch='submitted')
-            exited = any(internal.get('stop_job_states', {}).get(job) in ['finished', 'failed'] for job in seen)
             if exited:
                 phase = '停止命令已退出但未获得有效确认，状态待核查'
                 if len(seen) > 1:
@@ -274,6 +295,8 @@ class Service:
                     phase += '；停止请求提交回执读取失败'
             elif read_failed:
                 phase = '停止请求提交回执读取失败，状态待核查'
+            elif status_errors:
+                phase = '停止作业状态读取失败，状态待核查'
             elif len(seen) > 1 or seen and not bound:
                 phase = '停止请求提交回执无法唯一确认，状态待核查'
             elif bound:
@@ -298,6 +321,10 @@ class Service:
                                (task['id'], 'stop_retry:'+task['digest']+':'+internal['stop_requested_at'], now()))
                 self.submit_stop(task, stop_request)
                 return
+            if status_errors and exited:
+                phase += '；停止作业状态读取失败'
+            if log_errors:
+                phase += '；停止日志读取失败'
             self.stop_pending(task, phase)
             return
         if not request or not job:

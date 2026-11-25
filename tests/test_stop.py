@@ -474,6 +474,123 @@ while True:time.sleep(.1)
         self.assertIn('无法唯一确认', self.poll_stop(2000, restart=True)['phase'])
         self.assertEqual(self.platform.submit_job.call_count, 2)
 
+    def assert_receipt_error_preserves_bound_exit(self, failure):
+        self.stop_dispatch_fixture()
+        self.poll_stop(1000)
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1060)
+        broken = self.jobs/'broken.json'
+        broken.write_text('{')
+        original = Path.read_text
+        def read(path, *args, **kwargs):
+            if path == broken and failure == 'unreadable':
+                raise PermissionError('receipt unavailable')
+            return original(path, *args, **kwargs)
+        original_iterdir = Path.iterdir
+        def iterdir(path):
+            if path == self.jobs and failure == 'directory':
+                raise PermissionError('receipt directory unavailable')
+            return original_iterdir(path)
+        with patch.object(Path, 'read_text', read), patch.object(Path, 'iterdir', iterdir):
+            for index, terminal in enumerate(['finished', 'failed']):
+                with self.subTest(state=terminal, failure=failure):
+                    atomic_json(self.jobs/'retry-control/status.json', {'state': terminal})
+                    text = 'readable control log: '+terminal
+                    (self.jobs/'retry-control/output.log').write_text(text)
+                    state = self.poll_stop(1061+index, restart=True)
+                    self.assertEqual(state['state'], 'stopping')
+                    self.assertIn('已退出但未获得有效确认', state['phase'])
+                    self.assertIn('回执读取失败', state['phase'])
+                    self.assertIn('已用完一次自动重发机会', state['phase'])
+                    self.assertEqual(state['stop_log'], text)
+                    internal = self.store.get(self.task['id'])['internal']
+                    self.assertEqual(internal['stop_job_states']['retry-control'], terminal)
+                    self.assertTrue(internal['stop_receipt_error'])
+            self.assertEqual(self.platform.submit_job.call_count, 2)
+            self.assertEqual(len(self.retry_audit()), 1)
+            # A valid proof still takes priority even while the bad file remains.
+            self.stop_proof()
+            self.assertEqual(self.poll_stop(2000, restart=True)['state'], 'stopped')
+
+    def test_malformed_receipt_does_not_hide_bound_stop_exit_and_log(self):
+        self.assert_receipt_error_preserves_bound_exit('malformed')
+
+    def test_unreadable_receipt_does_not_hide_bound_stop_exit_and_log(self):
+        self.assert_receipt_error_preserves_bound_exit('unreadable')
+
+    def test_unreadable_receipt_directory_does_not_hide_bound_stop_exit_and_log(self):
+        self.assert_receipt_error_preserves_bound_exit('directory')
+
+    def test_bad_receipt_before_late_receipt_does_not_hide_late_stop_exit(self):
+        self.stop_dispatch_fixture()
+        self.poll_stop(1000)
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1060)
+        broken = self.jobs/'broken.json'
+        broken.write_text('{')
+        self.stop_receipt('late-control')
+        atomic_json(self.jobs/'late-control/status.json', {'state': 'finished'})
+        (self.jobs/'late-control/output.log').write_text('late command exited')
+        original = Path.iterdir
+        def receipts(path):
+            return iter([broken, self.jobs/'late-control.json']) if path == self.jobs else original(path)
+        with patch.object(Path, 'iterdir', receipts):
+            state = self.poll_stop(1061, restart=True)
+        self.assertEqual(state['state'], 'stopping')
+        self.assertIn('回执读取失败', state['phase'])
+        self.assertIn('无法唯一确认', state['phase'])
+        self.assertIn('已退出但未获得有效确认', state['phase'])
+        self.assertEqual(state['stop_log'], 'late command exited')
+        self.assertEqual(self.store.get(self.task['id'])['internal']['stop_receipts'], ['late-control', 'retry-control'])
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+
+    def test_job_state_and_log_errors_do_not_hide_another_exited_stop_job(self):
+        self.stop_dispatch_fixture()
+        self.poll_stop(1000)
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1060)
+        self.stop_receipt('aaa-late-control')
+        atomic_json(self.jobs/'retry-control/status.json', {'state': 'finished'})
+        (self.jobs/'retry-control/output.log').write_text('readable retry log')
+        bad_status = self.jobs/'aaa-late-control/status.json'
+        bad_status.parent.mkdir()
+        bad_status.write_text('[]')
+        state = self.poll_stop(1061, restart=True)
+        self.assertEqual(state['state'], 'stopping')
+        self.assertIn('已退出但未获得有效确认', state['phase'])
+        self.assertIn('停止作业状态读取失败', state['phase'])
+        self.assertEqual(state['stop_log'], 'readable retry log')
+        self.assertTrue(self.store.get(self.task['id'])['internal']['stop_status_errors'])
+        atomic_json(bad_status, {'state': 'failed'})
+        late_log = bad_status.parent/'output.log'
+        late_log.write_text('readable late log')
+        original = Path.open
+        def unavailable(path, *args, **kwargs):
+            if path == late_log:
+                raise PermissionError('late log unavailable')
+            return original(path, *args, **kwargs)
+        with patch.object(Path, 'open', unavailable):
+            state = self.poll_stop(1062, restart=True)
+        self.assertIn('已退出但未获得有效确认', state['phase'])
+        self.assertIn('停止日志读取失败', state['phase'])
+        self.assertIn('已用完一次自动重发机会', state['phase'])
+        self.assertEqual(state['stop_log'], 'readable retry log')
+        self.assertTrue(self.store.get(self.task['id'])['internal']['stop_log_errors'])
+        state = self.poll_stop(1063, restart=True)
+        self.assertIn('readable retry log', state['stop_log'])
+        self.assertIn('readable late log', state['stop_log'])
+        self.assertNotIn('停止日志读取失败', state['phase'])
+        # Previously readable logs remain available during a later read failure.
+        with patch.object(Path, 'open', unavailable):
+            state = self.poll_stop(1064, restart=True)
+        self.assertIn('readable late log', state['stop_log'])
+        self.assertIn('readable retry log', state['stop_log'])
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+        self.assertEqual(len(self.retry_audit()), 1)
+
     def assert_stop_failure_banner(self, returncode, stdout):
         self.stop_dispatch_fixture()
         self.platform.config = {}
