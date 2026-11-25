@@ -13,6 +13,7 @@ import uuid
 from gpuqueue.core import HOME,Store,atomic_json,read_json
 from gpuqueue.control import Control,ControlError,QueueChanged
 from gpuqueue.service import Service
+from gpuqueue.platform import Markflow
 from gpuqueue import stop_control as stop
 
 class StopTests(unittest.TestCase):
@@ -177,7 +178,9 @@ while True:time.sleep(.1)
         self.platform.job_folder.return_value = self.jobs
         self.platform.submit_job.side_effect = RuntimeError('submission uncertain')
         self.service = Service({}, self.store, self.platform)
-        self.clock = self.enterContext(patch('gpuqueue.service.time.time', return_value=1000))
+        clock_patch = patch('gpuqueue.service.time.time', return_value=1000)
+        self.clock = clock_patch.start()
+        self.addCleanup(clock_patch.stop)
 
     def poll_stop(self, at, restart=False):
         self.clock.return_value = at
@@ -385,6 +388,118 @@ while True:time.sleep(.1)
         self.poll_stop(2000, restart=True)
         self.assertEqual(self.platform.submit_job.call_count, 2)
         self.assertEqual(len(self.retry_audit()), 1)
+
+    def late_receipt_after_binding(self, retry_returns_id):
+        self.stop_dispatch_fixture()
+        self.poll_stop(1000)
+        if retry_returns_id:
+            self.platform.submit_job.side_effect = None
+            self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1060)
+        if not retry_returns_id:
+            # The retry return was lost; its receipt arrives alone first.
+            self.stop_receipt('retry-control')
+            self.poll_stop(1061, restart=True)
+        self.assertEqual(self.store.get(self.task['id'])['internal']['stop_job_uuid'], 'retry-control')
+        atomic_json(self.jobs/'retry-control/status.json', {'state': 'running'})
+        self.poll_stop(1062, restart=True)
+        # Only now does the original control receipt arrive.
+        self.stop_receipt('original-control')
+        state = self.poll_stop(1063, restart=True)
+        internal = self.store.get(self.task['id'])['internal']
+        self.assertEqual(internal['stop_receipts'], ['original-control', 'retry-control'])
+        self.assertEqual(internal['stop_job_uuid'], 'retry-control')
+        self.assertIn('无法唯一确认', state['phase'])
+        self.assertIn('已用完一次自动重发机会', state['phase'])
+        for terminal in ['finished', 'failed']:
+            with self.subTest(state=terminal):
+                atomic_json(self.jobs/'original-control/status.json', {'state': terminal})
+                (self.jobs/'original-control/output.log').write_text('late original control ended')
+                state = self.poll_stop(1064, restart=True)
+                self.assertEqual(state['state'], 'stopping')
+                self.assertIn('已退出但未获得有效确认', state['phase'])
+                self.assertIn('无法唯一确认', state['phase'])
+                self.assertIn('已用完一次自动重发机会', state['phase'])
+                self.assertIn('late original control ended', state['stop_log'])
+                self.assertEqual(self.store.get(self.task['id'])['internal']['stop_job_states']['original-control'], terminal)
+        (self.jobs/'original-control.json').unlink()
+        self.assertIn('无法唯一确认', self.poll_stop(2000, restart=True)['phase'])
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+        self.assertEqual(len(self.retry_audit()), 1)
+        self.stop_proof()
+        self.assertEqual(self.poll_stop(2001, restart=True)['state'], 'stopped')
+
+    def test_late_original_receipt_after_retry_returns_id_is_preserved(self):
+        self.late_receipt_after_binding(retry_returns_id=True)
+
+    def test_second_late_receipt_after_retry_return_lost_and_first_bound_is_preserved(self):
+        self.late_receipt_after_binding(retry_returns_id=False)
+
+    def test_late_receipt_after_initial_success_is_still_checked(self):
+        self.stop_dispatch_fixture()
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'initial-control'
+        self.poll_stop(1000)
+        self.stop_receipt('late-control')
+        atomic_json(self.jobs/'late-control/status.json', {'state': 'finished'})
+        state = self.poll_stop(1001, restart=True)
+        self.assertEqual(state['state'], 'stopping')
+        self.assertIn('无法唯一确认', state['phase'])
+        self.assertIn('已退出但未获得有效确认', state['phase'])
+        internal = self.store.get(self.task['id'])['internal']
+        self.assertEqual(internal['stop_job_uuid'], 'initial-control')
+        self.assertEqual(internal['stop_receipts'], ['initial-control', 'late-control'])
+        self.poll_stop(2000)
+        self.platform.submit_job.assert_called_once()
+        self.assertFalse(self.retry_audit())
+
+    def test_receipt_scan_error_after_binding_preserves_id_and_discovered_receipts(self):
+        self.stop_dispatch_fixture()
+        self.poll_stop(1000)
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1060)
+        self.stop_receipt('late-control')
+        broken = self.jobs/'broken.json'
+        broken.write_text('{')
+        original = Path.iterdir
+        def receipts(path):
+            return iter([self.jobs/'late-control.json', broken]) if path == self.jobs else original(path)
+        with patch.object(Path, 'iterdir', receipts):
+            self.assertIn('读取失败', self.poll_stop(1061, restart=True)['phase'])
+        internal = self.store.get(self.task['id'])['internal']
+        self.assertEqual(internal['stop_receipts'], ['late-control', 'retry-control'])
+        self.assertEqual(internal['stop_job_uuid'], 'retry-control')
+        broken.unlink()
+        self.assertIn('无法唯一确认', self.poll_stop(2000, restart=True)['phase'])
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+
+    def assert_stop_failure_banner(self, returncode, stdout):
+        self.stop_dispatch_fixture()
+        self.platform.config = {}
+        self.platform.run.return_value = subprocess.CompletedProcess([], returncode, stdout, '')
+        self.platform.submit_job.side_effect = lambda *args: Markflow.submit_job(self.platform, *args)
+        state = self.poll_stop(1000)
+        heartbeat = self.control.state()['heartbeat']
+        self.assertIn('回执待核查', heartbeat['error'])
+        self.assertIn('最多自动重发一次', heartbeat['error'])
+        self.assertNotIn('已停止自动重试', heartbeat['error'])
+        self.assertEqual(state['phase'], heartbeat['error'])
+        self.assertIn('已停止自动重试', self.store.get(self.task['id'])['internal']['stop_submit_error'])
+        # It remains eligible, so the banner must not claim retries have stopped.
+        self.platform.submit_job.side_effect = None
+        self.platform.submit_job.return_value = 'retry-control'
+        self.poll_stop(1059.999, restart=True)
+        self.platform.submit_job.assert_called_once()
+        self.poll_stop(1060)
+        self.assertEqual(self.platform.submit_job.call_count, 2)
+        self.assertIsNone(self.control.state()['heartbeat']['error'])
+
+    def test_nonzero_initial_stop_submit_has_stop_specific_pending_banner(self):
+        self.assert_stop_failure_banner(1, '')
+
+    def test_incomplete_initial_stop_return_has_stop_specific_pending_banner(self):
+        self.assert_stop_failure_banner(0, '{}')
 
     def test_partial_receipt_scan_preserves_already_discovered_match(self):
         self.stop_dispatch_fixture()

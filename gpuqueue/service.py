@@ -169,6 +169,24 @@ class Service:
         task['public'].update(state='stopping', phase=phase)
         self.store.save(task)
 
+    def submit_stop(self, task, request):
+        internal = task['internal']
+        try:
+            job = self.platform.submit_job(request, internal['stop_argv'], internal.get('stop_cwd', task['doc']['project']))
+        except Exception as error:
+            # The shared platform error describes compute's no-retry policy.
+            # Stop control has its own persisted, one-retry policy.
+            internal['stop_submit_error'] = redact(str(error))[:400]
+            phase = '停止请求提交回执待核查'
+            if internal.get('stop_retry_consumed_at') is None:
+                phase += '；等待满 60 秒后核对，满足条件时最多自动重发一次'
+            self.stop_pending(task, phase)
+            raise PlatformError(task['public']['phase']) from error
+        internal.pop('stop_submit_error', None)
+        internal.update(stop_dispatch='submitted', stop_job_uuid=job)
+        internal['stop_receipts'] = sorted(set(internal.get('stop_receipts', [])) | {job})
+        self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
+
     def process_stop(self, task):
         internal, public = task['internal'], task['public']
         if not internal.get('stop_requested_at') or internal.get('stop_confirmed') or public['state'] in ['completed','cancelled']:
@@ -203,61 +221,84 @@ class Service:
                 return
         if internal.get('stop_dispatch'):
             stop_request = internal.get('stop_request_uuid', request)
-            if internal.get('stop_job_uuid'):
-                stop_folder = self.platform.job_folder(stop_request)/internal['stop_job_uuid']
-                stop_status = read_json(stop_folder/'status.json',{})
-                if stop_status.get('state') in ['finished','failed']:
-                    public['stop_log'] = tail(stop_folder/'output.log')
-                    self.stop_pending(task, '停止命令已退出但未获得有效确认，状态待核查')
-            if internal['stop_dispatch']=='submitting' and not internal.get('stop_job_uuid'):
+            bound = internal.get('stop_job_uuid')
+            if internal['stop_dispatch'] == 'submitting' and not bound:
                 # Legacy records get a full wait window from first takeover.
-                started = internal.setdefault('stop_submitted_at', time.time())
+                internal.setdefault('stop_submitted_at', time.time())
                 self.store.save(task)
-                seen = set(internal.get('stop_receipts', []))
-                matches = []
-                try:
-                    # glob may hide directory errors. A missing/unreadable or
-                    # malformed receipt is not evidence of zero submissions.
-                    for path in self.platform.job_folder(stop_request).iterdir():
-                        if path.suffix != '.json':
-                            continue
-                        receipt = json.loads(path.read_text())
-                        if not isinstance(receipt, dict) or not isinstance(receipt.get('argv'), list):
-                            raise ValueError('停止命令回执格式无效')
-                        if receipt['argv'] == internal['stop_argv']:
-                            matches.append(path.stem)
-                            seen.add(path.stem)
-                except (OSError, ValueError) as error:
-                    internal['stop_receipts'] = sorted(seen)
-                    internal['stop_receipt_error'] = redact(str(error))[:400]
-                    self.stop_pending(task, '停止请求提交回执读取失败，状态待核查')
-                    return
-                internal['stop_receipts'] = sorted(seen)
+            seen = set(internal.get('stop_receipts', []))
+            if bound:
+                seen.add(bound)
+            matches = []
+            read_failed = False
+            try:
+                # Continue even after binding: the other submission may arrive
+                # later. glob may hide directory errors, which are not zero.
+                for path in self.platform.job_folder(stop_request).iterdir():
+                    if path.suffix != '.json':
+                        continue
+                    receipt = json.loads(path.read_text())
+                    if not isinstance(receipt, dict) or not isinstance(receipt.get('argv'), list):
+                        raise ValueError('停止命令回执格式无效')
+                    if receipt['argv'] == internal['stop_argv']:
+                        matches.append(path.stem)
+                        seen.add(path.stem)
+                # Inspect every known control job, not just the bound one.
+                states = internal.setdefault('stop_job_states', {})
+                for stop_job in sorted(seen):
+                    stop_folder = self.platform.job_folder(stop_request)/stop_job
+                    stop_status = read_json(stop_folder/'status.json', {})
+                    if not isinstance(stop_status, dict):
+                        raise ValueError('停止命令状态格式无效')
+                    if stop_status.get('state'):
+                        states[stop_job] = stop_status['state']
+                exited = [job for job in sorted(seen) if states.get(job) in ['finished', 'failed']]
+                if exited:
+                    logs = [(job, tail(self.platform.job_folder(stop_request)/job/'output.log')) for job in exited]
+                    public['stop_log'] = logs[0][1] if len(logs) == 1 else '\n\n'.join(job+':\n'+log for job, log in logs)
+            except (OSError, ValueError) as error:
+                read_failed = True
+                internal['stop_receipt_error'] = redact(str(error))[:400]
+            else:
                 internal.pop('stop_receipt_error', None)
-                if len(matches) == 1 and len(seen) == 1:
-                    internal.update(stop_job_uuid=matches[0], stop_dispatch='submitted')
-                    self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
-                elif seen:
-                    self.stop_pending(task, '停止请求提交回执无法唯一确认，状态待核查')
-                elif time.time()-started < 60:
-                    self.stop_pending(task, '停止请求提交回执待核查，等待满 60 秒后再核对')
-                elif internal.get('stop_retry_consumed_at') is not None:
-                    self.stop_pending(task, '停止请求提交回执待核查')
-                else:
-                    # Commit the budget and audit together before platform I/O.
-                    # A crash even before the call must never allow a third send.
-                    internal['stop_retry_consumed_at'] = time.time()
-                    phase = '停止请求已自动重发，提交回执及进程退出状态待核查；已用完一次自动重发机会'
-                    internal['stop_phase'] = phase
-                    public.update(state='stopping', phase=phase)
-                    with self.store.connect() as db:
-                        db.execute('UPDATE tasks SET public=?, internal=? WHERE id=?',
-                                   (canonical(public), canonical(internal), task['id']))
-                        db.execute('INSERT INTO queue_audit(task_id,action,at) VALUES (?,?,?)',
-                                   (task['id'], 'stop_retry:'+task['digest']+':'+internal['stop_requested_at'], now()))
-                    stopped_job = self.platform.submit_job(stop_request, internal['stop_argv'], internal.get('stop_cwd', task['doc']['project']))
-                    internal.update(stop_dispatch='submitted', stop_job_uuid=stopped_job)
-                    self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
+            internal['stop_receipts'] = sorted(seen)
+            if not read_failed and len(matches) == 1 and len(seen) == 1 and not bound:
+                bound = matches[0]
+                internal.update(stop_job_uuid=bound, stop_dispatch='submitted')
+            exited = any(internal.get('stop_job_states', {}).get(job) in ['finished', 'failed'] for job in seen)
+            if exited:
+                phase = '停止命令已退出但未获得有效确认，状态待核查'
+                if len(seen) > 1:
+                    phase += '；停止请求提交回执无法唯一确认'
+                if read_failed:
+                    phase += '；停止请求提交回执读取失败'
+            elif read_failed:
+                phase = '停止请求提交回执读取失败，状态待核查'
+            elif len(seen) > 1 or seen and not bound:
+                phase = '停止请求提交回执无法唯一确认，状态待核查'
+            elif bound:
+                phase = '已核对停止命令回执，等待进程退出确认'
+            elif internal['stop_dispatch'] != 'submitting':
+                phase = '停止请求提交回执待核查'
+            elif time.time()-internal['stop_submitted_at'] < 60:
+                phase = '停止请求提交回执待核查，等待满 60 秒后再核对'
+            elif internal.get('stop_retry_consumed_at') is not None:
+                phase = '停止请求提交回执待核查'
+            else:
+                # Commit the budget and audit together before platform I/O.
+                # A crash even before the call must never allow a third send.
+                internal['stop_retry_consumed_at'] = time.time()
+                phase = '停止请求已自动重发，提交回执及进程退出状态待核查；已用完一次自动重发机会'
+                internal['stop_phase'] = phase
+                public.update(state='stopping', phase=phase)
+                with self.store.connect() as db:
+                    db.execute('UPDATE tasks SET public=?, internal=? WHERE id=?',
+                               (canonical(public), canonical(internal), task['id']))
+                    db.execute('INSERT INTO queue_audit(task_id,action,at) VALUES (?,?,?)',
+                               (task['id'], 'stop_retry:'+task['digest']+':'+internal['stop_requested_at'], now()))
+                self.submit_stop(task, stop_request)
+                return
+            self.stop_pending(task, phase)
             return
         if not request or not job:
             self.stop_pending(task, '正在核对原计算任务回执，停止请求已保存')
@@ -268,9 +309,7 @@ class Service:
                         stop_request_uuid=request, stop_cwd=task['doc']['project'])
         self.stop_pending(task, '停止请求已发送，提交回执及进程退出状态待核查')
         # Same allocation, a control-only command. No model or resource request.
-        stopped_job = self.platform.submit_job(request,argv,task['doc']['project'])
-        internal.update(stop_dispatch='submitted',stop_job_uuid=stopped_job)
-        self.stop_pending(task, '已核对停止命令回执，等待进程退出确认')
+        self.submit_stop(task, request)
 
     def dispatch(self, task, selection):
         if not task['internal'].get('approved_at') or task['internal'].get('dispatch'):
