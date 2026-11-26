@@ -175,6 +175,72 @@ class ProbeRecoveryTests(unittest.TestCase):
         self.assertEqual(self.task['internal']['job_uuid'], 'compute')
         self.assertEqual(self.resource['monitor']['state'], 'retry')
 
+    def test_finished_probe_with_invalid_output_is_consumed_without_timeout_evidence(self):
+        self.adapter.lark = Mock(return_value=dict(messages=[]))
+        payload = dict(at=time.time(), gpus='0, GPU-test, H100, 81559, 1, 0, 30', apps='')
+        outputs = ['no telemetry', 'GPUQ_TELEMETRY={truncated',
+                   'GPUQ_TELEMETRY=[]', 'GPUQ_TELEMETRY={}',
+                   'GPUQ_TELEMETRY='+json.dumps(dict(payload, gpus='0, GPU-test')),
+                   'GPUQ_TELEMETRY='+json.dumps(dict(payload, gpus='bad, GPU-test, H100, 81559, 1, 0')),
+                   'GPUQ_TELEMETRY='+json.dumps(dict(payload, gpus=None)),
+                   'GPUQ_TELEMETRY='+json.dumps(dict(payload, apps=None))]
+        outputs += ['GPUQ_TELEMETRY='+json.dumps(dict(payload, at=stamp))
+                    for stamp in ['bad', None, 0, -1, float('nan'), float('inf'), time.time()+60]]
+        folder = self.adapter.job_folder(REQUEST)/JOB
+        atomic_json(folder/'status.json', dict(state='finished', exit_code=0))
+        for output in outputs:
+            with self.subTest(output=output):
+                resource = dict(id=REQUEST, status='online', probe=dict(job=JOB, at=time.time()),
+                                monitor=dict(state='sampling', attempts=1, at=time.time()), samples=[],
+                                probe_timeout=dict(job=JOB, at='old'))
+                self.adapter.resources = {REQUEST: resource}
+                (folder/'output.log').write_text(output)
+                self.adapter.refresh()
+                self.assertIsNone(resource['probe'])
+                self.assertEqual(resource['status'], 'unknown')
+                self.assertEqual(resource['monitor']['state'], 'retry')
+                self.assertIn('遥测输出', resource['error'])
+                self.assertFalse(self.adapter.probe_timed_out(resource))
+                self.assertEqual(resource['last_probe_timeout']['job'], JOB)
+                self.assertEqual(resource['samples'], [])
+                # The invalid finished job cannot be consumed again next tick.
+                self.adapter.refresh()
+                self.adapter.submit_job.assert_not_called()
+                self.assertEqual((folder/'output.log').read_text(), output)
+
+    def test_invalid_probe_retries_only_diagnostics_with_fresh_runner_and_budget(self):
+        # A historical timeout/specification must not reattach the same probe
+        # once its finished but invalid output has been consumed.
+        self.resource['probe_timeout']['job'] = JOB
+        atomic_json(self.adapter.job_folder(REQUEST)/(JOB+'.json'), dict(argv=['read-only-probe']))
+        self.resource.update(probe_invalid=dict(job=JOB, at='old'),
+                             monitor=dict(state='retry', attempts=3, at=time.time()-60))
+        self.recover()
+        self.adapter.submit_job.assert_not_called()
+        self.resource['monitor'].update(attempts=1, at=time.time())
+        self.recover()
+        self.adapter.submit_job.assert_not_called()
+        self.resource['monitor']['at'] = time.time()-60
+        self.recover()
+        self.adapter.submit_job.assert_called_once()
+        self.assertEqual(self.resource['monitor']['attempts'], 2)
+        folder = self.adapter.job_folder(REQUEST)/JOB
+        atomic_json(folder/'status.json', dict(state='finished', exit_code=0))
+        (folder/'output.log').write_text('GPUQ_TELEMETRY='+json.dumps(dict(
+            at=time.time(), gpus='0, GPU-test, H100, 81559, 1, 0', apps='')))
+        self.adapter.refresh_probe(self.resource)
+        self.assertEqual(self.resource['status'], 'online')
+        self.assertNotIn('probe_invalid', self.resource)
+        self.assertNotIn('monitor', self.resource)
+
+    def test_corrupt_runner_cannot_authorize_probe_recovery(self):
+        for content in ['{truncated', 'null', '[]']:
+            with self.subTest(content=content):
+                self.runner.write_text(content)
+                self.recover()
+                self.adapter.submit_job.assert_not_called()
+                self.assertEqual(self.runner.read_text(), content)
+
 
 if __name__ == '__main__':
     unittest.main()

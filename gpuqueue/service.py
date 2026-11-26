@@ -27,6 +27,21 @@ def tail(path, limit=8000):
         stream.seek(max(0, path.stat().st_size-limit))
         return redact(stream.read(limit).decode(errors='replace'))
 
+class RunnerStatusError(ValueError):
+    pass
+
+def runner_status(path):
+    try:
+        status = read_json(path)
+        if status is None and not path.exists():
+            return None
+        if not isinstance(status, dict) or not isinstance(status.get('state'), str):
+            raise ValueError('执行状态必须是 JSON 对象')
+        return status
+    except (OSError, ValueError) as error:
+        # Keep the corrupt file intact and distinguish it from a missing file.
+        raise RunnerStatusError('任务执行状态文件不可读，状态待核查（'+type(error).__name__+'）') from error
+
 class Service:
     def __init__(self, config, store=None, platform=None):
         self.config = config
@@ -140,7 +155,18 @@ class Service:
             if row and row['stopped_at']:
                 internal['stop_confirmed'] = True
         if not internal.get('stop_confirmed'):
-            return self._refresh_task(task)
+            previous = deepcopy(task)
+            try:
+                return self._refresh_task(task)
+            except RunnerStatusError as error:
+                public = task['public']
+                message = str(error)+'；不会自动重跑，原文件保留供排查'
+                if public.get('result_refresh_error') != message:
+                    public['events'].append(message)
+                public.update(state='stopping' if internal.get('stop_requested_at') else 'execution_unknown',
+                              failureReason=message, result_refresh_error=message)
+                self.save_if_changed(task, previous)
+                return
         # Late results are optional enrichment after a confirmed stop. Work on
         # a copy so malformed metadata or unreadable logs cannot partially
         # overwrite the saved result or stop other tasks from being scheduled.
@@ -207,7 +233,7 @@ class Service:
         if not job_id:
             return
         folder = self.store.root/'tasks'/task['id']
-        status = read_json(folder/'run/status.json')
+        status = runner_status(folder/'run/status.json')
         try:
             job_status = read_json(self.platform.job_folder(request_id)/job_id/'status.json', {})
             if not isinstance(job_status, dict):
@@ -221,7 +247,7 @@ class Service:
         if job_status.get('state') in ['finished', 'failed'] or resource.get('status') == 'closed':
             # The runner may have finished after the first status snapshot.
             # Read again after observing exit before freezing a terminal task.
-            status = read_json(folder/'run/status.json')
+            status = runner_status(folder/'run/status.json')
         if status:
             public.update(state=status['state'], stage=status.get('stage', 0), step_records=status.get('steps', []), progress=None)
             if status['state'] == 'completed':
@@ -258,6 +284,8 @@ class Service:
             public.pop('failureReason',None)
             for step in public.get('step_records',[]):
                 if step.get('state') == 'running': step['state'] = 'stopped'
+        if public.get('result_refresh_error') and public.get('failureReason') == public['result_refresh_error']:
+            public.pop('failureReason', None)
         public.pop('result_refresh_error', None)
         if (public['state'] in ['completed', 'failed', 'interrupted', 'stopped'] and (
                 (status or {}).get('state') in ['completed', 'failed']

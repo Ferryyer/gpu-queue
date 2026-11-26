@@ -240,7 +240,8 @@ class Markflow:
         A pending probe keeps its identity until its actual receipt arrives.
         Historical notices and old running receipts cannot trigger retries.
         """
-        if not self.probe_timed_out(resource) or resource.get('probe'):
+        if not (self.probe_timed_out(resource) or
+                resource['status'] == 'unknown' and resource.get('probe_invalid')) or resource.get('probe'):
             return
         monitor = resource.get('monitor') or {}
         if monitor.get('attempts', 0) >= 3 or time.time()-monitor.get('at', 0) < 30:
@@ -252,14 +253,20 @@ class Markflow:
                     or internal.get('stop_requested_at')
                     or task['public']['state'] not in ['starting', 'running']):
                 continue
-            runner = read_json(self.store.root/'tasks'/task['id']/'run/status.json', {})
+            try:
+                runner = read_json(self.store.root/'tasks'/task['id']/'run/status.json', {})
+                if not isinstance(runner, dict):
+                    continue
+            except (OSError, ValueError):
+                # Unreadable runner evidence cannot authorize a diagnostic retry.
+                continue
             at = runner.get('updated_at')
             if (runner.get('gpu_verified') is not True or runner.get('state') != 'running'
                     or not isinstance(at, (int, float)) or not math.isfinite(at)
                     or not -5 <= time.time()-at < 90):
                 continue
             old_job = (resource.get('probe_timeout') or {}).get('job')
-            if old_job:
+            if old_job and old_job != (resource.get('probe_invalid') or {}).get('job'):
                 folder = self.job_folder(resource['id'])
                 receipt = read_json(folder/old_job/'status.json', {})
                 if (folder/(old_job+'.json')).exists() or receipt.get('state') == 'running':
@@ -281,23 +288,36 @@ class Markflow:
             folder = self.job_folder(resource['id']) / probe['job']
             status = read_json(folder/'status.json', {})
             if status.get('state') == 'finished' and status.get('exit_code') == 0:
-                output = (folder/'output.log').read_text(errors='replace')
-                line = next((line for line in output.splitlines() if line.startswith('GPUQ_TELEMETRY=')), None)
-                if not line:
-                    raise PlatformError('GPU 检查已结束但没有有效遥测')
-                payload = json.loads(line.split('=', 1)[1])
-                gpus = []
-                for row in csv.reader(payload['gpus'].splitlines(), skipinitialspace=True):
-                    if len(row) not in [6, 7]:
-                        raise PlatformError('GPU 遥测字段不完整')
-                    temperature = row[6].strip() if len(row) == 7 else 'N/A'
-                    gpus.append({'index': int(row[0]), 'uuid': row[1], 'name': row[2], 'total_mb': float(row[3]), 'used_mb': float(row[4]), 'utilization': float(row[5]), 'temperature_c': None if temperature in ['N/A', '[N/A]', 'Not Supported', '[Not Supported]'] else float(temperature)})
-                apps = [row for row in csv.reader(payload['apps'].splitlines(), skipinitialspace=True) if len(row) == 2]
-                stamp = float(payload.get('at', status.get('at', (folder/'output.log').stat().st_mtime)))
-                if not math.isfinite(stamp) or stamp <= 0 or stamp > time.time()+5:
-                    raise PlatformError('GPU 遥测采样时间无效')
+                try:
+                    output = (folder/'output.log').read_text(errors='replace')
+                    line = next((line for line in output.splitlines() if line.startswith('GPUQ_TELEMETRY=')), None)
+                    if not line:
+                        raise PlatformError('GPU 检查已结束但没有有效遥测')
+                    payload = json.loads(line.split('=', 1)[1])
+                    gpus = []
+                    for row in csv.reader(payload['gpus'].splitlines(), skipinitialspace=True):
+                        if len(row) not in [6, 7]:
+                            raise PlatformError('GPU 遥测字段不完整')
+                        temperature = row[6].strip() if len(row) == 7 else 'N/A'
+                        gpus.append({'index': int(row[0]), 'uuid': row[1], 'name': row[2], 'total_mb': float(row[3]), 'used_mb': float(row[4]), 'utilization': float(row[5]), 'temperature_c': None if temperature in ['N/A', '[N/A]', 'Not Supported', '[Not Supported]'] else float(temperature)})
+                    apps = [row for row in csv.reader(payload['apps'].splitlines(), skipinitialspace=True) if len(row) == 2]
+                    stamp = float(payload.get('at', status.get('at', (folder/'output.log').stat().st_mtime)))
+                    if not math.isfinite(stamp) or stamp <= 0 or stamp > time.time()+5:
+                        raise PlatformError('GPU 遥测采样时间无效')
+                except (PlatformError, OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError, csv.Error) as error:
+                    resource.update(status='unknown', probe=None,
+                                    probe_invalid={'at': now(), 'job': probe['job']},
+                                    error='GPU 检查已结束，但遥测输出缺失、损坏或采样时间无效；资源可用性待核查（'+type(error).__name__+'）')
+                    if resource.get('monitor'):
+                        resource['monitor']['state'] = 'retry'
+                    # The receipt resolved this probe: malformed output is not
+                    # timeout evidence authorizing a replacement allocation.
+                    if resource.get('probe_timeout'):
+                        resource['last_probe_timeout'] = resource.pop('probe_timeout')
+                    return
                 resource.update(status='online', telemetry={'gpus': gpus, 'apps': apps, 'at': stamp, 'host': payload.get('host', '')}, probe=None, probe_checked=time.time())
                 resource.pop('error', None)
+                resource.pop('probe_invalid', None)
                 if stamp >= resource.get('sample_requested_at', 0):
                     resource.pop('sample_requested_at', None)
                     resource.pop('monitor', None)
@@ -479,7 +499,12 @@ class Markflow:
                     continue
             managed_pids = set()
             for running in active:
-                status = read_json(self.store.root/'tasks'/running['id']/'run/status.json', {})
+                try:
+                    status = read_json(self.store.root/'tasks'/running['id']/'run/status.json', {})
+                    if not isinstance(status, dict):
+                        raise ValueError('Invalid runner status')
+                except (OSError, ValueError):
+                    return None, '原任务执行状态文件不可读，状态待核查，暂不增加并行'
                 managed_pids.update(str(s['pid']) for s in status.get('steps', []) if s.get('state') == 'running' and s.get('pid'))
             occupied = {row[0] for row in telemetry.get('apps', []) if row[1] not in managed_pids}
             required_mb = memory_mb(required)
