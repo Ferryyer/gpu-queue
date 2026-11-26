@@ -240,6 +240,7 @@ def test_commands(args):
           'lib/core/service/diagnostics_upload.dart', 'lib/data/model/app/diagnostics_level.dart',
           'lib/view/widget/crash_report_dialog.dart', 'lib/main.dart'], APP),
         ([sys.executable, 'scripts/test_pty_native.py', '--flutter', args.flutter], ROOT),
+        ([sys.executable, 'scripts/test_feishu_browser.py'], ROOT),
         (['swiftc', '-swift-version', '5', 'scripts/macos-reconnect/TunnelRecovery.swift',
           '-o', str(args.out.resolve() / 'TunnelRecovery')], APP),
         ([sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts/macos-reconnect', '-v'], APP),

@@ -6,6 +6,20 @@ import 'package:server_box/core/utils/gpu_queue_theme.dart';
 import 'package:server_box/view/page/feishu/page.dart';
 
 void main() {
+  testWidgets('login hint closes automatically and disposing cancels its timer', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FeishuTaskPage())));
+    expect(find.textContaining('首次使用'), findsOneWidget);
+    await tester.pump(feishuHintDuration - const Duration(seconds: 1));
+    expect(find.textContaining('首次使用'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('首次使用'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FeishuTaskPage())));
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(feishuHintDuration);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant({TargetPlatform.windows}));
+
   for (final embedded in [false, true]) {
     testWidgets(
       'three-hour refresh, suspended catch-up and disposal (embedded=$embedded)',
@@ -100,6 +114,8 @@ void main() {
     tester,
   ) async {
     final messenger = tester.binding.defaultBinaryMessenger;
+    final channels = <MethodChannel>[];
+    final hoverChanges = <bool>[];
     messenger.setMockMessageHandler('flutter/assets', (message) async {
       return ByteData.sublistView(
         Uint8List.fromList('/* fixture script */'.codeUnits),
@@ -107,11 +123,24 @@ void main() {
     });
     messenger.setMockMethodCallHandler(
       SystemChannels.platform_views,
-      (_) async => null,
+      (call) async {
+        if (call.method == 'create') {
+          final id = (call.arguments as Map)['id'];
+          final channel = MethodChannel('work.inspirequeue/feishu/$id');
+          channels.add(channel);
+          messenger.setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'hideHover') hoverChanges.add(call.arguments as bool);
+          });
+        }
+        return null;
+      },
     );
     addTearDown(() {
       messenger.setMockMessageHandler('flutter/assets', null);
       messenger.setMockMethodCallHandler(SystemChannels.platform_views, null);
+      for (final channel in channels) {
+        messenger.setMockMethodCallHandler(channel, null);
+      }
     });
     for (final width in [360.0, 768.0, 1200.0]) {
       await tester.binding.setSurfaceSize(Size(width, 700));
@@ -135,6 +164,13 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Inspire 风格'), findsOneWidget);
+      await tester.tap(find.text('隐藏网页悬停提示'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(hoverChanges.last, isFalse);
+      await tester.tap(find.byTooltip('页面选项'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('回到我负责的'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));

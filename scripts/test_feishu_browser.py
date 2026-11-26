@@ -46,6 +46,32 @@ import Cocoa
 import WebKit
 
 _ = NSApplication.shared
+do {
+  let defaults = UserDefaults.standard
+  let original = defaults.object(forKey: "inspire.feishu.hideHover")
+  defer {
+    if let original = original { defaults.set(original, forKey: "inspire.feishu.hideHover") }
+    else { defaults.removeObject(forKey: "inspire.feishu.hideHover") }
+  }
+  let full = FeishuTaskView(viewId: 3, messenger: TestMessenger(), arguments: ["script": ""])
+  let overview = FeishuTaskView(viewId: 4, messenger: TestMessenger(),
+                               arguments: ["script": "", "embedded": true])
+  for hidden in [false, true] {
+    FlutterMethodChannel.handlers["work.inspirequeue/feishu/3"]?(
+      FlutterMethodCall(method: "hideHover", arguments: hidden), { _ in })
+    for view in [full, overview] {
+      let web = view.subviews.compactMap { $0 as? WKWebView }.first!
+      let source = web.configuration.userContentController.userScripts.first!.source
+      precondition(source.contains("hideHover:\(hidden)"), "Both documents must receive the preference")
+      precondition(web.url == nil, "Changing hover feedback must not reload or navigate")
+    }
+    precondition(FlutterMethodChannel.events.suffix(2).allSatisfy { $0["hideHover"] as? Bool == hidden },
+                 "Both Flutter pages must receive the preference")
+    precondition(defaults.bool(forKey: "inspire.feishu.hideHover") == hidden,
+                 "Keep the preference across application restarts")
+  }
+  print("PASS: shared hover preference, state updates, persistence, no navigation")
+}
 for embedded in [false, true] {
   let view = FeishuTaskView(viewId: embedded ? 2 : 1, messenger: TestMessenger(),
     arguments: ["script": "", "embedded": embedded])

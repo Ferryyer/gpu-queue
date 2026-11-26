@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Inspire Queue · 飞书任务
 // @namespace    local.feishu.task
-// @version      2.0.4
-// @description  隐藏全局导航，暖白与陶土色主题，小窗口可展开任务导航。
+// @version      2.0.5
+// @description  自动关闭浏览器推荐，缩放后刷新布局，可隐藏鼠标悬停提示。
 // @match        https://uqyv5nolng8.feishu.cn/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -22,14 +22,22 @@
   let resizePending = false;
   let enabled = native ? native.enabled !== false :
     (typeof GM_getValue === 'function' ? GM_getValue('hideGlobalNav', true) : true);
+  let hideHover = native ? native.hideHover !== false :
+    (typeof GM_getValue === 'function' ? GM_getValue('hideHover', true) : true);
   let dark = native ? native.dark === true : matchMedia('(prefers-color-scheme: dark)').matches;
   let open = false;
   let lastPath = '';
   let nav = null;
   let button = null;
+  let observedRoot = null;
+  const layoutObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(notifyLayout) : null;
   const style = document.createElement('style');
   style.id = 'inspire-task-style';
   style.textContent = `
+    html[data-inspire-task-page] [data-inspire-browser-tip] { display: none !important; }
+    html[data-inspire-task-page][data-inspire-hide-hover][data-inspire-pointer-hover] [role="tooltip"] {
+      visibility: hidden !important; pointer-events: none !important;
+    }
     html[${attribute}] {
       --iq-bg: #faf9f6; --iq-panel: #ffffff; --iq-nav: #f0eee8;
       --iq-text: #292722; --iq-muted: #716d65; --iq-line: #e5e1d8;
@@ -125,6 +133,7 @@
   function closeNav() { open = false; sync(); }
   function hideBrowserSuggestion() {
     if (!document.body) return;
+    const visited = new Set();
     const shell = 'body, main, [id^="root"], .appLayout, .messagesLayout, .appLayout-content, .larklet-extension, .larklet-extension-component';
     // Only the product's browser recommendation, never task text or other alerts.
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
@@ -137,18 +146,21 @@
     });
     let node;
     while ((node = walker.nextNode())) {
+      // Feishu may split a sentence across spans or include whitespace.
       const ownText = [...node.childNodes].filter(n => n.nodeType === Node.TEXT_NODE)
-        .map(n => n.textContent).join('');
-      if (!ownText.includes('想要更好的飞书网页版体验')) continue;
+        .map(n => n.textContent).join('').replace(/\s+/g, '');
+      if (!/想要|飞书网页版体验/.test(ownText)) continue;
       let banner = node;
       for (let depth = 0; banner && depth < 5; depth++, banner = banner.parentElement) {
-        const text = banner.textContent.trim();
+        const text = banner.textContent.replace(/\s+/g, '');
         if (text.length > 180 || banner.matches(shell) || banner.querySelector('#root-todo')) break;
-        if (text.includes('试试这些浏览器吧')) {
+        if (text.includes('想要更好的飞书网页版体验') && text.includes('试试这些浏览器吧')) {
           while (banner.parentElement && banner.parentElement !== document.body &&
                  !banner.parentElement.matches(shell) &&
                  !banner.parentElement.querySelector('#root-todo') &&
-                 banner.parentElement.textContent.trim() === text) banner = banner.parentElement;
+                 banner.parentElement.textContent.replace(/\s+/g, '') === text) banner = banner.parentElement;
+          if (visited.has(banner)) break;
+          visited.add(banner);
           const close = banner.querySelector('button[aria-label="关闭"], button[aria-label="Close"], [role="button"][aria-label="关闭"], [role="button"][aria-label="Close"], [class*="close"], [class*="Close"]') ||
             [...banner.querySelectorAll('button, [role="button"]')].find(el => !el.textContent.trim() && el.querySelector('svg'));
           const attempts = closeAttempts.get(banner) || 0;
@@ -157,6 +169,11 @@
             // Let Feishu update its own banner/layout state. CSS display:none
             // bypasses that state and can leave virtualized hit areas stale.
             close.click();
+            notifyLayout();
+          } else if (!banner.hasAttribute('data-inspire-browser-tip')) {
+            // Some releases omit the close control or ignore early clicks.
+            // Only this positively identified recommendation gets the fallback.
+            banner.setAttribute('data-inspire-browser-tip', '');
             notifyLayout();
           }
           break;
@@ -202,8 +219,16 @@
     const taskPage = /^\/next\/task(?:\/|$)/.test(location.pathname);
     const active = enabled && taskPage;
     html.toggleAttribute('data-inspire-task-page', taskPage);
+    html.toggleAttribute('data-inspire-hide-hover', taskPage && hideHover);
     html.toggleAttribute('data-inspire-embedded', embedded);
     if (taskPage) hideBrowserSuggestion();
+    const taskRoot = taskPage ? document.querySelector('#root-todo') : null;
+    if (taskRoot !== observedRoot) {
+      layoutObserver?.disconnect();
+      observedRoot = taskRoot;
+      if (taskRoot) layoutObserver?.observe(taskRoot);
+      notifyLayout();
+    }
     const wasActive = html.hasAttribute(attribute);
     html.toggleAttribute(attribute, active);
     html.toggleAttribute('data-inspire-dark', active && dark);
@@ -223,7 +248,8 @@
   }
   window.InspireTaskAppearance = {
     setEnabled(value) { enabled = value === true; sync(); },
-    setDark(value) { dark = value === true; sync(); }
+    setDark(value) { dark = value === true; sync(); },
+    setHideHover(value) { hideHover = value === true; sync(); }
   };
   if (typeof GM_registerMenuCommand === 'function') {
     GM_registerMenuCommand('切换：Inspire 风格 / 飞书原版', () => {
@@ -231,8 +257,18 @@
       if (typeof GM_setValue === 'function') GM_setValue('hideGlobalNav', enabled);
       sync();
     });
+    GM_registerMenuCommand('切换：隐藏网页悬停提示', () => {
+      hideHover = !hideHover;
+      if (typeof GM_setValue === 'function') GM_setValue('hideHover', hideHover);
+      sync();
+    });
   }
+  document.addEventListener('pointermove', event => {
+    if (event.pointerType === 'mouse') document.documentElement?.setAttribute('data-inspire-pointer-hover', '');
+  }, {passive: true});
   document.addEventListener('keydown', event => {
+    // Keyboard users still get the descriptions associated with focused controls.
+    document.documentElement?.removeAttribute('data-inspire-pointer-hover');
     if (event.key === 'Escape' && open) { closeNav(); button?.focus(); }
   });
   document.addEventListener('click', event => {
@@ -241,6 +277,9 @@
   });
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
     if (!native) { dark = event.matches; sync(); }
+  });
+  window.visualViewport?.addEventListener('resize', () => {
+    if (/^\/next\/task(?:\/|$)/.test(location.pathname)) notifyLayout();
   });
   sync();
   // SPA routing and asynchronously mounted roots; never reads task content,
