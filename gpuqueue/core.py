@@ -94,7 +94,15 @@ def validate_step_paths(argv, cwd, project, files, source_paths, index):
 def normalize(manifest, source='Codex'):
     if not isinstance(manifest, dict) or manifest.get('schema_version', 1) != 1:
         raise ValueError('需要 schema_version=1 的 JSON 任务文件')
-    title = manifest.get('title', '').strip()
+
+    def string(value, field):
+        if not isinstance(value, str) or '\x00' in value:
+            raise ValueError(f'{field} 必须是不含 NUL 的字符串')
+        return value
+
+    title = string(manifest.get('title', ''), 'title').strip()
+    description = string(manifest.get('description', ''), 'description')
+    submission_key = string(manifest.get('submission_key', ''), 'submission_key')
     if not title or len(title) > 160:
         raise ValueError('title 必填，最长 160 字符')
     if not isinstance(manifest.get('project'), str) or not Path(manifest['project']).is_absolute():
@@ -151,10 +159,19 @@ def normalize(manifest, source='Codex'):
     runtimes = {}
     source_paths = {(project / name).resolve() for name in files}
     for index, raw in enumerate(steps):
+        if not isinstance(raw, dict):
+            raise ValueError(f'步骤 {index + 1} 必须是对象')
+        name = string(raw.get('name', f'步骤 {index + 1}'), f'步骤 {index + 1} 的 name')
+        cwd = string(raw.get('cwd', '{code}'), f'步骤 {index + 1} 的 cwd')
+        if not Path(cwd).is_absolute() and not any(
+            cwd == '{' + key + '}' or cwd.startswith('{' + key + '}/')
+            for key in ('code', 'outputs', 'home', 'project')
+        ):
+            raise ValueError(f'步骤 {index + 1} 的 cwd 必须是绝对路径或以目录占位符开头')
         argv = raw.get('argv')
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and '\x00' not in a for a in argv):
             raise ValueError(f'步骤 {index + 1} 的 argv 必须是参数数组')
-        executable = Path(argv[0]).expanduser()
+        executable = Path(argv[0])
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError(f'步骤 {index + 1} 需要当前已存在的绝对可执行路径')
         runtimes[str(executable)] = fingerprint(executable)
@@ -168,9 +185,9 @@ def normalize(manifest, source='Codex'):
             raise ValueError('任务文件不保存凭据；使用本人私有环境配置')
         if any(k in env for k in ['CUDA_VISIBLE_DEVICES', 'GPUQ_OUTPUT_DIR', 'GPUQ_TASK_ID']):
             raise ValueError('GPU 设备与任务目录由执行器指定')
-        validate_step_paths(argv, raw.get('cwd', '{code}'), project, files, source_paths, index)
-        normalized_steps.append({'name': raw.get('name') or f'步骤 {index + 1}', 'argv': argv, 'cwd': raw.get('cwd', '{code}'), 'outputs': outputs, 'env': env})
-    document = {'schema_version': 1, 'title': title, 'description': manifest.get('description', ''), 'project': str(project), 'resources': resources, 'steps': normalized_steps, 'files': files, 'inputs': inputs, 'runtimes': list(runtimes.values()), 'submission_key': manifest.get('submission_key', ''), 'runner_sha256': sha(Path(__file__).with_name('runner.py'))}
+        validate_step_paths(argv, cwd, project, files, source_paths, index)
+        normalized_steps.append({'name': name or f'步骤 {index + 1}', 'argv': argv, 'cwd': cwd, 'outputs': outputs, 'env': env})
+    document = {'schema_version': 1, 'title': title, 'description': description, 'project': str(project), 'resources': resources, 'steps': normalized_steps, 'files': files, 'inputs': inputs, 'runtimes': list(runtimes.values()), 'submission_key': submission_key, 'runner_sha256': sha(Path(__file__).with_name('runner.py'))}
     digest = hashlib.sha256(canonical(document).encode()).hexdigest()
     return document, digest
 
@@ -236,6 +253,7 @@ class Store:
         folder = self.root / 'tasks' / task_id
         folder.parent.mkdir(exist_ok=True, mode=0o700)
         staging = Path(tempfile.mkdtemp(dir=folder.parent, prefix='.prepare-'))
+        reuse_folder = False
         try:
             for relative, expected in doc['files'].items():
                 target = staging / 'code' / relative
@@ -257,11 +275,29 @@ class Store:
                 # the winning submission is still visible or has been deleted.
                 if error.errno not in {errno.EEXIST, errno.ENOTEMPTY} or not folder.is_dir():
                     raise
+                reuse_folder = True
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         public = {'id': task_id, 'name': doc['title'], 'description': doc['description'], 'project': Path(doc['project']).name, 'agent': source, 'state': 'ready', 'stage': 0, 'progress': None, 'elapsed': '尚未运行', 'version': digest[:12], 'memory': doc['resources']['memory_gb'], 'resources': doc['resources'], 'steps': [s['name'] for s in doc['steps']], 'step_records': [], 'events': ['代码和配置已固定版本', 'CPU 准备检查通过，等待你在网页点击开始'], 'created_at': now(), 'checks': ['代码快照已校验', '输入路径已检查', '执行入口已检查', 'GPU 兼容性将在运行时验证']}
         task = {'id': task_id, 'digest': digest, 'doc': doc, 'public': public, 'internal': {'approved_at': None, 'position': 0, 'request_uuid': None, 'job_uuid': None, 'dispatch': None}}
         with self.connect() as connection:
             connection.execute('BEGIN IMMEDIATE')
+            existing = self._submitted_task(connection, task_id)
+            if existing:
+                return existing, False
+            if reuse_folder:
+                # No database winner: only recover a matching, unstarted snapshot.
+                # Keep this check under the write lock so a concurrent submit or
+                # approval cannot register/start it while it is being inspected.
+                try:
+                    plan = read_json(folder / 'manifest.json')
+                    run = folder / 'run'
+                    valid = (isinstance(plan, dict) and plan.get('digest') == digest
+                             and hashlib.sha256(canonical(plan.get('doc')).encode()).hexdigest() == digest
+                             and not run.is_symlink() and run.is_dir() and not any(run.iterdir()))
+                except (OSError, ValueError):
+                    valid = False
+                if not valid:
+                    raise ValueError('已有任务目录的清单不匹配或 run 目录非空，拒绝复用残留产物')
             inserted = connection.execute('INSERT OR IGNORE INTO tasks VALUES (?,?,?,?,?)', (task_id, digest, canonical(doc), canonical(public), canonical(task['internal'])))
             return self._submitted_task(connection, task_id), inserted.rowcount == 1
