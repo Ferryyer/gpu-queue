@@ -11,7 +11,7 @@ from .platform import Markflow, PlatformError
 from .feishu import FeishuAuthError
 from .resources import published_resources
 
-from .control import Control, QueueChanged
+from .control import Control, QueueChanged, ensure_stop_marker
 
 def redact(text):
     text = re.sub(r'(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+', r'\1[redacted]', text)
@@ -35,9 +35,16 @@ class Service:
         self.remote_revision = None
         self.error = None
         self.checked_at = None
+        self._control = None
+
+    @property
+    def control(self):
+        if self._control is None:
+            self._control = Control(self.store)
+        return self._control
 
     def remote(self, path, payload):
-        control = Control(self.store)
+        control = self.control
         if path == '/api/worker/sync':
             return control.sync(payload['heartbeat'])
         if path == '/api/worker/claim':
@@ -85,7 +92,7 @@ class Service:
                     local['public']['events'].append('你在网页请求停止任务；已有产物保留，后续步骤不再执行')
                 if (local['internal'].get('stop_requested_at') != at or
                         not local['internal'].get('stop_confirmed') and remote['state'] not in ['completed', 'cancelled']):
-                    atomic_json(self.store.root/'tasks'/local['id']/'run/stop.json', {'task':local['id'],'digest':local['digest'],'at':at})
+                    ensure_stop_marker(self.store, local['id'], local['digest'], at)
                 local['internal']['stop_requested_at'] = at
                 if remote['state'] != 'completed':
                     phase = ('已移出队列' if remote['state']=='cancelled' else
@@ -333,7 +340,7 @@ class Service:
                 self.refresh_task(task)
                 if public['state'] == 'completed':
                     return
-            Control(self.store).confirm_stop(task['id'],task['digest'])
+            self.control.confirm_stop(task['id'],task['digest'])
             internal['stop_confirmed'] = True
             internal['terminal_reconciled'] = True
             public.update(state='stopped',phase='任务已停止，已有产物保留')

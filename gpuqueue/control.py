@@ -1,7 +1,7 @@
 """Local queue authority. Browser approvals are separate from scheduler snapshots."""
 import time
 
-from .core import Store, canonical, now, atomic_json, TERMINAL
+from .core import Store, canonical, now, atomic_json, read_json, TERMINAL
 
 LIVE = {'ready', 'queued', 'waiting_gpu', 'checking_resources'}
 DELETABLE = {'completed', 'cancelled', 'stopped', 'failed', 'interrupted'}
@@ -13,6 +13,17 @@ class ControlError(RuntimeError):
 
 class QueueChanged(ControlError):
     pass
+
+def ensure_stop_marker(store, task_id, digest, at):
+    path = store.root/'tasks'/task_id/'run/stop.json'
+    expected = {'task': task_id, 'digest': digest, 'at': at}
+    try:
+        marker = read_json(path)
+    except ValueError:
+        marker = None
+    if isinstance(marker, dict) and all(marker.get(key) == value for key, value in expected.items()):
+        return
+    atomic_json(path, expected)
 
 class Control:
     def __init__(self, store=None):
@@ -223,7 +234,7 @@ class Control:
                 db.execute("UPDATE queue_meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
                 db.execute('INSERT INTO queue_audit(task_id,action,at) VALUES (?,?,?)', (task_id, 'browser_stop:'+digest, at))
         # Live control marker, separate from the immutable approved code.
-        atomic_json(self.store.root/'tasks'/task_id/'run/stop.json', {'task':task_id,'digest':digest,'at':at})
+        ensure_stop_marker(self.store, task_id, digest, at)
         return self.state()
 
     def confirm_stop(self, task_id, digest):

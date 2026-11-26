@@ -63,6 +63,34 @@ def fingerprint(path):
         result['sha256'] = sha(path)
     return result
 
+def validate_step_paths(argv, cwd, project, files, source_paths, index):
+    # Use the runner's expansion order and cwd resolution without changing the
+    # submitted strings (or tying their digest to this temporary location).
+    from .runner import expand
+    with tempfile.TemporaryDirectory(prefix='gpuq-paths-') as temporary:
+        folder = Path(temporary).resolve()
+        code = folder / 'code'
+        effective_cwd = Path(expand(cwd, folder, {'project': str(project)})).resolve()
+        for argument in argv[1:]:
+            value = argument.split('=', 1)[1] if argument.startswith('-') and '=' in argument else argument
+            path = Path(expand(value, folder, {'project': str(project)}))
+            if not path.is_absolute():
+                path = effective_cwd / path
+            lexical = Path(os.path.normpath(path))
+            resolved = path.resolve()
+            if '{code}' in value:
+                if not resolved.is_relative_to(code):
+                    raise ValueError(f'步骤 {index + 1} 的代码路径超出快照：{value}')
+                relative = str(resolved.relative_to(code))
+                if (relative != '.' and relative not in files and
+                        not any(name.startswith(relative + '/') for name in files)):
+                    raise ValueError(f'步骤 {index + 1} 引用了未加入快照的代码或配置：{relative}')
+            # Check both snapshot names and real targets: source symlinks can
+            # have different names, while the copied snapshot preserves its index.
+            if (resolved in source_paths or
+                    lexical.is_relative_to(project) and str(lexical.relative_to(project)) in files):
+                raise ValueError('运行代码请引用 {code}/文件，避免执行 Agent 后续修改的源文件')
+
 def normalize(manifest, source='Codex'):
     if not isinstance(manifest, dict) or manifest.get('schema_version', 1) != 1:
         raise ValueError('需要 schema_version=1 的 JSON 任务文件')
@@ -121,6 +149,7 @@ def normalize(manifest, source='Codex'):
         raise ValueError('steps 需要 1–50 个有序步骤')
     normalized_steps = []
     runtimes = {}
+    source_paths = {(project / name).resolve() for name in files}
     for index, raw in enumerate(steps):
         argv = raw.get('argv')
         if not isinstance(argv, list) or not argv or not all(isinstance(a, str) and '\x00' not in a for a in argv):
@@ -128,11 +157,6 @@ def normalize(manifest, source='Codex'):
         executable = Path(argv[0]).expanduser()
         if not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
             raise ValueError(f'步骤 {index + 1} 需要当前已存在的绝对可执行路径')
-        for argument in argv[1:]:
-            if argument.startswith('{code}/'):
-                relative = argument[len('{code}/'):]
-                if relative not in files and not any(name.startswith(relative.rstrip('/')+'/') for name in files):
-                    raise ValueError(f'步骤 {index + 1} 引用了未加入快照的代码或配置：{relative}')
         runtimes[str(executable)] = fingerprint(executable)
         outputs = raw.get('outputs', [])
         if not isinstance(outputs, list) or not all(isinstance(p, str) and p.startswith('{outputs}/') and '..' not in Path(p).parts for p in outputs):
@@ -144,11 +168,7 @@ def normalize(manifest, source='Codex'):
             raise ValueError('任务文件不保存凭据；使用本人私有环境配置')
         if any(k in env for k in ['CUDA_VISIBLE_DEVICES', 'GPUQ_OUTPUT_DIR', 'GPUQ_TASK_ID']):
             raise ValueError('GPU 设备与任务目录由执行器指定')
-        for a in argv[1:]:
-            # Match the project/home placeholders expanded by the runner.
-            a = a.replace('{project}', str(project)).replace('{home}', str(HOME))
-            if a.startswith(str(project) + '/') and Path(a).is_file() and str(Path(a).relative_to(project)) in files:
-                raise ValueError('运行代码请引用 {code}/文件，避免执行 Agent 后续修改的源文件')
+        validate_step_paths(argv, raw.get('cwd', '{code}'), project, files, source_paths, index)
         normalized_steps.append({'name': raw.get('name') or f'步骤 {index + 1}', 'argv': argv, 'cwd': raw.get('cwd', '{code}'), 'outputs': outputs, 'env': env})
     document = {'schema_version': 1, 'title': title, 'description': manifest.get('description', ''), 'project': str(project), 'resources': resources, 'steps': normalized_steps, 'files': files, 'inputs': inputs, 'runtimes': list(runtimes.values()), 'submission_key': manifest.get('submission_key', ''), 'runner_sha256': sha(Path(__file__).with_name('runner.py'))}
     digest = hashlib.sha256(canonical(document).encode()).hexdigest()
