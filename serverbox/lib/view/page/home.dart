@@ -217,10 +217,8 @@ class _HomePageState extends ConsumerState<HomePage>
     // The one way in the lifecycle cannot report: a file or link opened into
     // an app that never left the foreground. See [MethodChans.onOpened].
     MethodChans.onOpened(() => unawaited(_consumePending()));
-    // avoid index out of range
-    if (_selectIndex.value >= _tabs.length || _selectIndex.value < 0) {
-      _selectIndex.value = 0;
-    }
+    // Restore before the first frame so launch notices appear over the saved tab.
+    _selectIndex.value = _savedTabIndex() ?? 0;
     _pageController = PageController(initialPage: _selectIndex.value);
     if (Stores.setting.generalWakeLock.fetch()) {
       WakelockPlus.enable();
@@ -603,16 +601,6 @@ class _HomePageState extends ConsumerState<HomePage>
 
   @override
   Future<void> afterFirstLayout(BuildContext context) async {
-    // Auth required for first launch
-    // Where it was left, if that is still a tab: the enabled set is a setting
-    // and may have shrunk since.
-    final saved = _savedTabIndex();
-    if (saved != null) {
-      _selectIndex.value = saved;
-      if (_pageController.hasClients) {
-        _pageController.jumpToPage(saved);
-      }
-    }
     // Explicitly, because the listener above only fires on a change: the first
     // tab is usually already the value, and nothing would have announced it.
     _publishCurrentTab();

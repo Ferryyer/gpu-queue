@@ -46,6 +46,20 @@ import Cocoa
 import WebKit
 
 _ = NSApplication.shared
+let tenant = FeishuTaskView.home.host!
+for path in ["/next/messenger", "/next/messenger/"] {
+  precondition(FeishuTaskView.isMessengerLanding(URL(string: "https://\(tenant)\(path)")!),
+    "The messages landing page must return to tasks")
+}
+for url in [FeishuTaskView.home,
+            URL(string: "https://\(tenant)/next/task/watched-tasks")!,
+            URL(string: "https://\(tenant)/accounts/page/login/")!,
+            URL(string: "https://\(tenant)/next/messenger/chat")!,
+            URL(string: "https://\(tenant)/next/messenger?openChatId=fixture")!,
+            URL(string: "https://example.com/next/messenger")!] {
+  precondition(!FeishuTaskView.isMessengerLanding(url),
+    "Task, sign-in, conversation and foreign URLs must retain normal navigation")
+}
 for embedded in [false, true] {
   let view = FeishuTaskView(viewId: embedded ? 2 : 1, messenger: TestMessenger(),
     arguments: ["script": "", "embedded": embedded])
