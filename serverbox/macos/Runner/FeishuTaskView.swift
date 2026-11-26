@@ -25,11 +25,14 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
   private var dark: Bool
   private var popupWindows: [NSWindow] = []
   private var loadingObservation: NSKeyValueObservation?
+  private var urlObservation: NSKeyValueObservation?
   private var activeObservation: NSObjectProtocol?
   private var pageError: String?
   private var needsRecovery = false
   private var recoveryAttempted = false
   private var initialNavigationStarted = false
+  private var taskLandingRetried = false
+  private var taskLandingCheckPending = false
 
   init(viewId: Int64, messenger: FlutterBinaryMessenger, arguments: Any?) {
     let args = arguments as? [String: Any] ?? [:]
@@ -60,11 +63,18 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
     loadingObservation = web.observe(\.isLoading, options: [.new]) { [weak self] _, _ in
       self?.sendState()
     }
+    // Feishu can switch its top-level URL via client-side routing.
+    urlObservation = web.observe(\.url, options: [.new]) { [weak self] _, _ in
+      self?.checkTaskLanding()
+    }
     channel.setMethodCallHandler { [weak self] call, result in
       guard let self = self else { result(nil); return }
       switch call.method {
       case "state": self.sendState(); result(nil)
-      case "reload": self.reloadPage(); result(nil)
+      case "reload":
+        self.taskLandingRetried = false
+        self.reloadPage()
+        result(nil)
       case "refresh":
         // Do not interrupt sign-in, navigation, or a native attachment dialog.
         let url = self.web.url ?? Self.home
@@ -75,7 +85,10 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
           self.reloadPage()
         }
         result(nil)
-      case "home": self.web.load(URLRequest(url: Self.home)); result(nil)
+      case "home":
+        self.taskLandingRetried = false
+        self.web.load(URLRequest(url: Self.home))
+        result(nil)
       case "back": if self.web.canGoBack { self.web.goBack() }; result(nil)
       case "appearance":
         self.enabled = call.arguments as? Bool ?? true
@@ -119,8 +132,32 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
 
   private func reloadPage() {
     pageError = nil
-    // reload() has no navigation to repeat after an initial provisional failure.
-    if web.reload() == nil { web.load(URLRequest(url: Self.home)) }
+    // Reloading the messages landing page would keep the task view stranded.
+    if web.url.map(Self.isMessengerLanding) == true || web.reload() == nil {
+      web.load(URLRequest(url: Self.home))
+    }
+  }
+  static func isMessengerLanding(_ url: URL) -> Bool {
+    guard url.scheme == "https", url.host == home.host, url.port == nil,
+          url.query == nil, url.fragment == nil else { return false }
+    return url.path == "/next/messenger" || url.path == "/next/messenger/"
+  }
+  private func checkTaskLanding() {
+    guard !taskLandingCheckPending else { return }
+    taskLandingCheckPending = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.taskLandingCheckPending = false
+      guard !self.web.isLoading, self.web.url.map(Self.isMessengerLanding) == true,
+            self.window?.attachedSheet == nil,
+            !self.popupWindows.contains(where: { $0.isVisible }) else { return }
+      if self.taskLandingRetried {
+        self.sendState(error: "飞书仍停在消息首页。请点击刷新重试，或在浏览器中打开任务。")
+        return
+      }
+      self.taskLandingRetried = true
+      self.web.load(URLRequest(url: Self.home))
+    }
   }
   private func recoverIfNeeded() {
     guard needsRecovery, !recoveryAttempted, window != nil, NSApp.isActive else { return }
@@ -175,6 +212,7 @@ final class FeishuTaskView: NSView, WKNavigationDelegate, WKUIDelegate, WKDownlo
       needsRecovery = false
       recoveryAttempted = false
       sendState()
+      checkTaskLanding()
     }
   }
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
