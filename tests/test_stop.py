@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -32,6 +33,7 @@ class StopTests(unittest.TestCase):
     def approve_claim(self):
         state=self.control.start(self.task['id'],self.task['digest'])
         self.control.claim(self.task['id'],self.task['digest'],state['revision'])
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux procfs")
     def test_process_identity_and_parent_use_signal_visible_pids(self):
         process=subprocess.Popen(['/usr/bin/python3','-c','import time;time.sleep(30)'])
         self.processes.append(process)
@@ -41,6 +43,7 @@ class StopTests(unittest.TestCase):
         self.assertEqual(value['ppid'],os.getpid())
         self.assertIn(process.pid,stop.table())
         self.assertIsNone(stop.identity(-1))
+    @unittest.skipUnless(sys.platform == "linux", "requires Linux procfs")
     def test_other_namespace_pid_collision_is_rejected(self):
         own = Path('/proc/self/status').read_text()
         mounted_pid = next(int(line.split()[1]) for line in own.splitlines() if line.startswith('Pid:'))
