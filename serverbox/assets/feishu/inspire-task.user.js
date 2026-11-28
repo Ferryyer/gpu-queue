@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Inspire Queue · 飞书任务
 // @namespace    local.feishu.task
-// @version      2.0.4
+// @version      2.0.5
 // @description  隐藏全局导航，暖白与陶土色主题，小窗口可展开任务导航。
 // @match        https://uqyv5nolng8.feishu.cn/*
 // @grant        GM_getValue
@@ -16,9 +16,12 @@
   if (location.origin !== 'https://uqyv5nolng8.feishu.cn' || window.top !== window) return;
   if (window.InspireTaskAppearance) return;
   const attribute = 'data-inspire-task';
+  const taskPath = /^\/next\/task(?:\/|$)/;
+  const upgradeAttemptKey = 'inspire-task-page-upgrade-attempted';
   const native = window.__inspireTaskOptions;
   const embedded = native?.embedded === true;
   const closeAttempts = new WeakMap();
+  let followedUpgrade = false;
   let resizePending = false;
   let enabled = native ? native.enabled !== false :
     (typeof GM_getValue === 'function' ? GM_getValue('hideGlobalNav', true) : true);
@@ -123,6 +126,46 @@
     }));
   }
   function closeNav() { open = false; sync(); }
+  function followPageUpgrade() {
+    if (!document.body) return;
+    let storage;
+    try { storage = window.sessionStorage; } catch { return; }
+    const attempted = storage.getItem(upgradeAttemptKey) !== null;
+    if (document.querySelector('#root-todo .task-view-toolbar')) {
+      if (attempted) storage.removeItem(upgradeAttemptKey);
+      return;
+    }
+    const notice = '检测到存在新版本页面';
+    if (attempted || followedUpgrade || !document.body.textContent.includes(notice)) return;
+
+    const action = '点击跳转';
+    const controls = 'a, button, [role="link"], [role="button"]';
+    const textOf = element => element?.textContent.replace(/\s+/g, '');
+    const label = [...document.body.querySelectorAll(`${controls}, span`)].find(element =>
+      textOf(element) === action &&
+      !element.closest('form, [contenteditable], [hidden], [aria-hidden="true"]') &&
+      [element.parentElement, element.parentElement?.parentElement].some(parent =>
+        textOf(parent) === notice + action));
+    if (!label) return;
+    const control = label.closest(controls) ?? label;
+    if (control.matches(':disabled, [aria-disabled="true"], [download]')) return;
+
+    const hasHref = control.hasAttribute('href');
+    if (hasHref) {
+      let target;
+      try { target = new URL(control.href); } catch { return; }
+      if (target.origin !== location.origin || target.username || target.password) return;
+      // Only the app has native recovery from the bare messages landing.
+      const messenger = /^\/next\/messenger\/?$/.test(target.pathname) &&
+        target.href === target.origin + target.pathname;
+      if (!taskPath.test(target.pathname) && !(native && messenger)) return;
+    }
+    // The marker survives a document reload, including Feishu returning the same notice.
+    try { storage.setItem(upgradeAttemptKey, '1'); } catch { return; }
+    followedUpgrade = true;
+    if (hasHref) control.setAttribute('target', '_self');
+    control.click();
+  }
   function hideBrowserSuggestion() {
     if (!document.body) return;
     const shell = 'body, main, [id^="root"], .appLayout, .messagesLayout, .appLayout-content, .larklet-extension, .larklet-extension-component';
@@ -199,11 +242,14 @@
     const html = document.documentElement;
     if (!html) return;
     if (!style.isConnected) html.append(style);
-    const taskPage = /^\/next\/task(?:\/|$)/.test(location.pathname);
+    const taskPage = taskPath.test(location.pathname);
     const active = enabled && taskPage;
     html.toggleAttribute('data-inspire-task-page', taskPage);
     html.toggleAttribute('data-inspire-embedded', embedded);
-    if (taskPage) hideBrowserSuggestion();
+    if (taskPage) {
+      followPageUpgrade();
+      hideBrowserSuggestion();
+    }
     const wasActive = html.hasAttribute(attribute);
     html.toggleAttribute(attribute, active);
     html.toggleAttribute('data-inspire-dark', active && dark);

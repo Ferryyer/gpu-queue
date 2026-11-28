@@ -11,7 +11,7 @@ function page(path = '/next/task/my-tasks', html = fixture, origin = 'https://uq
   const {window} = dom;
   let tick;
   let frames = [];
-  window.__inspireTaskOptions = {enabled: true, ...options};
+  if (options) window.__inspireTaskOptions = {enabled: true, ...options};
   window.requestAnimationFrame = callback => { frames.push(callback); };
   window.setInterval = callback => { tick = callback; };
   window.matchMedia = () => ({matches: false, addEventListener() {}});
@@ -138,4 +138,92 @@ test('browser recommendation uses its close action, without hiding layout shells
     p.window.history.pushState({}, '', '/next/messenger'); p.tick();
     assert(!p.document.documentElement.hasAttribute('data-inspire-task-page'));
   } finally { p.close(); login.close(); early.close(); }
+});
+
+function upgradeNotice(control) {
+  return `<main><p>检测到存在新版本页面 ${control}</p></main>`;
+}
+
+test('the Feishu upgrade link opens the requested task in the existing view', () => {
+  const path = '/next/task/my-tasks?view=assigned#fixture';
+  const p = page('/next/task/my-tasks', '');
+  try {
+    p.document.body.innerHTML = upgradeNotice(`<a href="${path}" target="_blank">点击跳转</a>`);
+    const link = p.document.querySelector('a');
+    const navigations = [];
+    link.addEventListener('click', event => {
+      event.preventDefault();
+      navigations.push({target: link.target, path: link.pathname + link.search + link.hash});
+    });
+    p.tick();
+    p.tick();
+    assert.deepEqual(navigations, [{target: '_self', path}]);
+
+    p.window.history.replaceState({}, '', path);
+    p.document.body.innerHTML = fixture;
+    p.tick();
+    assert(p.document.documentElement.hasAttribute('data-inspire-task'));
+    assert(p.document.querySelector('#inspire-task-nav-toggle'));
+  } finally { p.close(); }
+});
+
+test('the version prompt activates a page handler at most once across task documents', () => {
+  const p = page('/next/task/my-tasks', '', undefined, {embedded: false, enabled: false});
+  try {
+    const notice = upgradeNotice('<span>点击跳转</span>');
+    let activations = 0;
+    p.document.body.innerHTML = notice;
+    p.document.querySelector('span').onclick = () => activations++;
+    p.tick();
+    assert.equal(activations, 1);
+
+    // A full navigation re-runs the script while the WebView session persists.
+    delete p.window.InspireTaskAppearance;
+    p.document.body.innerHTML = notice;
+    p.document.querySelector('span').onclick = () => activations++;
+    p.window.eval(source);
+    p.tick();
+    assert.equal(activations, 1);
+    assert(!p.document.documentElement.hasAttribute('data-inspire-task'));
+  } finally { p.close(); }
+});
+
+test('only the app follows the bare messages landing as a version upgrade', () => {
+  for (const native of [true, false]) {
+    const p = page('/next/task/my-tasks', '', undefined, native ? {embedded: true} : null);
+    try {
+      p.document.body.innerHTML = upgradeNotice('<a href="/next/messenger" target="_blank">点击跳转</a>');
+      let activations = 0;
+      const link = p.document.querySelector('a');
+      link.addEventListener('click', event => { event.preventDefault(); activations++; });
+      p.tick();
+      assert.equal(activations, native ? 1 : 0);
+      assert.equal(link.target, native ? '_self' : '_blank');
+    } finally { p.close(); }
+  }
+});
+
+test('version prompts leave login, task content and unrecognized destinations alone', () => {
+  const pageCases = [
+    ['/accounts/login', upgradeNotice('<button>点击跳转</button>')],
+    ['/next/task/my-tasks', fixture + upgradeNotice('<button>点击跳转</button>')],
+    ['/next/task/my-tasks', '<p>任务已归档 <button>点击跳转</button></p>'],
+    ['/next/task/my-tasks', upgradeNotice('<a href="https://example.com/next/task/my-tasks">点击跳转</a>')],
+    ['/next/task/my-tasks', upgradeNotice('<a href="https://example.com/next/task/my-tasks"><span>点击跳转</span></a>')],
+    ['/next/task/my-tasks', upgradeNotice('<a href="/accounts/login">点击跳转</a>')],
+    ['/next/task/my-tasks', upgradeNotice('<a href="/next/messenger?openChatId=fixture">点击跳转</a>')],
+  ];
+  for (const [path, html] of pageCases) {
+    const p = page(path, '');
+    try {
+      let activations = 0;
+      p.document.body.innerHTML = html;
+      p.document.addEventListener('click', event => {
+        event.preventDefault();
+        activations++;
+      });
+      p.tick();
+      assert.equal(activations, 0, html);
+    } finally { p.close(); }
+  }
 });
