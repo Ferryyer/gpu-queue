@@ -18,6 +18,10 @@ class InlineSearchField extends StatelessWidget {
     required this.onChanged,
     required this.onClose,
     this.hint,
+    this.onSubmitted,
+    this.onKeyEvent,
+    this.focusNode,
+    this.trailing,
   });
 
   final TextEditingController controller;
@@ -29,6 +33,15 @@ class InlineSearchField extends StatelessWidget {
 
   final String? hint;
 
+  /// Handles submission while keeping focus available to the caller.
+  /// Without a handler, submission dismisses the keyboard.
+  final ValueChanged<String>? onSubmitted;
+
+  /// Return [KeyEventResult.ignored] to allow normal text-field shortcuts.
+  final FocusOnKeyEventCallback? onKeyEvent;
+  final FocusNode? focusNode;
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) {
     // The bar is the field's box; a theme's form-input border would be a
@@ -38,27 +51,34 @@ class InlineSearchField extends StatelessWidget {
       children: [
         const SizedBox(width: 13),
         Expanded(
-          child: TextField(
-            controller: controller,
-            autofocus: true,
-            textInputAction: TextInputAction.search,
-            onChanged: onChanged,
-            // Leaves the field but not the search: what was typed is still
-            // narrowing the list, and dismissing the keyboard to look at it is
-            // the reason to submit.
-            onSubmitted: (_) => FocusScope.of(context).unfocus(),
-            style: style.textColor == null
-                ? null
-                : TextStyle(color: style.textColor),
-            decoration: bareInputDecoration(
-              isDense: true,
-              hintText: hint ?? libL10n.search,
-              hintStyle: style.hintColor == null
+          child: Focus(
+            canRequestFocus: false,
+            onKeyEvent: onKeyEvent,
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              autofocus: true,
+              textInputAction: TextInputAction.search,
+              onChanged: onChanged,
+              onEditingComplete: onSubmitted == null
                   ? null
-                  : TextStyle(color: style.hintColor),
+                  : controller.clearComposing,
+              onSubmitted:
+                  onSubmitted ?? (_) => FocusScope.of(context).unfocus(),
+              style: style.textColor == null
+                  ? null
+                  : TextStyle(color: style.textColor),
+              decoration: bareInputDecoration(
+                isDense: true,
+                hintText: hint ?? libL10n.search,
+                hintStyle: style.hintColor == null
+                    ? null
+                    : TextStyle(color: style.hintColor),
+              ),
             ),
           ),
         ),
+        ?trailing,
         Btn.icon(
           text: libL10n.close,
           icon: Icon(Icons.close, size: 18, color: style.iconColor),
@@ -91,6 +111,15 @@ class InlineSearchController extends ValueNotifier<String?> {
   /// empty, so a caller can treat "searching for nothing" as "not searching".
   String get needle => value?.trim().toLowerCase() ?? '';
 
+  /// Sets the search text and places the caret at the end.
+  void setQuery(String query) {
+    text.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+    value = query;
+  }
+
   void start() {
     text.clear();
     value = '';
@@ -119,6 +148,10 @@ class InlineSearchBar extends StatelessWidget {
     required this.controller,
     required this.child,
     this.hint,
+    this.onSubmitted,
+    this.onKeyEvent,
+    this.focusNode,
+    this.trailing,
   });
 
   final InlineSearchController controller;
@@ -127,6 +160,10 @@ class InlineSearchBar extends StatelessWidget {
   final Widget child;
 
   final String? hint;
+  final ValueChanged<String>? onSubmitted;
+  final FocusOnKeyEventCallback? onKeyEvent;
+  final FocusNode? focusNode;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -141,6 +178,10 @@ class InlineSearchBar extends StatelessWidget {
                 onChanged: (value) => controller.value = value,
                 onClose: controller.end,
                 hint: hint,
+                onSubmitted: onSubmitted,
+                onKeyEvent: onKeyEvent,
+                focusNode: focusNode,
+                trailing: trailing,
               )
             : KeyedSubtree(
                 key: const ValueKey('inline-search-rest'),
