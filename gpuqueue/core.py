@@ -200,11 +200,16 @@ class Store:
             connection.execute('CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY,digest TEXT NOT NULL,doc TEXT NOT NULL,public TEXT NOT NULL,internal TEXT NOT NULL)')
             connection.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY,value TEXT NOT NULL)')
 
+    @contextlib.contextmanager
     def connect(self):
         connection = sqlite3.connect(self.root / 'queue.sqlite3', timeout=30)
-        connection.row_factory = sqlite3.Row
-        connection.execute('PRAGMA synchronous=FULL')
-        return connection
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute('PRAGMA synchronous=FULL')
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def tasks(self):
         with self.connect() as connection:

@@ -32,6 +32,7 @@ class StopTests(unittest.TestCase):
     def approve_claim(self):
         state=self.control.start(self.task['id'],self.task['digest'])
         self.control.claim(self.task['id'],self.task['digest'],state['revision'])
+    @unittest.skipUnless(Path('/proc/self/status').is_file(), 'Requires Linux /proc')
     def test_process_identity_and_parent_use_signal_visible_pids(self):
         process=subprocess.Popen(['/usr/bin/python3','-c','import time;time.sleep(30)'])
         self.processes.append(process)
@@ -41,6 +42,7 @@ class StopTests(unittest.TestCase):
         self.assertEqual(value['ppid'],os.getpid())
         self.assertIn(process.pid,stop.table())
         self.assertIsNone(stop.identity(-1))
+    @unittest.skipUnless(Path('/proc/self/status').is_file(), 'Requires Linux /proc')
     def test_other_namespace_pid_collision_is_rejected(self):
         own = Path('/proc/self/status').read_text()
         mounted_pid = next(int(line.split()[1]) for line in own.splitlines() if line.startswith('Pid:'))
@@ -89,6 +91,7 @@ while True:time.sleep(.1)
         platform=Mock();platform.resources={};service=Service({},self.store,platform)
         service.tick();platform.request.assert_not_called();platform.submit_job.assert_not_called();platform.select.assert_not_called()
         self.assertEqual(self.store.get(self.task['id'])['public']['state'],'cancelled')
+    @unittest.skipUnless(Path('/proc/self/status').is_file(), 'Requires Linux /proc')
     @unittest.skipUnless(hasattr(os,'pidfd_open') and hasattr(signal,'pidfd_send_signal'),'pidfds unavailable')
     def test_legacy_stop_kills_its_tree_but_preserves_unrelated_process_and_outputs(self):
         self.approve_claim();p,child,argv=self.cpu_tree()
@@ -100,6 +103,7 @@ while True:time.sleep(.1)
         p.wait(timeout=5);self.assertIsNone(stop.identity(child));self.assertIsNone(unrelated.poll())
         self.assertEqual(proof['state'],'stopped');self.assertEqual((self.folder/'outputs/kept.txt').read_text(),'existing result')
         self.assertFalse((self.folder/'outputs/next-step.txt').exists())
+    @unittest.skipUnless(Path('/proc/self/status').is_file(), 'Requires Linux /proc')
     @unittest.skipUnless(hasattr(os,'pidfd_open') and hasattr(signal,'pidfd_send_signal'),'pidfds unavailable')
     def test_pid_or_command_mismatch_is_not_signalled(self):
         self.approve_claim();p,child,argv=self.cpu_tree();self.control.stop(self.task['id'],self.task['digest'])
@@ -111,6 +115,7 @@ while True:time.sleep(.1)
         # Explicit fixture cleanup of its own detached child.
         value=stop.identity(child)
         if value:stop.send(value,signal.SIGKILL)
+    @unittest.skipUnless(Path('/proc/self/status').is_file(), 'Requires Linux /proc')
     @unittest.skipUnless(hasattr(os,'pidfd_open') and hasattr(signal,'pidfd_send_signal'),'pidfds unavailable')
     def test_new_supervisor_stops_current_step_without_mutating_snapshot(self):
         # CPU stand-in for a frozen runner, used only in this isolated test.
