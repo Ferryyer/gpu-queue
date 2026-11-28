@@ -629,8 +629,31 @@ Future<SSHClient> genClient(
         prompt: hostKeyPrompt,
       ),
     );
-    if (Diag.enabled) {
+    void connectSucceeded() {
       Diag.crumb(SbDiag.server, 'ssh connect ok', data: {'via': via});
+    }
+
+    if (socket is ProxyCommandSocket) {
+      try {
+        await client.authenticated;
+      } on SSHAuthAbortError catch (e) {
+        if (client.remoteVersion == null &&
+            e.reason == null &&
+            e.message.startsWith('Connection closed before authentication.')) {
+          final proxyError = socket.preHandshakeError();
+          if (proxyError != null) throw proxyError;
+        }
+        rethrow;
+      }
+      socket.markAuthenticated();
+      if (Diag.enabled) connectSucceeded();
+    } else if (Diag.enabled) {
+      unawaited(
+        client.authenticated.then<void>(
+          (_) => connectSucceeded(),
+          onError: (Object e, StackTrace _) => connectFailed('auth', e),
+        ),
+      );
     }
     return client;
   } catch (e) {
