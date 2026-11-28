@@ -15,7 +15,6 @@ import 'package:server_box/core/utils/sudo_password.dart';
 import 'package:server_box/data/model/app/error.dart';
 import 'package:server_box/data/model/server/server.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
-import 'package:server_box/data/model/server/try_limiter.dart';
 import 'package:server_box/data/provider/port_forward_provider.dart';
 import 'package:server_box/data/provider/remote_desktop.dart';
 import 'package:server_box/data/provider/server/refresh_scheduler.dart';
@@ -179,12 +178,12 @@ class ServersNotifier extends _$ServersNotifier {
       )..remove(spi.id);
       state = state.copyWith(manualDisconnectedIds: newManualDisconnected);
       final serverNotifier = ref.read(serverProvider(spi.id).notifier);
+      serverNotifier.resetConnectionRetries();
       await serverNotifier.refresh(interactive: true);
       return;
     }
 
     final serversToRefresh = <MapEntry<String, Spi>>[];
-    final idsToResetLimiter = <String>[];
 
     for (final entry in state.servers.entries) {
       final serverId = entry.key;
@@ -195,7 +194,11 @@ class ServersNotifier extends _$ServersNotifier {
       final serverState = ref.read(serverProvider(serverId));
 
       final error = serverState.status.err;
-      if (error is SSHErr && error.type == SSHErrType.interactiveAuth) {
+      if (error is SSHErr &&
+          (error.type == SSHErrType.interactiveAuth ||
+              (!onlyFailed &&
+                  serverState.conn == ServerConn.failed &&
+                  error.type == SSHErrType.auth))) {
         continue;
       }
 
@@ -203,7 +206,7 @@ class ServersNotifier extends _$ServersNotifier {
         if (serverState.conn != ServerConn.failed) {
           continue;
         }
-        idsToResetLimiter.add(serverId);
+        ref.read(serverProvider(serverId).notifier).resetConnectionRetries();
       }
 
       if (serverState.conn == ServerConn.disconnected && !spi.autoConnect) {
@@ -211,10 +214,6 @@ class ServersNotifier extends _$ServersNotifier {
       }
 
       serversToRefresh.add(entry);
-    }
-
-    for (final id in idsToResetLimiter) {
-      TryLimiter.reset(id);
     }
 
     await _refreshEach(serversToRefresh.map((e) => e.key).toList());
@@ -237,7 +236,7 @@ class ServersNotifier extends _$ServersNotifier {
     if (ids.isEmpty) return;
     state = state.copyWith(manualDisconnectedIds: const <String>{});
     for (final id in ids) {
-      TryLimiter.reset(id);
+      ref.read(serverProvider(id).notifier).resetConnectionRetries();
     }
     await _refreshEach(ids);
   }
@@ -570,8 +569,6 @@ class ServersNotifier extends _$ServersNotifier {
 
       // Only reconnect if neccessary
       if (newSpi.shouldReconnect(old)) {
-        // Use [newSpi.id] instead of [old.id] because [old.id] may be changed
-        TryLimiter.reset(newSpi.id);
         unawaited(refresh(spi: newSpi));
       }
     }

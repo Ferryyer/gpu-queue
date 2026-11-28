@@ -33,6 +33,10 @@ class ProxyCommandSocket implements SSHSocket {
        _sink = sink,
        _done = done,
        _release = release {
+    _stderrDone = process.stderr.forEach(_captureStderr).onError((_, _) {});
+    _exitObserved = process.exitCode.then<void>((code) {
+      _exitCode = code;
+    }, onError: (_, _) {});
     // The guest stays "in use" — and so cannot be deleted — for exactly as
     // long as the proxy runs.
     unawaited(_done.whenComplete(_releaseOnce).catchError((_) {}));
@@ -44,7 +48,82 @@ class ProxyCommandSocket implements SSHSocket {
   final IOSink _sink;
   final Future<void> _done;
   final void Function()? _release;
+  late final Future<void> _stderrDone;
+  late final Future<void> _exitObserved;
+  static const _stderrLimit = 2048;
+  List<int> _stderrTail = [];
+  int? _exitCode;
+  bool _authenticated = false;
+  var _terminating = false;
   var _released = false;
+
+  void _terminate() {
+    if (_terminating) return;
+    _terminating = true;
+    if (_exitCode != null && _processGroupId == null) return;
+    ProcessTree.terminate(_process, _processGroupId);
+  }
+
+  void _captureStderr(List<int> data) {
+    if (_authenticated) return;
+    if (data.length >= _stderrLimit) {
+      _stderrTail = data.sublist(data.length - _stderrLimit);
+      return;
+    }
+    final overflow = _stderrTail.length + data.length - _stderrLimit;
+    if (overflow > 0) _stderrTail.removeRange(0, overflow);
+    _stderrTail.addAll(data);
+  }
+
+  // Only forward known gateway wording. A helper can also print its command,
+  // identity paths or a configuration error to stderr.
+  static const _authMethod =
+      r'(?:publickey|password|keyboard-interactive|hostbased|'
+      r'gssapi-with-mic|gssapi-keyex|none)';
+  static final _authDenial = RegExp(
+    r'^(?:[\w.@:\[\]-]+: )?'
+    '(permission denied(?: \\($_authMethod(?:,$_authMethod)*\\))?'
+    r'|access denied|(?:public[ -]?key )?authentication (?:failed|denied)'
+    r'|public[ -]?key (?:rejected|denied))\.?$',
+    caseSensitive: false,
+  );
+  static final _stderrControls = RegExp(r'[\x00-\x09\x0b-\x1f\x7f-\x9f]');
+
+  Future<void> _settleDiagnostics() async {
+    // stdout and stderr have independent readers. An EOF may arrive first,
+    // and dartssh2 will terminate the helper as soon as it sees that EOF.
+    await Future.wait([
+      _stderrDone,
+      _exitObserved,
+    ]).timeout(const Duration(milliseconds: 50), onTimeout: () => []);
+  }
+
+  void markAuthenticated() {
+    _authenticated = true;
+    _stderrTail.clear();
+  }
+
+  /// Reads the reason for an EOF before the SSH server sent its identification.
+  SSHErr? preHandshakeError() {
+    final stderr = utf8
+        .decode(_stderrTail, allowMalformed: true)
+        .replaceAll(_stderrControls, '');
+    for (final line in stderr.split('\n').reversed) {
+      final denial = _authDenial.firstMatch(line.trim());
+      if (denial != null) {
+        return SSHErr(
+          type: SSHErrType.auth,
+          message: 'ProxyCommand: ${denial.group(1)}.',
+        );
+      }
+    }
+    final code = _exitCode;
+    if (code == null || code <= 0) return null;
+    return SSHErr(
+      type: SSHErrType.connect,
+      message: _explain('ProxyCommand exited with code $code.'),
+    );
+  }
 
   void _releaseOnce() {
     if (_released) return;
@@ -107,16 +186,14 @@ class ProxyCommandSocket implements SSHSocket {
       'Starting ProxyCommand for ${Redact.host(host)}:$port',
     );
 
+    // A normal child exposes exitCode. ProcessTree uses the child tree when
+    // the command does not lead its own process group.
     final processFuture = Process.start(
       shellCommand.executable,
       shellCommand.arguments,
       // The guest's own PATH and home: Android's names directories that do
       // not exist inside it, and the command would find none of its tools.
       environment: guest == null ? null : AndroidRootfs.environment,
-      // This creates a separate Unix session. The returned PID is the final
-      // fork rather than the session leader, so its actual PGID is queried
-      // below. Windows cleanup uses taskkill /T.
-      mode: ProcessStartMode.detachedWithStdio,
     );
     late final Process process;
     try {
@@ -146,7 +223,17 @@ class ProxyCommandSocket implements SSHSocket {
       rethrow;
     }
     final processGroupId = await ProcessTree.groupId(process);
+    // Socket completion follows stdout. A helper can outlive its stdout or
+    // exit nonzero after forwarding has ended.
     final stdoutController = StreamController<Uint8List>();
+    final socket = ProxyCommandSocket._(
+      process: process,
+      processGroupId: processGroupId,
+      stream: stdoutController.stream,
+      sink: process.stdin,
+      done: stdoutController.done,
+      release: guest?.release,
+    );
 
     process.stdout.listen(
       (data) {
@@ -156,45 +243,14 @@ class ProxyCommandSocket implements SSHSocket {
       onError: (error, stackTrace) {
         stdoutController.addError(error, stackTrace);
       },
-      onDone: () {
-        stdoutController.close();
+      onDone: () async {
+        if (!socket._authenticated && !socket._terminating) {
+          await socket._settleDiagnostics();
+        }
+        unawaited(stdoutController.close());
       },
     );
-    process.stderr.listen(
-      (data) {
-        const maxLoggedBytes = 4096;
-        final capped = data.length <= maxLoggedBytes
-            ? data
-            : data.sublist(0, maxLoggedBytes);
-        final message = utf8.decode(capped, allowMalformed: true).trimRight();
-        if (message.isEmpty) return;
-        final suffix = data.length > maxLoggedBytes ? ' [truncated]' : '';
-        Loggers.app.warning('ProxyCommand stderr: $message$suffix');
-      },
-      onError: (error, stackTrace) {
-        Loggers.app.warning(
-          'ProxyCommand stderr stream error',
-          error,
-          stackTrace,
-        );
-      },
-    );
-
-    // The SSH socket's lifecycle is the byte stream, not the helper process.
-    // A proxy that keeps its process alive after closing the transport would
-    // otherwise leave SSHSocket.done pending forever, while a shell that
-    // exits non-zero after forwarding ended would incorrectly report a
-    // transport failure.
-    final done = stdoutController.done;
-
-    return ProxyCommandSocket._(
-      process: process,
-      processGroupId: processGroupId,
-      stream: stdoutController.stream,
-      sink: process.stdin,
-      done: done,
-      release: guest?.release,
-    );
+    return socket;
   }
 
   /// [message], plus what a sandboxed build has almost certainly done to it.
@@ -291,7 +347,7 @@ class ProxyCommandSocket implements SSHSocket {
   @override
   Future<void> close() async {
     // Kill first so a child that ignores stdin EOF does not block close().
-    ProcessTree.terminate(_process, _processGroupId);
+    _terminate();
     try {
       await _sink.close().timeout(const Duration(seconds: 2));
     } catch (_) {}
@@ -299,9 +355,11 @@ class ProxyCommandSocket implements SSHSocket {
       await _done.timeout(const Duration(seconds: 2)).catchError((_) {});
     } catch (_) {}
     // Ensure the process is gone even if the above timed out.
-    try {
-      _process.kill(ProcessSignal.sigkill);
-    } catch (_) {}
+    if (_exitCode == null) {
+      try {
+        _process.kill(ProcessSignal.sigkill);
+      } catch (_) {}
+    }
     try {
       if (!Platform.isWindows && _processGroupId != null) {
         Process.killPid(-_processGroupId, ProcessSignal.sigkill);
@@ -315,7 +373,7 @@ class ProxyCommandSocket implements SSHSocket {
 
   @override
   void destroy() {
-    ProcessTree.terminate(_process, _processGroupId);
+    _terminate();
     _releaseOnce();
   }
 

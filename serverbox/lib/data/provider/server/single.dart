@@ -398,6 +398,7 @@ class ServerNotifier extends _$ServerNotifier {
       return;
     }
 
+    resetConnectionRetries();
     _operationGeneration++;
     unawaited(_disposePersistentShell());
     state.client?.close();
@@ -909,6 +910,12 @@ class ServerNotifier extends _$ServerNotifier {
   ({Spi spi, Stopwatch since, Object error, bool transient})?
       _backgroundShellFailure;
 
+  void resetConnectionRetries() {
+    TryLimiter.reset(state.spi.id);
+    TryLimiter.reset(_shellTryId);
+    _backgroundShellFailure = null;
+  }
+
   /// Something that can run a command on this server.
   ///
   /// The one place that decides *how* a command reaches a server. Callers —
@@ -1234,7 +1241,7 @@ class ServerNotifier extends _$ServerNotifier {
         onHostKeyPrompt: interactive ? null : (_) async => false,
         allowKeyPrompt: interactive,
       );
-      await client.authenticated;
+      await awaitSshAuthentication(client);
       // Checked after, as every await in the refresh paths already does.
       // Authenticating takes as long as the far side and the user take, and
       // editing the server or disconnecting it bumps the generation — so
@@ -1275,16 +1282,22 @@ class ServerNotifier extends _$ServerNotifier {
       TryLimiter.inc(_shellTryId);
       if (!interactive || resetRetries) {
         final cause = e is SSHAuthAbortError ? e.reason ?? e : e;
-        final droppedBeforeAuth = e is SSHAuthAbortError &&
+        final droppedBeforeAuth =
+            e is SSHAuthAbortError &&
             e.reason == null &&
             e.message.startsWith('Connection closed before authentication.');
+        final authRejected = e is SSHErr && e.type == SSHErrType.auth;
         _backgroundShellFailure = (
           spi: spi,
           since: Stopwatch()..start(),
           error: e,
-          transient: isJumpFailoverError(cause) || e is TimeoutException ||
-              droppedBeforeAuth ||
-              (e is SSHAuthAbortError && e.message == 'Authentication timed out'),
+          transient:
+              !authRejected &&
+              (isJumpFailoverError(cause) ||
+                  e is TimeoutException ||
+                  droppedBeforeAuth ||
+                  (e is SSHAuthAbortError &&
+                      e.message == 'Authentication timed out')),
         );
       }
       Loggers.app.warning('Connect shell for ${spi.name}', e, s);
@@ -1399,7 +1412,7 @@ class ServerNotifier extends _$ServerNotifier {
             return KeyboardInteractiveAuth.handle(server, request);
           },
         );
-        await client.authenticated;
+        await awaitSshAuthentication(client);
         if (!_isRefreshCurrent(operation, spi)) {
           client.close();
           return;
@@ -1455,16 +1468,40 @@ class ServerNotifier extends _$ServerNotifier {
 
         final durationMs = elapsed.elapsedMilliseconds;
 
+        // dartssh2 uses SSHAuthAbortError for transport loss as well as auth
+        // failures. A network drop must remain eligible for the next poll.
+        final transportAbort =
+            e is SSHAuthAbortError &&
+            e.reason is! SSHHostkeyError &&
+            (e.message.startsWith('Connection closed before authentication.') ||
+                e.message == 'Authentication timed out');
+        final SSHErr error;
+        if (keyboardInteractiveRequested && !interactive) {
+          error = SSHErr(
+            type: SSHErrType.interactiveAuth,
+            message: e.toString(),
+          );
+        } else if (e is SSHErr &&
+            (e.type == SSHErrType.auth || e.type == SSHErrType.connect)) {
+          error = e;
+        } else {
+          error = SSHErr(
+            type: e is SSHAuthError && !transportAbort
+                ? SSHErrType.auth
+                : SSHErrType.connect,
+            message: e.toString(),
+          );
+        }
+
         ConnectionResult failureResult;
         final errStr = e.toString().toLowerCase();
-        if (errStr.contains('timed out') || errStr.contains('timeout')) {
-          failureResult = ConnectionResult.timeout;
-        } else if (errStr.contains('auth') ||
-            errStr.contains('authentication') ||
-            errStr.contains('permission denied') ||
-            errStr.contains('access denied')) {
+        if (error.type == SSHErrType.auth ||
+            error.type == SSHErrType.interactiveAuth) {
           failureResult = ConnectionResult.authFailed;
-        } else if (errStr.contains('connection refused') ||
+        } else if (errStr.contains('timed out') || errStr.contains('timeout')) {
+          failureResult = ConnectionResult.timeout;
+        } else if (transportAbort ||
+            errStr.contains('connection refused') ||
             errStr.contains('no route to host') ||
             errStr.contains('network') ||
             errStr.contains('socket')) {
@@ -1490,20 +1527,8 @@ class ServerNotifier extends _$ServerNotifier {
         if (!_isRefreshCurrent(operation, spi)) return;
         if (!(state.client?.isClosed ?? true)) return;
 
-        final SSHErrType errType;
-        if (keyboardInteractiveRequested && !interactive) {
-          errType = SSHErrType.interactiveAuth;
-        } else if (e is SSHAuthError) {
-          errType = SSHErrType.auth;
-        } else {
-          errType = SSHErrType.connect;
-        }
         _setFailedState(
-          _copyStatus(
-            state.status,
-            err: SSHErr(type: errType, message: e.toString()),
-            setErr: true,
-          ),
+          _copyStatus(state.status, err: error, setErr: true),
           closeClient: true,
         );
         // Removed, not just marked dead: there is no session to reconnect to
