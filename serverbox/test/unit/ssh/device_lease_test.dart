@@ -78,7 +78,7 @@ void main() {
     File(p.join(ordinary.path, 'session.json'))
         .writeAsStringSync('{"revoked":true}');
 
-    final sibling = Directory(p.join('${root}-other', 'device-example'))
+    final sibling = Directory(p.join('$root-other', 'device-example'))
       ..createSync(recursive: true);
     final siblingKey = File(p.join(sibling.path, 'identity'))..createSync();
     File(p.join(sibling.path, 'session.json'))
@@ -147,7 +147,7 @@ void main() {
       deviceLink.deleteSync();
       movedDevice.renameSync(device.path);
 
-      final movedRoot = Directory(root).renameSync('${root}-other');
+      final movedRoot = Directory(root).renameSync('$root-other');
       Link(root).createSync(movedRoot.path);
       expect(read(), isNull);
     },

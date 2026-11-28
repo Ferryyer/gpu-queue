@@ -135,7 +135,7 @@ class ServerNotice {
         kind: ServerNoticeKind.feishuLease,
         glyph: Icons.lock_outline,
         title: revoked ? '此设备的飞书授权已退出' : '飞书登录授权已过期',
-        text: '${expiry}重新通过飞书登录可恢复服务器状态监控。',
+        text: '$expiry重新通过飞书登录可恢复服务器状态监控。',
         mono: err?.message ?? '',
       );
     }
