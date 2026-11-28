@@ -12,6 +12,7 @@ import 'package:server_box/data/model/server/system.dart';
 import 'package:server_box/data/provider/server/single.dart';
 import 'package:server_box/data/res/store.dart';
 import 'package:server_box/view/page/storage/file_browser.dart';
+import 'package:server_box/view/page/storage/local_file_editor.dart';
 import 'package:server_box/view/page/storage/sftp.dart';
 import 'package:server_box/view/page/storage/show_transfers.dart';
 
@@ -130,6 +131,10 @@ class _LocalServerFilePage extends StatelessWidget {
             onTap: () => showTransfers(context),
           ),
         ],
+        entryActions: (handle, entry, path) =>
+            localFileEntryActions(context, handle, entry, path),
+        onOpenFile: (handle, entry, path) =>
+            openLocalFileEditor(context, handle, entry, path),
         // This device's files are this device's, whichever page lists them:
         // a transfer from here needs no server to reach them.
         refOf: LocalFileRef.new,
