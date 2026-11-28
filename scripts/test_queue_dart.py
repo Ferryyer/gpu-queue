@@ -12,7 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--flutter', default='flutter')
     parser.add_argument('--widgets', action='store_true', help='Also render production GPU monitor widgets on the CPU Flutter test engine')
-    parser.add_argument('--ssh-bundle', action='store_true', help='Verify ZIP parsing, private key matching and protected SSH configuration')
+    parser.add_argument('--ssh-bundle', action='store_true', help='Verify ZIP parsing, private key matching, protected SSH configuration and device leases')
     parser.add_argument('--offline', action='store_true', help='Use already cached pub dependencies')
     args = parser.parse_args()
     build = ROOT/'build'
@@ -22,7 +22,7 @@ def main():
         (harness/'test').mkdir()
         ui = '  material_ui: 1.5.0\n  cupertino_ui: 1.1.1\n  url_launcher: 6.3.2\n  clock: ^1.1.3\n' if args.widgets else ''
         if args.ssh_bundle:
-            ui += f'  archive: ^4.3.0\n  crypto: ^3.0.0\n  pointycastle: ^4.0.0\n  pinenacl: ^0.6.0\n  dartssh2:\n    path: "{ROOT / "serverbox/packages/dartssh2"}"\n'
+            ui += f'  archive: ^4.3.0\n  crypto: ^3.0.0\n  path: ^1.9.1\n  pointycastle: ^4.0.0\n  pinenacl: ^0.6.0\n  dartssh2:\n    path: "{ROOT / "serverbox/packages/dartssh2"}"\n'
         (harness/'pubspec.yaml').write_text("name: queue_protocol_checks\nenvironment:\n  sdk: '>=3.11.0 <4.0.0'\ndependencies:\n  flutter:\n    sdk: flutter\n"+ui+"dev_dependencies:\n  flutter_test:\n    sdk: flutter\nflutter:\n  uses-material-design: true\n")
         names = ['queue_protocol_test.dart', 'queue_session_test.dart', 'queue_presentation_test.dart', 'mac_update_release_test.dart', 'mac_update_bridge_test.dart', 'local_calendar_test.dart', 'result_preview_test.dart']
         if args.widgets:
@@ -31,8 +31,9 @@ def main():
             source = (ROOT/'serverbox/test/unit/app'/name).read_text()
             (harness/'test'/name).write_text(source)
         if args.ssh_bundle:
-            (harness/'test/client_bundle_test.dart').write_text((ROOT/'serverbox/test/unit/ssh/client_bundle_test.dart').read_text())
-            (harness/'test/device_login_test.dart').write_text((ROOT/'serverbox/test/unit/ssh/device_login_test.dart').read_text())
+            for name in ['client_bundle_test.dart', 'device_login_test.dart', 'device_lease_test.dart']:
+                source = (ROOT/'serverbox/test/unit/ssh'/name).read_text()
+                (harness/'test'/name).write_text(source)
         subprocess.run([args.flutter, 'pub', 'get', *(['--offline'] if args.offline else [])], cwd=harness, check=True)
         # Resolve the real production library; no copies, mocks, or native app
         # hooks. Only the small declared dependency graph is built by this harness.

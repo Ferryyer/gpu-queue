@@ -35,7 +35,9 @@ extension on _ServerDetailPageState {
                   form: ServerNoticeForm.page,
                   openness: 1,
                 ),
-                byCard: ServerNotice.onCard(si) != null,
+                byCard:
+                    notice.kind == ServerNoticeKind.feishuLease ||
+                    ServerNotice.onCard(si) != null,
                 from: const Offset(0, 24),
               ),
               _entering(
@@ -117,7 +119,8 @@ extension on _ServerDetailPageState {
         ),
         edit,
       ],
-      ServerNoticeKind.failed => [
+      ServerNoticeKind.failed || ServerNoticeKind.feishuLease => [
+        if (notice.canReloginFeishu()) feishuReloginButton(context),
         retry,
         // The title above is the error's own line; this is everything
         // around it — what the app was doing, and the copy button a bug
@@ -125,7 +128,7 @@ extension on _ServerDetailPageState {
         if (si.status.err case final err?)
           Btn.text(
             text: l10n.viewError,
-            onTap: () => _showErrDetail(si, err),
+            onTap: () => _showErrDetail(si, err, notice),
           ),
         edit,
       ],
@@ -136,9 +139,12 @@ extension on _ServerDetailPageState {
   }
 
   /// The error as markdown: what to do about it, then what was actually said.
-  String _errMarkdown(Err err) {
+  String _errMarkdown(Err err, ServerNotice notice) {
+    final solution = notice.kind == ServerNoticeKind.feishuLease
+        ? notice.text
+        : err.solution ?? libL10n.unknown;
     return '''
-${err.solution ?? libL10n.unknown}
+$solution
 
 ```sh
 ${err.message ?? 'null'}
@@ -220,27 +226,33 @@ ${err.message ?? 'null'}
   /// showing the last successful one — stale data with a visible reason
   /// beats a blank page.
   ///
-  /// The block the card in the list draws, at the far end of its movement —
-  /// see [ServerNoticeForm.card]. Pressing it is the way to the whole error.
+  /// The block the card in the list draws, at the far end of its movement.
+  /// An error opens the full diagnostics. A disconnected device can still
+  /// explain its lease and offer to sign in again.
   Widget? _buildErrCard(ServerState si) {
     final err = si.status.err;
-    if (err == null) return null;
+    final notice = err == null ? ServerNotice.onCard(si) : ServerNotice.of(si);
+    if (notice == null) return null;
     return ServerCardNotice(
-      notice: ServerNotice.of(si),
+      notice: notice,
       form: ServerNoticeForm.card,
       openness: 1,
-      onTap: () => _showErrDetail(si, err),
+      onTap: err == null ? null : () => _showErrDetail(si, err, notice),
     );
   }
 
   /// A server that has reported before shows its failure here rather than on
   /// the empty page, so the same one-tap answer has to be offered in both.
-  void _showErrDetail(ServerState si, Err err) {
-    final md = _errMarkdown(err);
+  void _showErrDetail(ServerState si, Err err, ServerNotice notice) {
+    final md = _errMarkdown(err, notice);
     context.showRoundDialog(
-      title: libL10n.error,
+      title: notice.kind == ServerNoticeKind.feishuLease
+          ? notice.title
+          : libL10n.error,
       child: SingleChildScrollView(child: SimpleMarkdown(data: md)),
       actions: [
+        if (notice.canReloginFeishu())
+          feishuReloginButton(context, inErrorDialog: true),
         if (si.spi.monitorHttp?.needsInsecureOptIn == true)
           TextButton(
             // Closes the dialog itself and leaves the work to the page: an
