@@ -1241,7 +1241,7 @@ class ServerNotifier extends _$ServerNotifier {
         onHostKeyPrompt: interactive ? null : (_) async => false,
         allowKeyPrompt: interactive,
       );
-      await client.authenticated;
+      await awaitSshAuthentication(client);
       // Checked after, as every await in the refresh paths already does.
       // Authenticating takes as long as the far side and the user take, and
       // editing the server or disconnecting it bumps the generation — so
@@ -1412,7 +1412,7 @@ class ServerNotifier extends _$ServerNotifier {
             return KeyboardInteractiveAuth.handle(server, request);
           },
         );
-        await client.authenticated;
+        await awaitSshAuthentication(client);
         if (!_isRefreshCurrent(operation, spi)) {
           client.close();
           return;

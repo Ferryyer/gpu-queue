@@ -371,6 +371,7 @@ Future<Map<String, String>> resolvePrivateKeysAsync(
   return keys;
 }
 
+/// Opens the transport and starts authentication without waiting for it.
 Future<SSHClient> genClient(
   Spi spi, {
   void Function(GenSSHClientStatus)? onStatus,
@@ -629,29 +630,20 @@ Future<SSHClient> genClient(
         prompt: hostKeyPrompt,
       ),
     );
-    void connectSucceeded() {
-      Diag.crumb(SbDiag.server, 'ssh connect ok', data: {'via': via});
-    }
-
-    if (socket is ProxyCommandSocket) {
-      try {
-        await client.authenticated;
-      } on SSHAuthAbortError catch (e) {
-        if (client.remoteVersion == null &&
-            e.reason == null &&
-            e.message.startsWith('Connection closed before authentication.')) {
-          final proxyError = socket.preHandshakeError();
-          if (proxyError != null) throw proxyError;
-        }
-        rethrow;
-      }
-      socket.markAuthenticated();
-      if (Diag.enabled) connectSucceeded();
-    } else if (Diag.enabled) {
+    if (socket is ProxyCommandSocket || Diag.enabled) {
       unawaited(
         client.authenticated.then<void>(
-          (_) => connectSucceeded(),
-          onError: (Object e, StackTrace _) => connectFailed('auth', e),
+          (_) {
+            if (socket is ProxyCommandSocket) socket.markAuthenticated();
+            if (Diag.enabled) {
+              Diag.crumb(SbDiag.server, 'ssh connect ok', data: {'via': via});
+            }
+          },
+          onError: (Object e, StackTrace _) {
+            if (Diag.enabled) {
+              connectFailed('auth', _preHandshakeProxyError(client, e) ?? e);
+            }
+          },
         ),
       );
     }
@@ -661,6 +653,29 @@ Future<SSHClient> genClient(
     socket.destroy();
     rethrow;
   }
+}
+
+/// Waits for SSH authentication and reports any ProxyCommand startup failure.
+Future<void> awaitSshAuthentication(SSHClient client) async {
+  try {
+    await client.authenticated;
+  } on SSHAuthAbortError catch (error, stackTrace) {
+    final proxyError = _preHandshakeProxyError(client, error);
+    if (proxyError == null) rethrow;
+    Error.throwWithStackTrace(proxyError, stackTrace);
+  }
+}
+
+SSHErr? _preHandshakeProxyError(SSHClient client, Object error) {
+  final socket = client.socket;
+  if (socket is ProxyCommandSocket &&
+      client.remoteVersion == null &&
+      error is SSHAuthAbortError &&
+      error.reason == null &&
+      error.message.startsWith('Connection closed before authentication.')) {
+    return socket.preHandshakeError();
+  }
+  return null;
 }
 
 /// The client itself, once there is a socket to build it on.

@@ -40,8 +40,14 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('process-backed ProxyCommand', () {
-    Future<SSHClient> connect(String command) =>
-        genClient(_server(command), knownHostFingerprints: {});
+    Future<SSHClient> connect(String command) async {
+      final client = await genClient(
+        _server(command),
+        knownHostFingerprints: {},
+      );
+      addTearDown(client.close);
+      return client;
+    }
 
     test(
       'reports a sanitized gateway denial and no success breadcrumb',
@@ -50,15 +56,16 @@ void main() {
         Diag.install(sink);
         addTearDown(Diag.uninstall);
 
-        await expectLater(
-          connect(r"""
-            exec 1>&-
+        final client = await connect(r"""
+          exec 1>&-
           printf '%4096s\n' '' >&2
           printf 'Could not open config file /synthetic/config: Permission denied\n' >&2
           printf 'fixture@gateway.example: Permission den' >&2
           printf 'ied (publickey).\r\n' >&2
           exit 23
-        """),
+        """);
+        await expectLater(
+          awaitSshAuthentication(client),
           throwsA(_sshError(SSHErrType.auth, equals(_authError))),
         );
         expect(sink.events, ['ssh connect', 'ssh connect failed']);
@@ -66,11 +73,12 @@ void main() {
     );
 
     test('reports a nonzero exit without exposing local stderr', () async {
+      final client = await connect(r"""
+        printf 'Could not open config file /synthetic/config: Permission denied\n' >&2
+        exit 17
+      """);
       await expectLater(
-        connect(r"""
-          printf 'Could not open config file /synthetic/config: Permission denied\n' >&2
-          exit 17
-        """),
+        awaitSshAuthentication(client),
         throwsA(
           _sshError(
             SSHErrType.connect,
@@ -86,8 +94,9 @@ void main() {
     test(
       'a clean EOF before the banner still reports a transport abort',
       () async {
+        final client = await connect('exit 0');
         await expectLater(
-          connect('exit 0'),
+          awaitSshAuthentication(client),
           throwsA(
             isA<SSHAuthAbortError>().having(
               (err) => err.reason,
