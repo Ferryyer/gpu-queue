@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'dart:ui' show lerpDouble;
 
 import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' show DateFormat;
 import 'package:material_ui/material_ui.dart';
 import 'package:server_box/core/extension/context/locale.dart';
 import 'package:server_box/core/extension/server.dart';
+import 'package:server_box/core/ssh_bundle/device_lease.dart';
+import 'package:server_box/data/model/app/error.dart';
+import 'package:server_box/data/model/server/server.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
 import 'package:server_box/data/model/server/try_limiter.dart';
 import 'package:server_box/data/provider/server/all.dart';
@@ -15,6 +20,7 @@ import 'package:server_box/view/page/server/card/metric.dart';
 import 'package:server_box/view/page/server/card/sizes.dart';
 import 'package:server_box/view/page/server/metric_row.dart';
 import 'package:server_box/view/page/server/reading_text.dart';
+import 'package:server_box/view/widget/feishu_server_setup.dart';
 
 // --- The states that are not a body ---
 //
@@ -37,6 +43,9 @@ enum ServerNoticeKind {
   /// Reaching it failed, and the machine said why.
   failed,
 
+  /// The SSH device authorization has expired or was revoked.
+  feishuLease,
+
   /// Nothing yet, and something on its way.
   connecting,
 
@@ -49,8 +58,7 @@ enum ServerNoticeKind {
 ///
 /// One set of words for the card in the list and for the page it opens
 /// into, because the block that says them is one widget at two sizes — see
-/// [ServerCardNotice]. The actions are the page's alone: they act on the
-/// machine, and a card has nowhere to put them.
+/// [ServerCardNotice].
 class ServerNotice {
   const ServerNotice({
     required this.kind,
@@ -59,17 +67,18 @@ class ServerNotice {
     this.text = '',
     this.mono = '',
     this.hint = '',
-  });
+    bool feishuAuthFailed = false,
+  }) : _feishuAuthFailed = feishuAuthFailed;
 
   final ServerNoticeKind kind;
+  final bool _feishuAuthFailed;
 
   final IconData glyph;
 
   /// What went wrong, in this app's words.
   final String title;
 
-  /// A sentence under the title, which the page has room for and a card has
-  /// not.
+  /// A sentence under the title.
   final String text;
 
   /// What the machine said, as it said it — the only part a search engine
@@ -79,8 +88,12 @@ class ServerNotice {
   /// A line under the page's actions.
   final String hint;
 
+  bool canReloginFeishu({bool? onMacOS}) =>
+      (onMacOS ?? isMacOS) &&
+      (kind == ServerNoticeKind.feishuLease || _feishuAuthFailed);
+
   /// Which state this machine is in, and what to say about it.
-  static ServerNotice of(ServerState srv) {
+  static ServerNotice of(ServerState srv, {String? deviceBundlesRoot}) {
     // Asked before the error is read: a connection this app has not been
     // allowed to make has not been tried, so whatever else is on `err` is
     // about an earlier address or an earlier setting.
@@ -103,12 +116,37 @@ class ServerNotice {
       );
     }
     final err = srv.status.err;
+    final keyPath = srv.spi.sshOn?.keyPath;
+    final lease =
+        keyPath != null && (err != null || srv.conn < ServerConn.connected)
+        ? DeviceLease.read(
+            keyPath,
+            bundlesRoot: deviceBundlesRoot ?? '${Paths.doc}/ssh-client-bundles',
+          )
+        : null;
+    if (lease != null && lease.state != DeviceLeaseState.valid) {
+      final revoked = lease.state == DeviceLeaseState.revoked;
+      final expiresAt = lease.expiresAt;
+      final expiry = expiresAt == null
+          ? ''
+          : '${revoked ? '原授权' : '授权'}到期时间：'
+                '${DateFormat('yyyy-MM-dd HH:mm').format(expiresAt.toLocal())}。';
+      return ServerNotice(
+        kind: ServerNoticeKind.feishuLease,
+        glyph: Icons.lock_outline,
+        title: revoked ? '此设备的飞书授权已退出' : '飞书登录授权已过期',
+        text: '$expiry重新通过飞书登录可恢复服务器状态监控。',
+        mono: err?.message ?? '',
+      );
+    }
     if (err != null) {
       return ServerNotice(
         kind: ServerNoticeKind.failed,
         glyph: Icons.link_off,
         title: err.solution ?? libL10n.fail,
         mono: err.message ?? '',
+        feishuAuthFailed:
+            lease != null && err is SSHErr && err.type == SSHErrType.auth,
       );
     }
     // `connected` counts as busy: the SSH path sits there through system
@@ -138,19 +176,35 @@ class ServerNotice {
   /// What the card in the list says about this machine, or null when it says
   /// nothing.
   ///
-  /// Only a failure it has seen. Waiting is said by the spinner beside the
-  /// name, and a machine that answered with nothing is a name with nothing
-  /// under it. A prompt from the far end is not a failure to report either:
-  /// the card offers a lock rather than a retry — see
-  /// `ServerStateUi.needsInteractiveAuth`.
+  /// A recorded failure or a device lease that needs attention. Other
+  /// interactive authentication prompts use the lock beside the name.
   ///
   /// The page asks this too, of the block it holds room for: what the card
   /// draws, the page paints only at the handover; what the card does not,
   /// the page brings in itself — see `ServerDetailPage.readingsShowing`.
-  static ServerNotice? onCard(ServerState srv) {
-    if (srv.status.err == null || srv.needsInteractiveAuth) return null;
-    return of(srv);
+  static ServerNotice? onCard(ServerState srv, {String? deviceBundlesRoot}) {
+    if (srv.status.err == null &&
+        (!(srv.conn < ServerConn.connected) ||
+            srv.spi.sshOn?.keyPath == null)) {
+      return null;
+    }
+    final notice = of(srv, deviceBundlesRoot: deviceBundlesRoot);
+    if (notice.kind == ServerNoticeKind.feishuLease ||
+        (srv.status.err != null && !srv.needsInteractiveAuth)) {
+      return notice;
+    }
+    return null;
   }
+}
+
+Widget feishuReloginButton(BuildContext context, {bool inErrorDialog = false}) {
+  return TextButton(
+    onPressed: () {
+      if (inErrorDialog) context.popDialog();
+      unawaited(FeishuServerSetup.open(context));
+    },
+    child: const Text('重新飞书登录'),
+  );
 }
 
 /// What the page draws a notice as, which is where a card's block is going.
@@ -201,7 +255,7 @@ class ServerCardNotice extends StatelessWidget {
   /// What a press does once this is the page's, in the
   /// [ServerNoticeForm.card] form: the whole error, with what the app was
   /// doing and the copy button a bug report needs. Null on a card, where the
-  /// card's own tap is the one that counts.
+  /// parent handles navigation and the Feishu button opens sign-in directly.
   final VoidCallback? onTap;
 
   /// Around the block at rest.
@@ -245,6 +299,7 @@ class ServerCardNotice extends StatelessWidget {
   /// own.
   Widget _page(BuildContext context, double t) {
     final scheme = Theme.of(context).colorScheme;
+    final feishuLease = notice.kind == ServerNoticeKind.feishuLease;
     // From the left of a card's block to the middle of the page. The lines
     // of a title that wraps follow at the halfway point, by which the card is
     // wide enough that none does.
@@ -334,25 +389,32 @@ class ServerCardNotice extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           title,
-          // The page's sentence under the title, which a card has no room
-          // for: it grows in from nothing, so what is under it travels
-          // rather than arriving lower by its height.
+          // A device lease explanation is visible at both sizes.
           if (notice.text.isNotEmpty)
             ServerCardReveal(
-              shown: t,
+              shown: feishuLease ? 1 : t,
               child: Padding(
-                padding: const EdgeInsets.only(top: 13),
+                padding: EdgeInsets.only(
+                  top: feishuLease ? lerpDouble(3, 13, t)! : 13,
+                ),
                 child: Text(
                   notice.text,
                   textAlign: textAlign,
                   style: UIs.textGrey,
+                  maxLines: feishuLease && t < 1 ? 3 : null,
+                  overflow: feishuLease && t < 1 ? TextOverflow.ellipsis : null,
                 ),
               ),
             ),
-          if (mono != null) ...[
-            SizedBox(height: lerpDouble(3, 13, t)),
-            mono,
-          ],
+          if (mono != null) ...[SizedBox(height: lerpDouble(3, 13, t)), mono],
+          if (notice.canReloginFeishu() && t < 1)
+            ServerCardReveal(
+              shown: 1 - t,
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: feishuReloginButton(context),
+              ),
+            ),
         ],
       ),
     );
@@ -408,6 +470,10 @@ class ServerCardNotice extends StatelessWidget {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
+        if (notice.kind == ServerNoticeKind.feishuLease) ...[
+          const SizedBox(height: 3),
+          Text(notice.text, style: UIs.textGrey),
+        ],
         if (notice.mono.isNotEmpty) ...[
           const SizedBox(height: 3),
           Text(
@@ -421,24 +487,33 @@ class ServerCardNotice extends StatelessWidget {
     );
     final body = Padding(
       padding: EdgeInsets.lerp(_pad, ServerCardSizes.focusPad, t)!,
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(child: words),
-          // The page's card is a way in as well as a line, and says so. On
-          // a card there is no room to say it and nothing it would lead to
-          // that tapping the card does not.
-          SizedBox(width: 9 * t),
-          SizedBox(
-            width: 17 * t,
-            child: Opacity(
-              opacity: t,
-              child: const Icon(
-                Icons.chevron_right,
-                size: 17,
-                color: Colors.grey,
-              ),
-            ),
+          Row(
+            children: [
+              Expanded(child: words),
+              // The page's card is a way in as well as a line, and says so.
+              if (notice.kind != ServerNoticeKind.feishuLease ||
+                  notice.mono.isNotEmpty ||
+                  onTap != null) ...[
+                SizedBox(width: 9 * t),
+                SizedBox(
+                  width: 17 * t,
+                  child: Opacity(
+                    opacity: t,
+                    child: const Icon(
+                      Icons.chevron_right,
+                      size: 17,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
+          if (notice.canReloginFeishu()) feishuReloginButton(context),
         ],
       ),
     );
