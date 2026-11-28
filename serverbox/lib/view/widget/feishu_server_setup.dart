@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:server_box/core/ssh_bundle/bundle.dart';
 import 'package:server_box/core/ssh_bundle/device_login.dart';
+import 'package:server_box/core/ssh_bundle/feishu_setup_policy.dart';
 import 'package:server_box/core/ssh_bundle/install.dart';
 import 'package:server_box/core/utils/ssh_keygen.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
@@ -165,10 +166,17 @@ class _FeishuServerSetupState extends ConsumerState<FeishuServerSetup> {
     if (!bundle.matchesPrivateKey(await SshClientBundle.readPrivateKey(keyPath))) {
       throw const FormatException('返回的设备公钥不匹配，请重新登录');
     }
-    final existing = Stores.server.fetch().where((server) =>
-      server.ssh?.ip == bundle.cpu['hostname'] &&
-      server.ssh?.port == int.parse(bundle.cpu['port']!) &&
-      server.ssh?.user == bundle.username).firstOrNull;
+    await _loadDevices();
+    if (_cancelled || !mounted) return;
+    final host = bundle.cpu['hostname']!;
+    final port = int.parse(bundle.cpu['port']!);
+    final existing = findFeishuServer(
+      servers: Stores.server.fetch(),
+      devices: _devices.map((device) => device.data),
+      username: bundle.username,
+      host: host,
+      port: port,
+    );
     if (existing != null) {
       final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
         title: const Text('更新现有服务器连接？'),
@@ -196,17 +204,42 @@ class _FeishuServerSetupState extends ConsumerState<FeishuServerSetup> {
       await _writeRecord(directory, {...request.toJson(), 'server_id': id,
         'username': bundle.username, 'lease_expires_at': result['expires_at']});
       Stores.setting.sshKnownHostFingerprints.putSync(known);
-      final credential = SshCredential(ip: bundle.cpu['hostname']!,
-          port: int.parse(bundle.cpu['port']!), user: bundle.username,
-          keyPath: keyPath, proxyCommand: proxy);
+      final credential = SshCredential(
+        ip: host,
+        port: port,
+        user: bundle.username,
+        keyPath: keyPath,
+        proxyCommand: proxy,
+      );
       final notifier = ref.read(serversProvider.notifier);
+      final custom = memberServerCustom(existing?.custom);
       if (existing == null) {
-        await notifier.addServer(Spi(id: id, name: '${bundle.username} · CPU', ssh: credential));
+        await notifier.addServer(Spi(
+          id: id,
+          name: '${bundle.username} · CPU',
+          ssh: credential,
+          custom: custom,
+        ));
       } else {
-        await notifier.updateServer(existing, existing.copyWith(ssh: credential));
+        await notifier.updateServer(
+          existing,
+          existing.copyWith(ssh: credential, custom: custom),
+        );
       }
       _saved = true;
       if (mounted) setState(() => _message = '${bundle.username} 的个人服务器已配置，正在连接。');
+      try {
+        final queueServer = Stores.setting.gpuQueueServer;
+        final currentId = queueServer.fetch();
+        final selectedId = feishuQueueServerId(
+          currentId: currentId,
+          savedId: id,
+          servers: Stores.server.fetch(),
+        );
+        if (selectedId != currentId) queueServer.putSync(selectedId);
+      } catch (_) {
+        if (mounted) setState(() => _error = '服务器已保存。任务服务关联失败，请在任务页选择。');
+      }
       await _retireReplacedDevices(id, directory);
     } catch (_) {
       final persisted = Stores.server.fetch().any((s) => s.id == id && s.ssh?.keyPath == keyPath);
@@ -286,8 +319,14 @@ class _FeishuServerSetupState extends ConsumerState<FeishuServerSetup> {
       const SizedBox(height: 8),
       const Text('用本人飞书账号授权，自动配置服务器、终端和文件访问。'),
       const SizedBox(height: 16),
-      FilledButton.icon(onPressed: _busy ? null : _start,
-          icon: const Icon(Icons.login), label: Text(_saved ? '重新授权连接' : '飞书登录')),
+      FilledButton.icon(
+        onPressed: _busy ? null : _start,
+        icon: const Icon(Icons.login),
+        label: Text(feishuLoginButtonLabel(
+          _devices.map((device) => device.data),
+          now: DateTime.now(),
+        )),
+      ),
       if (_busy) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: LinearProgressIndicator()),
       if (_message != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(_message!)),
       if (_busy && request != null) ...[

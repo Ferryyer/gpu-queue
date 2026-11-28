@@ -6,6 +6,7 @@ import 'package:fl_lib/fl_lib.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:server_box/core/ssh_bundle/bundle.dart';
+import 'package:server_box/core/ssh_bundle/feishu_setup_policy.dart';
 import 'package:server_box/core/ssh_bundle/install.dart';
 import 'package:server_box/data/model/server/server_private_info.dart';
 import 'package:server_box/data/model/server/ssh_credential.dart';
@@ -88,10 +89,18 @@ class _ClientBundleSetupState extends ConsumerState<ClientBundleSetup> {
       known['$id::${hostKey.split(' ').first}'] = SshClientBundle.fingerprint(hostKey);
       // Fail closed: persist the bundled pin before addServer starts connecting.
       Stores.setting.sshKnownHostFingerprints.putSync(known);
-      final server = Spi(id: id, name: '${bundle.username} · CPU', ssh: SshCredential(
-        ip: bundle.cpu['hostname']!, port: int.parse(bundle.cpu['port']!), user: bundle.username,
-        keyPath: key, proxyCommand: proxy,
-      ));
+      final server = Spi(
+        id: id,
+        name: '${bundle.username} · CPU',
+        ssh: SshCredential(
+          ip: bundle.cpu['hostname']!,
+          port: int.parse(bundle.cpu['port']!),
+          user: bundle.username,
+          keyPath: key,
+          proxyCommand: proxy,
+        ),
+        custom: memberServerCustom(),
+      );
       if (!mounted) { throw const FormatException('导入已取消，请重新打开配置页'); }
       await ref.read(serversProvider.notifier).addServer(server);
       if (mounted) setState(() => _saved = true);
